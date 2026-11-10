@@ -1,4 +1,5 @@
 import GalleryStoryCard, { type GalleryStoryCardProps } from "./GalleryStoryCard";
+import "./gallery.css";
 
 type GalleryPartnerGridProps = {
   stories: GalleryStoryCardProps[];
