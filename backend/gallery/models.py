@@ -33,7 +33,7 @@ class GalleryMedia(models.Model):
 
     class Meta:
         ordering = ("-created_at",)
-        indexes = [models.Index(fields=("partner", "status"), name="gallery_media_partner_status_idx")]
+        indexes = [models.Index(fields=("partner", "status"), name="gal_media_partner_status_idx")]
 
     def clean(self):
         if self.promotional_permission and not self.permission_granted_at:
