@@ -58,6 +58,7 @@ class GalleryStory(models.Model):
     # Source facts are retained privately. They are never included in public serializers.
     owner_original_history = models.TextField(blank=True)
     owner_history_private = models.BooleanField(default=True)
+    original_history_public_permission = models.BooleanField(default=False)
     summary = models.CharField(max_length=600, blank=True)
     summary_word_count = models.PositiveSmallIntegerField(default=0)
     ai_assisted = models.BooleanField(default=False)
@@ -82,8 +83,8 @@ class GalleryStory(models.Model):
         count = self.word_count(self.summary)
         if self.summary and not 30 <= count <= 60:
             raise ValidationError({"summary": "Published story summaries must contain 30–60 words."})
-        if not self.owner_history_private and not self.owner_approved_at:
-            raise ValidationError("Publishing the owner's original history requires explicit owner approval.")
+        if not self.owner_history_private and not (self.original_history_public_permission and self.owner_approved_at):
+            raise ValidationError("Publishing the owner's original history requires separate explicit owner permission and story approval.")
         if self.status == self.Status.PUBLISHED:
             if not (self.owner_approved_at and self.editorial_approved_at):
                 raise ValidationError("Owner and editorial approval are both required.")
