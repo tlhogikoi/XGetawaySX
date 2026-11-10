@@ -46,7 +46,7 @@ class GalleryPublicationTests(TestCase):
         response = self.client.get("/api/v1/gallery/stories/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
-        self.assertNotIn("owner_original_history", response.data[0])
+        self.assertIsNone(response.data[0]["owner_original_history"])
         self.assertNotIn("ai_source_facts", response.data[0])
 
     def test_unapproved_partner_story_is_not_public(self):
