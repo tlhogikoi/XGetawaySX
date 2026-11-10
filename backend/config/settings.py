@@ -22,6 +22,7 @@ INSTALLED_APPS = [
     "health",
     "accounts",
     "partners",
+    "gallery",
 ]
 
 MIDDLEWARE = [
