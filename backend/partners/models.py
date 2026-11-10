@@ -51,8 +51,8 @@ class Partner(models.Model):
     class Meta:
         ordering = ("name",)
         indexes = [
-            models.Index(fields=("gallery_status", "category")),
-            models.Index(fields=("city", "province")),
+            models.Index(fields=("gallery_status", "category"), name="partners_gallery_status_idx"),
+            models.Index(fields=("city", "province"), name="partners_city_province_idx"),
         ]
 
     def save(self, *args, **kwargs):
