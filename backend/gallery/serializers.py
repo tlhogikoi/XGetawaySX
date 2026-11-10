@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import GalleryMedia, GalleryStory
+from .models import GalleryAuditEvent, GalleryMedia, GalleryStory, GalleryStoryRevision
 
 
 class PublicGalleryStorySerializer(serializers.ModelSerializer):
@@ -53,3 +53,20 @@ class GalleryMediaDraftSerializer(serializers.ModelSerializer):
         if request and not request.user.is_staff and value.owner_id != request.user.id:
             raise serializers.ValidationError("You can only submit media for your own partner entity.")
         return value
+
+
+class GalleryStoryRevisionSerializer(serializers.ModelSerializer):
+    changed_by = serializers.EmailField(source="changed_by.email", read_only=True, allow_null=True)
+    class Meta:
+        model = GalleryStoryRevision
+        fields = ("id", "story", "version", "summary", "owner_history_private", "ai_assisted", "change_reason", "changed_by", "created_at")
+        read_only_fields = fields
+
+
+class GalleryAuditEventSerializer(serializers.ModelSerializer):
+    actor_email = serializers.EmailField(source="actor.email", read_only=True, allow_null=True)
+    partner_name = serializers.CharField(source="partner.name", read_only=True, allow_null=True)
+    class Meta:
+        model = GalleryAuditEvent
+        fields = ("id", "actor_email", "partner_name", "action", "details", "created_at")
+        read_only_fields = fields
