@@ -1,3 +1,4 @@
+import GalleryPartnerGrid from "./components/GalleryPartnerGrid";
 import { ArrowRight, Compass, Globe2, Heart, MapPin } from "lucide-react";
 
 const categories = [
@@ -41,6 +42,7 @@ export default function App() {
         <div><p className="eyebrow">THE PEOPLE & PLACES BEHIND THE PICTURE</p><h2>Every picture tells a story.</h2><p>Discover the history and character behind our approved partner places and experiences.</p></div>
         <div className="gallery-mark"><Heart size={28} /><span>STORIES THAT<br />TAKE YOU PLACES</span><MapPin size={18} /></div>
       </section>
+      <section className="gallery-live-preview" aria-label="Approved partner gallery"><GalleryPartnerGrid stories={[]} /></section>
       <footer><span>© {new Date().getFullYear()} XGetawaySX</span><strong>TRAVEL THROUGH US.</strong><span>Discover. Escape. Experience.</span></footer>
     </main>
   );
