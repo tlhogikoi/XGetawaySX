@@ -29,7 +29,6 @@ export default function GalleryStoryCard({
         aria-controls={`story-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
         onClick={() => setStoryVisible((visible) => !visible)}
         onMouseEnter={() => setStoryVisible(true)}
-        onMouseLeave={() => setStoryVisible(false)}
         onFocus={() => setStoryVisible(true)}
         onBlur={(event) => {
           if (!event.currentTarget.parentElement?.contains(event.relatedTarget as Node | null)) {
