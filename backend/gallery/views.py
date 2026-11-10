@@ -8,7 +8,7 @@ from rest_framework.views import APIView
 
 from partners.models import Partner
 from .models import GalleryAuditEvent, GalleryMedia, GalleryStory, GalleryStoryRevision
-from .serializers import GalleryMediaDraftSerializer, GalleryStoryDraftSerializer, PublicGalleryStorySerializer
+from .serializers import GalleryAuditEventSerializer, GalleryMediaDraftSerializer, GalleryStoryDraftSerializer, GalleryStoryRevisionSerializer, PublicGalleryStorySerializer
 
 
 class PublicGalleryStoriesView(generics.ListAPIView):
@@ -160,6 +160,7 @@ class GalleryStoryDraftUpdateView(generics.UpdateAPIView):
 
 class GalleryStoryRevisionListView(generics.ListAPIView):
     permission_classes = [IsAuthenticated]
+    serializer_class = GalleryStoryRevisionSerializer
 
     def get_queryset(self):
         queryset = GalleryStoryRevision.objects.select_related("story", "changed_by", "story__media", "story__media__partner")
@@ -182,6 +183,7 @@ class GalleryStoryRevisionListView(generics.ListAPIView):
 
 class GalleryAuditEventListView(generics.ListAPIView):
     permission_classes = [IsAuthenticated]
+    serializer_class = GalleryAuditEventSerializer
 
     def get_queryset(self):
         if not self.request.user.is_staff:
