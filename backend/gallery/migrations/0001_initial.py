@@ -36,7 +36,7 @@ class Migration(migrations.Migration):
         ),
         migrations.AddIndex(
             model_name="gallerymedia",
-            index=models.Index(fields=["partner", "status"], name="gallery_media_partner_status_idx"),
+            index=models.Index(fields=["partner", "status"], name="gal_media_partner_status_idx"),
         ),
         migrations.CreateModel(
             name="GalleryStory",
