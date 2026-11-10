@@ -97,3 +97,54 @@ class GalleryStory(models.Model):
 
     def __str__(self):
         return f"Story for {self.media.title}"
+
+
+
+class GalleryStoryRevision(models.Model):
+    story = models.ForeignKey(GalleryStory, on_delete=models.PROTECT, related_name="revisions")
+    version = models.PositiveIntegerField()
+    summary = models.CharField(max_length=600, blank=True)
+    owner_original_history_snapshot = models.TextField(blank=True)
+    owner_history_private = models.BooleanField(default=True)
+    original_history_public_permission = models.BooleanField(default=False)
+    ai_assisted = models.BooleanField(default=False)
+    ai_source_facts_snapshot = models.JSONField(default=list, blank=True)
+    changed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.PROTECT, related_name="gallery_story_revisions")
+    change_reason = models.CharField(max_length=250, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-version",)
+        constraints = [
+            models.UniqueConstraint(fields=("story", "version"), name="gal_story_version_unique"),
+        ]
+
+    @classmethod
+    def capture(cls, story, actor=None, reason=""):
+        latest = cls.objects.filter(story=story).order_by("-version").first()
+        return cls.objects.create(
+            story=story,
+            version=(latest.version + 1) if latest else 1,
+            summary=story.summary,
+            owner_original_history_snapshot=story.owner_original_history,
+            owner_history_private=story.owner_history_private,
+            original_history_public_permission=story.original_history_public_permission,
+            ai_assisted=story.ai_assisted,
+            ai_source_facts_snapshot=story.ai_source_facts,
+            changed_by=actor,
+            change_reason=reason,
+        )
+
+
+class GalleryAuditEvent(models.Model):
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.PROTECT, related_name="gallery_audit_events")
+    partner = models.ForeignKey(Partner, null=True, on_delete=models.PROTECT, related_name="gallery_audit_events")
+    media = models.ForeignKey(GalleryMedia, null=True, on_delete=models.PROTECT, related_name="audit_events")
+    story = models.ForeignKey(GalleryStory, null=True, on_delete=models.PROTECT, related_name="audit_events")
+    action = models.CharField(max_length=60)
+    details = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=("action", "created_at"), name="gal_audit_action_date_idx")]
