@@ -29,7 +29,7 @@ class Migration(migrations.Migration):
                 ("booking_status", models.CharField(choices=[("pending", "Pending"), ("approved", "Approved"), ("suspended", "Suspended"), ("rejected", "Rejected")], default="pending", max_length=20)),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
                 ("updated_at", models.DateTimeField(auto_now=True)),
-                ("owner", models.OneToOneField(on_delete=django.db.models.deletion.PROTECT, related_name="partner_profile", to=settings.AUTH_USER_MODEL)),
+                ("owner", models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name="partner_profiles", to=settings.AUTH_USER_MODEL)),
             ],
             options={"ordering": ("name",)},
         ),
