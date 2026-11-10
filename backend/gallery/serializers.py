@@ -9,17 +9,23 @@ class PublicGalleryStorySerializer(serializers.ModelSerializer):
     partner_name = serializers.CharField(source="media.partner.name", read_only=True)
     partner_slug = serializers.CharField(source="media.partner.slug", read_only=True)
     partner_city = serializers.CharField(source="media.partner.city", read_only=True)
+    owner_original_history = serializers.SerializerMethodField()
+
+    def get_owner_original_history(self, obj):
+        if obj.original_history_public_permission and not obj.owner_history_private:
+            return obj.owner_original_history
+        return None
 
     class Meta:
         model = GalleryStory
-        fields = ("id", "summary", "published_at", "image", "alt_text", "partner_name", "partner_slug", "partner_city")
+        fields = ("id", "summary", "published_at", "image", "alt_text", "partner_name", "partner_slug", "partner_city", "owner_original_history")
         read_only_fields = fields
 
 
 class GalleryStoryDraftSerializer(serializers.ModelSerializer):
     class Meta:
         model = GalleryStory
-        fields = ("id", "media", "owner_original_history", "owner_history_private", "summary", "ai_assisted", "ai_source_facts", "status")
+        fields = ("id", "media", "owner_original_history", "owner_history_private", "original_history_public_permission", "summary", "ai_assisted", "ai_source_facts", "status")
         read_only_fields = ("status",)
 
     def validate_summary(self, value):
