@@ -1,6 +1,7 @@
 import django.contrib.auth.models
 import django.contrib.auth.validators
 import django.utils.timezone
+from accounts.managers import UserManager
 from django.db import migrations, models
 
 
@@ -30,6 +31,6 @@ class Migration(migrations.Migration):
                 ("user_permissions", models.ManyToManyField(blank=True, help_text="Specific permissions for this user.", related_name="user_set", related_query_name="user", to="auth.permission", verbose_name="user permissions")),
             ],
             options={"verbose_name": "user", "verbose_name_plural": "users", "abstract": False},
-            managers=[("objects", __import__("accounts.managers", fromlist=["UserManager"]).UserManager())],
+            managers=[("objects", UserManager())],
         ),
     ]
