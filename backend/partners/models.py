@@ -21,10 +21,10 @@ class Partner(models.Model):
         DESTINATION = "destination", "Destination"
         OTHER = "other", "Other"
 
-    owner = models.OneToOneField(
+    owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
-        related_name="partner_profile",
+        related_name="partner_profiles",
     )
     name = models.CharField(max_length=180)
     slug = models.SlugField(max_length=200, unique=True)
