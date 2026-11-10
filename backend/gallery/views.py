@@ -53,8 +53,8 @@ class GalleryStoryOwnerApprovalView(APIView):
     @transaction.atomic
     def post(self, request, pk):
         story = generics.get_object_or_404(GalleryStory.objects.select_for_update(), pk=pk)
-        if story.media.partner.owner_id != request.user.id and not request.user.is_staff:
-            raise PermissionDenied("Only the partner owner may approve the story.")
+        if story.media.partner.owner_id != request.user.id:
+            raise PermissionDenied("Only the partner owner may approve the story. Editorial staff cannot substitute for owner consent.")
         if story.status != GalleryStory.Status.OWNER_REVIEW:
             raise ValidationError("Story is not awaiting owner approval.")
         if story.media.partner.gallery_status != Partner.ApprovalStatus.APPROVED:
