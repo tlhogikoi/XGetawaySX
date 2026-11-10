@@ -20,6 +20,8 @@ INSTALLED_APPS = [
     "corsheaders",
     "rest_framework",
     "health",
+    "accounts",
+    "partners",
 ]
 
 MIDDLEWARE = [
@@ -54,6 +56,8 @@ DATABASES = {
         conn_health_checks=True,
     )
 }
+
+AUTH_USER_MODEL = "accounts.User"
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
