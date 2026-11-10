@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from partners.models import Partner
-from .models import GalleryMedia, GalleryStory
+from .models import GalleryAuditEvent, GalleryMedia, GalleryStory, GalleryStoryRevision
 from .serializers import GalleryMediaDraftSerializer, GalleryStoryDraftSerializer, PublicGalleryStorySerializer
 
 
@@ -44,7 +44,7 @@ class GalleryStoryCreateView(generics.CreateAPIView):
         media = serializer.validated_data["media"]
         if not self.request.user.is_staff and media.partner.owner_id != self.request.user.id:
             raise PermissionDenied("Only the partner owner may submit this story.")
-        serializer.save(status=GalleryStory.Status.OWNER_REVIEW)
+        story = serializer.save(status=GalleryStory.Status.OWNER_REVIEW)\n        GalleryStoryRevision.capture(story, self.request.user, "Initial owner story submission")\n        GalleryAuditEvent.objects.create(actor=self.request.user, partner=media.partner, media=media, story=story, action="story_submitted")
 
 
 class GalleryStoryOwnerApprovalView(APIView):
@@ -121,3 +121,69 @@ class GalleryStoryOwnerDraftListView(generics.ListAPIView):
         if self.request.user.is_staff:
             return GalleryStory.objects.all().select_related("media", "media__partner")
         return GalleryStory.objects.filter(media__partner__owner=self.request.user).select_related("media", "media__partner")
+
+
+class GalleryStoryDraftUpdateView(generics.UpdateAPIView):
+    serializer_class = GalleryStoryDraftSerializer
+    permission_classes = [IsAuthenticated]
+    http_method_names = ["put", "patch", "head", "options"]
+
+    def get_queryset(self):
+        if self.request.user.is_staff:
+            return GalleryStory.objects.filter(status__in=[GalleryStory.Status.DRAFT, GalleryStory.Status.OWNER_REVIEW])
+        return GalleryStory.objects.filter(
+            media__partner__owner=self.request.user,
+            status__in=[GalleryStory.Status.DRAFT, GalleryStory.Status.OWNER_REVIEW],
+        )
+
+    @transaction.atomic
+    def perform_update(self, serializer):
+        story = self.get_object()
+        old_summary = story.summary
+        old_history = story.owner_original_history
+        updated = serializer.save(
+            status=GalleryStory.Status.OWNER_REVIEW,
+            owner_approved_by=None,
+            owner_approved_at=None,
+            editorial_approved_by=None,
+            editorial_approved_at=None,
+            published_at=None,
+        )
+        if old_summary != updated.summary or old_history != updated.owner_original_history:
+            GalleryStoryRevision.capture(updated, self.request.user, "Story draft edited; prior approvals reset")
+            GalleryAuditEvent.objects.create(
+                actor=self.request.user, partner=updated.media.partner, media=updated.media,
+                story=updated, action="story_edited",
+                details={"summary_changed": old_summary != updated.summary, "owner_history_changed": old_history != updated.owner_original_history},
+            )
+
+
+class GalleryStoryRevisionListView(generics.ListAPIView):
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = GalleryStoryRevision.objects.select_related("story", "changed_by", "story__media", "story__media__partner")
+        if self.request.user.is_staff:
+            return queryset
+        return queryset.filter(story__media__partner__owner=self.request.user)
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        # Private source history is intentionally omitted from the ordinary revision API.
+        response.data = [
+            {"id": item["id"], "story": item["story"], "version": item["version"],
+             "summary": item["summary"], "owner_history_private": item["owner_history_private"],
+             "ai_assisted": item["ai_assisted"], "change_reason": item["change_reason"],
+             "changed_by": item["changed_by"], "created_at": item["created_at"]}
+            for item in response.data
+        ]
+        return response
+
+
+class GalleryAuditEventListView(generics.ListAPIView):
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        if not self.request.user.is_staff:
+            raise PermissionDenied("Gallery audit records are restricted to authorised editorial staff.")
+        return GalleryAuditEvent.objects.select_related("actor", "partner", "media", "story")
