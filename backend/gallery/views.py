@@ -19,6 +19,8 @@ class PublicGalleryStoriesView(generics.ListAPIView):
 
     def get_queryset(self):
         return GalleryStory.objects.filter(
+            Q(media__permission_grants__expires_at__isnull=True)
+            | Q(media__permission_grants__expires_at__gt=timezone.now()),
             status=GalleryStory.Status.PUBLISHED,
             media__status=GalleryMedia.Status.APPROVED,
             media__partner__gallery_status=Partner.ApprovalStatus.APPROVED,
@@ -29,9 +31,6 @@ class PublicGalleryStoriesView(generics.ListAPIView):
             media__permission_grants__revoked_at__isnull=True,
             owner_approved_version=F("current_version"),
             editorial_approved_version=F("current_version"),
-        ).filter(
-            Q(media__permission_grants__expires_at__isnull=True)
-            | Q(media__permission_grants__expires_at__gt=timezone.now())
         ).select_related("media", "media__partner").prefetch_related("history_publication_consents").distinct()
 
 
