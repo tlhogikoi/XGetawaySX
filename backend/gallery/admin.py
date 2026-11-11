@@ -48,7 +48,7 @@ class GalleryAuditEventAdmin(GalleryReadOnlyAdmin):
 
 @admin.register(GalleryMediaPermissionGrant)
 class GalleryMediaPermissionGrantAdmin(GalleryReadOnlyAdmin):
-    list_display = ("media", "rights_holder", "purpose", "granted_by", "granted_at", "expires_at", "revoked_at")
-    list_filter = ("purpose", "revoked_at")
+    list_display = ("media", "rights_holder", "purpose", "review_status", "reviewed_by", "granted_at", "expires_at", "revoked_at")
+    list_filter = ("purpose", "review_status", "revoked_at")
     search_fields = ("media__title", "media__partner__name", "rights_holder")
     readonly_fields = tuple(field.name for field in GalleryMediaPermissionGrant._meta.fields)
