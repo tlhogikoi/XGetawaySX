@@ -1,6 +1,7 @@
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, Q
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from rest_framework import generics, status
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -8,7 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from partners.models import Partner
-from .models import GalleryAuditEvent, GalleryHistoryPublicationConsent, GalleryMedia, GalleryStory, GalleryStoryRevision
+from .models import GalleryAuditEvent, GalleryHistoryPublicationConsent, GalleryMedia, GalleryMediaPermissionGrant, GalleryStory, GalleryStoryRevision
 from .serializers import GalleryAuditEventSerializer, GalleryMediaDraftSerializer, GalleryStoryDraftSerializer, GalleryStoryRevisionSerializer, PublicGalleryStorySerializer
 
 
@@ -24,9 +25,14 @@ class PublicGalleryStoriesView(generics.ListAPIView):
             media__rights_confirmed=True,
             media__promotional_permission=True,
             media__permission_granted_at__isnull=False,
+            media__permission_grants__purpose=GalleryMediaPermissionGrant.Purpose.GALLERY_PROMOTION,
+            media__permission_grants__revoked_at__isnull=True,
             owner_approved_version=F("current_version"),
             editorial_approved_version=F("current_version"),
-        ).select_related("media", "media__partner").prefetch_related("history_publication_consents")
+        ).filter(
+            Q(media__permission_grants__expires_at__isnull=True)
+            | Q(media__permission_grants__expires_at__gt=timezone.now())
+        ).select_related("media", "media__partner").prefetch_related("history_publication_consents").distinct()
 
 
 class GalleryMediaCreateView(generics.CreateAPIView):
@@ -99,7 +105,9 @@ class GalleryMediaEditorialApprovalView(APIView):
             raise PermissionDenied("Editorial approval is restricted to authorised staff.")
         media = generics.get_object_or_404(GalleryMedia.objects.select_for_update(), pk=pk)
         if not (media.rights_confirmed and media.promotional_permission and media.permission_granted_at):
-            raise ValidationError("Confirmed media rights and promotional permission are required.")
+            raise ValidationError("Confirmed media rights and dated promotional permission are required.")
+        if not has_active_gallery_media_permission(media):
+            raise ValidationError("An active, evidence-backed Gallery media permission grant is required.")
         if media.partner.gallery_status != Partner.ApprovalStatus.APPROVED:
             raise ValidationError("Partner must be approved for Gallery advertising.")
         media.status = GalleryMedia.Status.APPROVED
@@ -132,6 +140,8 @@ class GalleryStoryEditorialApprovalView(APIView):
             raise ValidationError("Partner must be approved for Gallery advertising.")
         if not (story.media.rights_confirmed and story.media.promotional_permission and story.media.permission_granted_at):
             raise ValidationError("Current media rights and dated promotional permission are required.")
+        if not has_active_gallery_media_permission(story.media):
+            raise ValidationError("An active, evidence-backed Gallery media permission grant is required.")
         story.editorial_approved_by = request.user
         story.editorial_approved_at = timezone.now()
         story.editorial_approved_version = story.current_version
@@ -288,3 +298,80 @@ class GalleryStoryHistoryConsentView(APIView):
             "story_version": story.current_version,
             "original_history_public": decision == "grant",
         }, status=status.HTTP_200_OK)
+
+
+class GalleryMediaPermissionGrantView(APIView):
+    """Only the partner owner can record a rights holder's Gallery permission."""
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        media = generics.get_object_or_404(
+            GalleryMedia.objects.select_for_update().select_related("partner"), pk=pk
+        )
+        if media.partner.owner_id != request.user.id:
+            raise PermissionDenied("Only the partner owner may record media publication permission.")
+        rights_holder = request.data.get("rights_holder", "")
+        evidence_reference = request.data.get("evidence_reference", "")
+        permitted_channels = request.data.get("permitted_channels", [])
+        expires_raw = request.data.get("expires_at")
+        expires_at = parse_datetime(expires_raw) if expires_raw else None
+        if expires_raw and not expires_at:
+            raise ValidationError({"expires_at": "Provide a valid ISO-8601 date-time."})
+        if expires_at and timezone.is_naive(expires_at):
+            expires_at = timezone.make_aware(expires_at, timezone.get_current_timezone())
+        if not isinstance(permitted_channels, list) or not permitted_channels:
+            raise ValidationError({"permitted_channels": "Provide at least one permitted channel."})
+        grant = GalleryMediaPermissionGrant(
+            media=media,
+            purpose=GalleryMediaPermissionGrant.Purpose.GALLERY_PROMOTION,
+            rights_holder=rights_holder,
+            permitted_channels=permitted_channels,
+            evidence_reference=evidence_reference,
+            granted_by=request.user,
+            granted_at=timezone.now(),
+            expires_at=expires_at,
+        )
+        grant.full_clean()
+        grant.save()
+        GalleryAuditEvent.objects.create(
+            actor=request.user, partner=media.partner, media=media,
+            action="media_permission_granted",
+            details={"permission_id": grant.pk, "purpose": grant.purpose},
+        )
+        return Response({
+            "id": grant.pk,
+            "purpose": grant.purpose,
+            "rights_holder": grant.rights_holder,
+            "permitted_channels": grant.permitted_channels,
+            "granted_at": grant.granted_at,
+            "expires_at": grant.expires_at,
+            "active": grant.is_active,
+        }, status=status.HTTP_201_CREATED)
+
+
+class GalleryMediaPermissionRevokeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk, grant_id):
+        media = generics.get_object_or_404(
+            GalleryMedia.objects.select_for_update().select_related("partner"), pk=pk
+        )
+        if media.partner.owner_id != request.user.id:
+            raise PermissionDenied("Only the partner owner may revoke media publication permission.")
+        grant = generics.get_object_or_404(
+            GalleryMediaPermissionGrant.objects.select_for_update(),
+            pk=grant_id, media=media,
+        )
+        if grant.revoked_at is None:
+            grant.revoked_by = request.user
+            grant.revoked_at = timezone.now()
+            grant.full_clean()
+            grant.save(update_fields=("revoked_by", "revoked_at", "updated_at"))
+            GalleryAuditEvent.objects.create(
+                actor=request.user, partner=media.partner, media=media,
+                action="media_permission_revoked",
+                details={"permission_id": grant.pk, "purpose": grant.purpose},
+            )
+        return Response({"id": grant.pk, "active": grant.is_active, "revoked_at": grant.revoked_at})
