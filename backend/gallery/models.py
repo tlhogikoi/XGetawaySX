@@ -211,3 +211,70 @@ class GalleryAuditEvent(models.Model):
     class Meta:
         ordering = ("-created_at",)
         indexes = [models.Index(fields=("action", "created_at"), name="gal_audit_action_date_idx")]
+
+
+class GalleryMediaPermissionGrant(models.Model):
+    """Private, auditable evidence that a rights holder permits Gallery promotion."""
+
+    class Purpose(models.TextChoices):
+        GALLERY_PROMOTION = "gallery_promotion", "XGetawaySX Gallery promotion"
+
+    media = models.ForeignKey(
+        GalleryMedia, on_delete=models.PROTECT, related_name="permission_grants"
+    )
+    purpose = models.CharField(
+        max_length=32, choices=Purpose.choices, default=Purpose.GALLERY_PROMOTION
+    )
+    rights_holder = models.CharField(max_length=180)
+    permitted_channels = models.JSONField(default=list, blank=True)
+    evidence_reference = models.CharField(max_length=500)
+    granted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+        related_name="gallery_media_permissions_granted",
+    )
+    granted_at = models.DateTimeField()
+    expires_at = models.DateTimeField(null=True, blank=True)
+    revoked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT,
+        related_name="gallery_media_permissions_revoked",
+    )
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-granted_at",)
+        indexes = [
+            models.Index(fields=("media", "purpose", "revoked_at"), name="gal_media_perm_active_idx"),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=models.F("granted_at")),
+                name="gal_media_perm_expiry_after_grant",
+            ),
+        ]
+
+    def clean(self):
+        if not self.rights_holder.strip():
+            raise ValidationError({"rights_holder": "A rights holder is required."})
+        if not self.evidence_reference.strip():
+            raise ValidationError({"evidence_reference": "A private evidence reference is required."})
+        if not isinstance(self.permitted_channels, list) or not self.permitted_channels:
+            raise ValidationError({"permitted_channels": "At least one permitted channel is required."})
+        if any(not isinstance(channel, str) or not channel.strip() for channel in self.permitted_channels):
+            raise ValidationError({"permitted_channels": "Channels must be non-empty strings."})
+        if self.expires_at and self.granted_at and self.expires_at <= self.granted_at:
+            raise ValidationError({"expires_at": "Expiry must be later than the grant date."})
+        if self.revoked_at and not self.revoked_by_id:
+            raise ValidationError({"revoked_by": "Record who revoked this permission."})
+
+    @property
+    def is_active(self):
+        return (
+            self.revoked_at is None
+            and (self.expires_at is None or self.expires_at > timezone.now())
+            and self.purpose == self.Purpose.GALLERY_PROMOTION
+        )
+
+    def __str__(self):
+        return f"{self.media_id}: {self.purpose} ({self.rights_holder})"
