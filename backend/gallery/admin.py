@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import GalleryAuditEvent, GalleryHistoryPublicationConsent, GalleryMedia, GalleryStory, GalleryStoryRevision
+from .models import GalleryAuditEvent, GalleryHistoryPublicationConsent, GalleryMedia, GalleryMediaPermissionGrant, GalleryStory, GalleryStoryRevision
 
 
 class GalleryReadOnlyAdmin(admin.ModelAdmin):
@@ -44,3 +44,11 @@ class GalleryStoryRevisionAdmin(GalleryReadOnlyAdmin):
 class GalleryAuditEventAdmin(GalleryReadOnlyAdmin):
     list_display = ("action", "partner", "actor", "created_at")
     readonly_fields = tuple(field.name for field in GalleryAuditEvent._meta.fields)
+
+
+@admin.register(GalleryMediaPermissionGrant)
+class GalleryMediaPermissionGrantAdmin(GalleryReadOnlyAdmin):
+    list_display = ("media", "rights_holder", "purpose", "granted_by", "granted_at", "expires_at", "revoked_at")
+    list_filter = ("purpose", "revoked_at")
+    search_fields = ("media__title", "media__partner__name", "rights_holder")
+    readonly_fields = tuple(field.name for field in GalleryMediaPermissionGrant._meta.fields)
