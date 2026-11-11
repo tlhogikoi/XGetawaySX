@@ -37,6 +37,9 @@ class GalleryPublicationTests(TestCase):
             evidence_reference="private-evidence://permission/approved-lodge",
             granted_by=self.owner,
             granted_at=timezone.now(),
+            review_status=GalleryMediaPermissionGrant.ReviewStatus.APPROVED,
+            reviewed_by=self.editor,
+            reviewed_at=timezone.now(),
         )
 
     def test_private_original_history_is_not_public(self):
@@ -180,6 +183,39 @@ class GalleryPublicationTests(TestCase):
             format="json",
         )
         self.assertEqual(response.status_code, 403)
+\n\n
+
+    def test_pending_media_rights_review_blocks_publication(self):
+        self.permission.review_status = GalleryMediaPermissionGrant.ReviewStatus.PENDING
+        self.permission.reviewed_by = None
+        self.permission.reviewed_at = None
+        self.permission.save(update_fields=("review_status", "reviewed_by", "reviewed_at", "updated_at"))
+        response = self.client.get("/api/v1/gallery/stories/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
+    def test_only_editorial_staff_can_approve_media_rights_evidence(self):
+        grant = GalleryMediaPermissionGrant.objects.create(
+            media=self.media,
+            rights_holder="Independent photographer",
+            permitted_channels=["website"],
+            evidence_reference="private-evidence://photographer/licence",
+            granted_by=self.owner,
+            granted_at=timezone.now(),
+        )
+        url = f"/api/v1/gallery/media/{self.media.id}/permissions/{grant.id}/review/"
+        self.client.force_authenticate(self.owner)
+        denied = self.client.post(url, {"decision": "approve"}, format="json")
+        self.assertEqual(denied.status_code, 403)
+        self.client.force_authenticate(self.editor)
+        approved = self.client.post(url, {
+            "decision": "approve",
+            "review_notes": "Licence checked; Gallery promotional use is covered.",
+        }, format="json")
+        self.assertEqual(approved.status_code, 200)
+        grant.refresh_from_db()
+        self.assertEqual(grant.review_status, GalleryMediaPermissionGrant.ReviewStatus.APPROVED)
+        self.assertEqual(grant.reviewed_by, self.editor)
 \n\n    def test_unapproved_partner_story_is_not_public(self):
         self.partner.gallery_status = Partner.ApprovalStatus.PENDING
         self.partner.save()
