@@ -130,6 +130,8 @@ class GalleryStoryEditorialApprovalView(APIView):
             raise ValidationError("Media must be editorially approved first.")
         if story.media.partner.gallery_status != Partner.ApprovalStatus.APPROVED:
             raise ValidationError("Partner must be approved for Gallery advertising.")
+        if not (story.media.rights_confirmed and story.media.promotional_permission and story.media.permission_granted_at):
+            raise ValidationError("Current media rights and dated promotional permission are required.")
         story.editorial_approved_by = request.user
         story.editorial_approved_at = timezone.now()
         story.editorial_approved_version = story.current_version
