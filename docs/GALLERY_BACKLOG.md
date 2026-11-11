@@ -29,7 +29,7 @@ Inspected on the feature branch `feat/application-foundation`:
 - The landing page currently passes an empty stories array; the public Gallery is not yet connected to the API.
 - The card has a reveal control and summary link, but the complete hover-exit, Escape and stable-ID behaviour needs refinement.
 - No AI provider/service, media object-storage integration, partner story workspace, editorial queue, timeline or Gallery analytics implementation was found.
-- The current Gallery view source contains a malformed story-submission statement and must be repaired before backend validation. The branch has not been confirmed passing CI in this review.
+- An earlier malformed story-submission statement was corrected on this feature branch. Version-bound approval fields, a separate version-scoped original-history consent record/action, and related tests have since been added. Migration 0003 is present, but backend tests, migration checks and CI have not yet been confirmed passing.
 
 ## 3. Prioritised implementation backlog
 
