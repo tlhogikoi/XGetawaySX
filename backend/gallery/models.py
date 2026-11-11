@@ -37,8 +37,6 @@ class GalleryMedia(models.Model):
         indexes = [models.Index(fields=("partner", "status"), name="gal_media_partner_status_idx")]
 
     def clean(self):
-        if self.promotional_permission and not self.permission_granted_at:
-            raise ValidationError({"permission_granted_at": "Record when promotional permission was granted."})
         # Formal GalleryMediaPermissionGrant records are the publication source of truth.
 
     def __str__(self):
