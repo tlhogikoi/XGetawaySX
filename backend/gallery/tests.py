@@ -4,7 +4,7 @@ from django.utils import timezone
 
 from accounts.models import User
 from partners.models import Partner
-from .models import GalleryHistoryPublicationConsent, GalleryMedia, GalleryStory, GalleryStoryRevision
+from .models import GalleryHistoryPublicationConsent, GalleryMedia, GalleryMediaPermissionGrant, GalleryStory, GalleryStoryRevision
 
 
 class GalleryPublicationTests(TestCase):
@@ -29,6 +29,14 @@ class GalleryPublicationTests(TestCase):
             permission_granted_at=timezone.now(),
             status=GalleryMedia.Status.APPROVED,
             submitted_by=self.owner,
+        )
+        self.permission = GalleryMediaPermissionGrant.objects.create(
+            media=self.media,
+            rights_holder="The Lodge",
+            permitted_channels=["website", "social_media"],
+            evidence_reference="private-evidence://permission/approved-lodge",
+            granted_by=self.owner,
+            granted_at=timezone.now(),
         )
 
     def test_private_original_history_is_not_public(self):
@@ -111,7 +119,67 @@ class GalleryPublicationTests(TestCase):
         story.refresh_from_db()
         self.assertEqual(story.status, GalleryStory.Status.EDITORIAL_REVIEW)
 
-    def test_unapproved_partner_story_is_not_public(self):
+
+
+    def test_revoked_media_permission_blocks_publication(self):
+        self.permission.revoked_by = self.owner
+        self.permission.revoked_at = timezone.now()
+        self.permission.save(update_fields=("revoked_by", "revoked_at", "updated_at"))
+        story = GalleryStory.objects.create(
+            media=self.media,
+            summary=" ".join(["A verified short story about this place and its setting."] * 5),
+            status=GalleryStory.Status.PUBLISHED,
+            owner_approved_by=self.owner,
+            owner_approved_at=timezone.now(),
+            owner_approved_version=1,
+            editorial_approved_by=self.editor,
+            editorial_approved_at=timezone.now(),
+            editorial_approved_version=1,
+            published_at=timezone.now(),
+        )
+        response = self.client.get("/api/v1/gallery/stories/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
+    def test_expired_media_permission_blocks_publication(self):
+        self.permission.expires_at = timezone.now()
+        self.permission.save(update_fields=("expires_at", "updated_at"))
+        response = self.client.get("/api/v1/gallery/stories/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
+    def test_partner_owner_can_grant_and_revoke_media_permission(self):
+        self.client.force_authenticate(self.owner)
+        url = f"/api/v1/gallery/media/{self.media.id}/permissions/"
+        response = self.client.post(url, {
+            "rights_holder": "Photographer",
+            "permitted_channels": ["website", "social_media"],
+            "evidence_reference": "private-evidence://contracts/photo-licence-01",
+        }, format="json")
+        self.assertEqual(response.status_code, 201)
+        permission_id = response.data["id"]
+        self.assertNotIn("evidence_reference", response.data)
+        revoke = self.client.post(
+            f"/api/v1/gallery/media/{self.media.id}/permissions/{permission_id}/revoke/",
+            format="json",
+        )
+        self.assertEqual(revoke.status_code, 200)
+        self.assertFalse(revoke.data["active"])
+
+    def test_other_partner_owner_cannot_grant_media_permission(self):
+        other = User.objects.create_user(email="media-other@example.com", password="test-password")
+        self.client.force_authenticate(other)
+        response = self.client.post(
+            f"/api/v1/gallery/media/{self.media.id}/permissions/",
+            {
+                "rights_holder": "Photographer",
+                "permitted_channels": ["website"],
+                "evidence_reference": "private-evidence://unauthorised",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 403)
+\n\n    def test_unapproved_partner_story_is_not_public(self):
         self.partner.gallery_status = Partner.ApprovalStatus.PENDING
         self.partner.save()
         story = GalleryStory.objects.create(
