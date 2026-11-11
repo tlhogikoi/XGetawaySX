@@ -7,6 +7,7 @@ from .models import GalleryAuditEvent, GalleryHistoryPublicationConsent, Gallery
 class GalleryMediaAdmin(admin.ModelAdmin):
     list_display = ("title", "partner", "status", "rights_confirmed", "promotional_permission")
     list_filter = ("status", "rights_confirmed", "promotional_permission")
+    readonly_fields = ("status", "rights_confirmed", "promotional_permission", "permission_granted_at", "rights_holder", "rights_reference")
     search_fields = ("title", "partner__name", "rights_holder")
 
 
