@@ -1,9 +1,10 @@
 from django.test import TestCase
 from rest_framework.test import APIClient
+from django.utils import timezone
 
 from accounts.models import User
 from partners.models import Partner
-from .models import GalleryMedia, GalleryStory
+from .models import GalleryHistoryPublicationConsent, GalleryMedia, GalleryStory, GalleryStoryRevision
 
 
 class GalleryPublicationTests(TestCase):
@@ -38,16 +39,44 @@ class GalleryPublicationTests(TestCase):
             summary=" ".join(["A verified short story about this place and its setting."] * 5),
             status=GalleryStory.Status.PUBLISHED,
             owner_approved_by=self.owner,
-            owner_approved_at=__import__("django.utils.timezone", fromlist=["now"]).now(),
+            owner_approved_at=timezone.now(),
+            owner_approved_version=1,
             editorial_approved_by=self.editor,
-            editorial_approved_at=__import__("django.utils.timezone", fromlist=["now"]).now(),
-            published_at=__import__("django.utils.timezone", fromlist=["now"]).now(),
+            editorial_approved_at=timezone.now(),
+            editorial_approved_version=1,
+            published_at=timezone.now(),
         )
         response = self.client.get("/api/v1/gallery/stories/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
         self.assertIsNone(response.data[0]["owner_original_history"])
         self.assertNotIn("ai_source_facts", response.data[0])
+
+    def test_original_history_is_public_only_with_separate_current_version_consent(self):
+        story = GalleryStory.objects.create(
+            media=self.media,
+            owner_original_history="The owner has separately permitted this original history to be published.",
+            owner_history_private=False,
+            original_history_public_permission=True,
+            summary=" ".join(["A verified short story about this place and its setting."] * 5),
+            status=GalleryStory.Status.PUBLISHED,
+            owner_approved_by=self.owner,
+            owner_approved_at=timezone.now(),
+            owner_approved_version=1,
+            editorial_approved_by=self.editor,
+            editorial_approved_at=timezone.now(),
+            editorial_approved_version=1,
+            published_at=timezone.now(),
+        )
+        GalleryHistoryPublicationConsent.objects.create(
+            story=story,
+            story_version=1,
+            granted_by=self.owner,
+            granted_at=timezone.now(),
+        )
+        response = self.client.get("/api/v1/gallery/stories/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data[0]["owner_original_history"], story.owner_original_history)
 
     def test_unapproved_partner_story_is_not_public(self):
         self.partner.gallery_status = Partner.ApprovalStatus.PENDING
@@ -116,3 +145,81 @@ class GalleryRevisionPrivacyTests(TestCase):
         self.assertNotEqual(first.summary, second.summary)
         self.assertEqual(first.version, 1)
         self.assertEqual(second.version, 2)
+
+
+class GalleryHistoryConsentTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.owner = User.objects.create_user(email="consent-owner@example.com", password="test-password")
+        self.other = User.objects.create_user(email="consent-other@example.com", password="test-password")
+        self.partner = Partner.objects.create(
+            owner=self.owner,
+            name="Consent Test Retreat",
+            category=Partner.Category.ACCOMMODATION,
+            gallery_status=Partner.ApprovalStatus.APPROVED,
+        )
+        self.media = GalleryMedia.objects.create(
+            partner=self.partner,
+            title="Retreat garden",
+            image="https://images.example.test/garden.jpg",
+            alt_text="A garden at the retreat",
+            rights_holder="Retreat owner",
+            rights_confirmed=True,
+            promotional_permission=True,
+            permission_granted_at=timezone.now(),
+            submitted_by=self.owner,
+        )
+        self.story = GalleryStory.objects.create(
+            media=self.media,
+            owner_original_history="Private source history supplied by the retreat owner.",
+            summary="A verified story about this partner place shares its setting, character, and guest experience using details supplied by the owner and checked by the editorial team before publication to travellers.",
+            status=GalleryStory.Status.OWNER_REVIEW,
+        )
+        GalleryStoryRevision.capture(self.story, self.owner, "Initial draft")
+
+    def test_only_partner_owner_can_grant_history_permission(self):
+        self.client.force_authenticate(self.other)
+        response = self.client.post(
+            f"/api/v1/gallery/stories/{self.story.id}/history-consent/",
+            {"decision": "grant"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self.story.history_publication_consents.count(), 0)
+
+    def test_owner_can_grant_and_revoke_separate_history_permission(self):
+        self.client.force_authenticate(self.owner)
+        url = f"/api/v1/gallery/stories/{self.story.id}/history-consent/"
+        grant = self.client.post(url, {"decision": "grant"}, format="json")
+        self.assertEqual(grant.status_code, 200)
+        self.story.refresh_from_db()
+        consent = self.story.history_publication_consents.get(story_version=1)
+        self.assertFalse(self.story.owner_history_private)
+        self.assertTrue(self.story.original_history_public_permission)
+        self.assertIsNone(consent.revoked_at)
+
+        revoke = self.client.post(url, {"decision": "revoke"}, format="json")
+        self.assertEqual(revoke.status_code, 200)
+        self.story.refresh_from_db()
+        consent.refresh_from_db()
+        self.assertTrue(self.story.owner_history_private)
+        self.assertFalse(self.story.original_history_public_permission)
+        self.assertIsNotNone(consent.revoked_at)
+
+    def test_material_edit_creates_new_version_and_returns_history_to_private(self):
+        self.client.force_authenticate(self.owner)
+        url = f"/api/v1/gallery/stories/{self.story.id}/history-consent/"
+        self.assertEqual(self.client.post(url, {"decision": "grant"}, format="json").status_code, 200)
+        new_summary = "A carefully checked account of the property describes its setting, facilities, and guest experience using details supplied directly by the owner and reviewed for accuracy before it is shown to travellers."
+        response = self.client.patch(
+            f"/api/v1/gallery/stories/{self.story.id}/draft/",
+            {"summary": new_summary},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.story.refresh_from_db()
+        self.assertEqual(self.story.current_version, 2)
+        self.assertTrue(self.story.owner_history_private)
+        self.assertFalse(self.story.original_history_public_permission)
+        self.assertIsNone(self.story.owner_approved_version)
+        self.assertFalse(self.story.history_publication_consents.filter(story_version=2, revoked_at__isnull=True).exists())
