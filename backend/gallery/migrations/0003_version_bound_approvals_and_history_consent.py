@@ -1,11 +1,15 @@
 from django.conf import settings
 from django.db import migrations, models
-from django.db.models import F
+from django.db.models import F, Max
 import django.db.models.deletion
 
 
 def backfill_approval_versions(apps, schema_editor):
     GalleryStory = apps.get_model("gallery", "GalleryStory")
+    GalleryStoryRevision = apps.get_model("gallery", "GalleryStoryRevision")
+    latest_versions = GalleryStoryRevision.objects.values("story_id").annotate(latest=Max("version"))
+    for row in latest_versions:
+        GalleryStory.objects.filter(pk=row["story_id"]).update(current_version=row["latest"])
     GalleryStory.objects.filter(owner_approved_at__isnull=False).update(
         owner_approved_version=F("current_version")
     )
