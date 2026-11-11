@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import GalleryMedia, GalleryStory
+from .models import GalleryAuditEvent, GalleryHistoryPublicationConsent, GalleryMedia, GalleryStory, GalleryStoryRevision
 
 
 @admin.register(GalleryMedia)
@@ -15,4 +15,23 @@ class GalleryStoryAdmin(admin.ModelAdmin):
     list_display = ("media", "status", "owner_approved_at", "editorial_approved_at", "published_at")
     list_filter = ("status", "owner_history_private")
     search_fields = ("media__title", "media__partner__name", "summary")
-    readonly_fields = ("created_at", "updated_at")
+    readonly_fields = ("created_at", "updated_at", "status", "owner_history_private", "original_history_public_permission", "owner_original_history", "current_version", "owner_approved_version", "editorial_approved_version", "owner_approved_by", "owner_approved_at", "editorial_approved_by", "editorial_approved_at", "published_at")
+
+
+
+@admin.register(GalleryHistoryPublicationConsent)
+class GalleryHistoryPublicationConsentAdmin(admin.ModelAdmin):
+    list_display = ("story", "story_version", "granted_by", "granted_at", "revoked_at")
+    readonly_fields = ("story", "story_version", "granted_by", "granted_at", "revoked_by", "revoked_at", "created_at", "updated_at")
+
+
+@admin.register(GalleryStoryRevision)
+class GalleryStoryRevisionAdmin(admin.ModelAdmin):
+    list_display = ("story", "version", "changed_by", "change_reason", "created_at")
+    readonly_fields = tuple(field.name for field in GalleryStoryRevision._meta.fields)
+
+
+@admin.register(GalleryAuditEvent)
+class GalleryAuditEventAdmin(admin.ModelAdmin):
+    list_display = ("action", "partner", "actor", "created_at")
+    readonly_fields = tuple(field.name for field in GalleryAuditEvent._meta.fields)
