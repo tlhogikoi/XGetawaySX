@@ -38,8 +38,7 @@ class GalleryMedia(models.Model):
     def clean(self):
         if self.promotional_permission and not self.permission_granted_at:
             raise ValidationError({"permission_granted_at": "Record when promotional permission was granted."})
-        if self.status == self.Status.APPROVED and not (self.rights_confirmed and self.promotional_permission):
-            raise ValidationError("Media rights and promotional permission are required before approval.")
+        # Formal GalleryMediaPermissionGrant records are the publication source of truth.
 
     def __str__(self):
         return f"{self.partner.name}: {self.title}"
@@ -255,6 +254,8 @@ class GalleryMediaPermissionGrant(models.Model):
         ]
 
     def clean(self):
+        if self.granted_by_id and self.media_id and self.granted_by_id != self.media.partner.owner_id:
+            raise ValidationError({"granted_by": "Only the owning partner may grant media publication permission."})
         if not self.rights_holder.strip():
             raise ValidationError({"rights_holder": "A rights holder is required."})
         if not self.evidence_reference.strip():
