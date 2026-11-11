@@ -40,6 +40,11 @@ class GalleryStoryDraftSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Story summary must contain 30–60 words.")
         return value
 
+    def validate_media(self, value):
+        if self.instance and value.pk != self.instance.media_id:
+            raise serializers.ValidationError("A story stays attached to its image. Create a separate story for another image.")
+        return value
+
     def validate(self, attrs):
         media = attrs.get("media", getattr(self.instance, "media", None))
         request = self.context.get("request")
