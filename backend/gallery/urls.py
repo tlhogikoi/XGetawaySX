@@ -3,6 +3,8 @@ from django.urls import path
 from .views import (
     GalleryMediaCreateView,
     GalleryMediaEditorialApprovalView,
+    GalleryMediaPermissionGrantView,
+    GalleryMediaPermissionRevokeView,
     GalleryStoryCreateView,
     GalleryStoryEditorialApprovalView,
     GalleryStoryOwnerApprovalView,
@@ -25,5 +27,7 @@ urlpatterns = [
     path("stories/<int:pk>/owner-approve/", GalleryStoryOwnerApprovalView.as_view(), name="gallery-story-owner-approve"),
     path("stories/<int:pk>/editorial-approve/", GalleryStoryEditorialApprovalView.as_view(), name="gallery-story-editorial-approve"),
     path("media/create/", GalleryMediaCreateView.as_view(), name="gallery-media-create"),
+    path("media/<int:pk>/permissions/", GalleryMediaPermissionGrantView.as_view(), name="gallery-media-permission-grant"),
+    path("media/<int:pk>/permissions/<int:grant_id>/revoke/", GalleryMediaPermissionRevokeView.as_view(), name="gallery-media-permission-revoke"),
     path("media/<int:pk>/editorial-approve/", GalleryMediaEditorialApprovalView.as_view(), name="gallery-media-editorial-approve"),
 ]
