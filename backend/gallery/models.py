@@ -38,6 +38,15 @@ class GalleryMedia(models.Model):
 
     def clean(self):
         # Formal GalleryMediaPermissionGrant records are the publication source of truth.
+        if self.status == self.Status.APPROVED and self.pk:
+            now = timezone.now()
+            has_active_permission = self.permission_grants.filter(
+                purpose=GalleryMediaPermissionGrant.Purpose.GALLERY_PROMOTION,
+                review_status=GalleryMediaPermissionGrant.ReviewStatus.APPROVED,
+                revoked_at__isnull=True,
+            ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now)).exists()
+            if not has_active_permission:
+                raise ValidationError("Media cannot be approved without an active, editorially verified Gallery permission.")
 
     def __str__(self):
         return f"{self.partner.name}: {self.title}"
@@ -284,6 +293,8 @@ class GalleryMediaPermissionGrant(models.Model):
         if self.review_status in (self.ReviewStatus.APPROVED, self.ReviewStatus.REJECTED):
             if not self.reviewed_by_id or not self.reviewed_at:
                 raise ValidationError("A completed rights review requires an editorial reviewer and timestamp.")
+            if not self.reviewed_by.is_staff:
+                raise ValidationError({"reviewed_by": "Only authorised editorial staff may review media rights."})
         elif self.reviewed_by_id or self.reviewed_at:
             raise ValidationError("Pending rights reviews cannot have a reviewer or review timestamp.")
 
