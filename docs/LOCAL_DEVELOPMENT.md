@@ -43,7 +43,7 @@ npm run build
 
 - Backend foundations include the accounts, partner, health and Gallery Django apps.
 - Partner listing and initial Gallery submission/review APIs are present on the `feat/application-foundation` branch.
-- Gallery work remains in progress: version-bound approvals and original-history consent have been added, but automated validation and PostgreSQL migration checks still need to be run.
+- Gallery work remains in progress: version-bound approvals, separate original-history consent, formal media permission grants and editorial evidence review have been added on the feature branch; automated validation and PostgreSQL migration checks still need to be run.
 - The frontend is a branded shell with an initial accessible Gallery story-card component; it is not yet connected to live Gallery API data.
-- Media object storage/upload, formal expiring media-rights grants, partner story workspace, editorial queue, AI drafting, timelines, analytics, payments and deployment are not complete.
+- Private evidence object storage/upload, partner story workspace, editorial UI, AI drafting, timelines, analytics, payments and deployment are not complete.
 - The feature branch is not the production/default branch. Do not treat the Gallery as live or public until its tests, review and deployment gates pass.
