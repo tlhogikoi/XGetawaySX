@@ -18,7 +18,7 @@ export default function GalleryPartnerGrid({ stories }: GalleryPartnerGridProps)
 
   return (
     <div className="gallery-partner-grid">
-      {stories.map((story) => <GalleryStoryCard key={story.title + story.partnerName} {...story} />)}
+      {stories.map((story) => <GalleryStoryCard key={story.storyId} {...story} />)}
     </div>
   );
 }
