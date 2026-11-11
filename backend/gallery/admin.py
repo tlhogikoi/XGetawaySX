@@ -7,7 +7,7 @@ from .models import GalleryAuditEvent, GalleryHistoryPublicationConsent, Gallery
 class GalleryMediaAdmin(admin.ModelAdmin):
     list_display = ("title", "partner", "status", "rights_confirmed", "promotional_permission")
     list_filter = ("status", "rights_confirmed", "promotional_permission")
-    readonly_fields = ("status", "rights_confirmed", "promotional_permission", "permission_granted_at", "rights_holder", "rights_reference")
+    readonly_fields = tuple(field.name for field in GalleryMedia._meta.fields)
     search_fields = ("title", "partner__name", "rights_holder")
 
 
@@ -16,7 +16,7 @@ class GalleryStoryAdmin(admin.ModelAdmin):
     list_display = ("media", "status", "owner_approved_at", "editorial_approved_at", "published_at")
     list_filter = ("status", "owner_history_private")
     search_fields = ("media__title", "media__partner__name", "summary")
-    readonly_fields = ("created_at", "updated_at", "status", "owner_history_private", "original_history_public_permission", "owner_original_history", "current_version", "owner_approved_version", "editorial_approved_version", "owner_approved_by", "owner_approved_at", "editorial_approved_by", "editorial_approved_at", "published_at")
+    readonly_fields = tuple(field.name for field in GalleryStory._meta.fields)
 
 
 
