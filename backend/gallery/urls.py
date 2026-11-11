@@ -5,6 +5,7 @@ from .views import (
     GalleryMediaEditorialApprovalView,
     GalleryMediaPermissionGrantView,
     GalleryMediaPermissionRevokeView,
+    GalleryMediaPermissionReviewView,
     GalleryStoryCreateView,
     GalleryStoryEditorialApprovalView,
     GalleryStoryOwnerApprovalView,
@@ -29,5 +30,6 @@ urlpatterns = [
     path("media/create/", GalleryMediaCreateView.as_view(), name="gallery-media-create"),
     path("media/<int:pk>/permissions/", GalleryMediaPermissionGrantView.as_view(), name="gallery-media-permission-grant"),
     path("media/<int:pk>/permissions/<int:grant_id>/revoke/", GalleryMediaPermissionRevokeView.as_view(), name="gallery-media-permission-revoke"),
+    path("media/<int:pk>/permissions/<int:grant_id>/review/", GalleryMediaPermissionReviewView.as_view(), name="gallery-media-permission-review"),
     path("media/<int:pk>/editorial-approve/", GalleryMediaEditorialApprovalView.as_view(), name="gallery-media-editorial-approve"),
 ]
