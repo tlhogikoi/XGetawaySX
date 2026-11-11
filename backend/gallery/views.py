@@ -335,6 +335,25 @@ class GalleryMediaPermissionGrantView(APIView):
         )
         grant.full_clean()
         grant.save()
+        # Any new rights grant requires fresh media review and, where a story exists,
+        # fresh owner/editorial approval before the media can return to public display.
+        media.status = GalleryMedia.Status.OWNER_REVIEW
+        media.save(update_fields=("status", "updated_at"))
+        story = GalleryStory.objects.filter(media=media).first()
+        if story:
+            story.status = GalleryStory.Status.OWNER_REVIEW
+            story.owner_approved_by = None
+            story.owner_approved_at = None
+            story.owner_approved_version = None
+            story.editorial_approved_by = None
+            story.editorial_approved_at = None
+            story.editorial_approved_version = None
+            story.published_at = None
+            story.save(update_fields=(
+                "status", "owner_approved_by", "owner_approved_at", "owner_approved_version",
+                "editorial_approved_by", "editorial_approved_at", "editorial_approved_version",
+                "published_at", "updated_at",
+            ))
         GalleryAuditEvent.objects.create(
             actor=request.user, partner=media.partner, media=media,
             action="media_permission_granted",
@@ -370,6 +389,24 @@ class GalleryMediaPermissionRevokeView(APIView):
             grant.revoked_at = timezone.now()
             grant.full_clean()
             grant.save(update_fields=("revoked_by", "revoked_at", "updated_at"))
+            # Rights withdrawal suspends the asset and resets both approvals.
+            media.status = GalleryMedia.Status.OWNER_REVIEW
+            media.save(update_fields=("status", "updated_at"))
+            story = GalleryStory.objects.filter(media=media).first()
+            if story:
+                story.status = GalleryStory.Status.OWNER_REVIEW
+                story.owner_approved_by = None
+                story.owner_approved_at = None
+                story.owner_approved_version = None
+                story.editorial_approved_by = None
+                story.editorial_approved_at = None
+                story.editorial_approved_version = None
+                story.published_at = None
+                story.save(update_fields=(
+                    "status", "owner_approved_by", "owner_approved_at", "owner_approved_version",
+                    "editorial_approved_by", "editorial_approved_at", "editorial_approved_version",
+                    "published_at", "updated_at",
+                ))
             GalleryAuditEvent.objects.create(
                 actor=request.user, partner=media.partner, media=media,
                 action="media_permission_revoked",
