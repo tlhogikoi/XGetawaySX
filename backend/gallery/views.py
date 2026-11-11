@@ -13,6 +13,16 @@ from .models import GalleryAuditEvent, GalleryHistoryPublicationConsent, Gallery
 from .serializers import GalleryAuditEventSerializer, GalleryMediaDraftSerializer, GalleryStoryDraftSerializer, GalleryStoryRevisionSerializer, PublicGalleryStorySerializer
 
 
+
+def has_active_gallery_media_permission(media):
+    now = timezone.now()
+    return media.permission_grants.filter(
+        purpose=GalleryMediaPermissionGrant.Purpose.GALLERY_PROMOTION,
+        review_status=GalleryMediaPermissionGrant.ReviewStatus.APPROVED,
+        revoked_at__isnull=True,
+    ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now)).exists()
+
+
 class PublicGalleryStoriesView(generics.ListAPIView):
     serializer_class = PublicGalleryStorySerializer
     permission_classes = [AllowAny]
@@ -74,8 +84,6 @@ class GalleryStoryOwnerApprovalView(APIView):
             raise ValidationError("Story is not awaiting owner approval.")
         if story.media.partner.gallery_status != Partner.ApprovalStatus.APPROVED:
             raise ValidationError("Partner must be approved for Gallery advertising.")
-        if not (story.media.rights_confirmed and story.media.promotional_permission):
-            raise ValidationError("Media rights and promotional permission must be confirmed.")
         if story.media.status not in (GalleryMedia.Status.OWNER_REVIEW, GalleryMedia.Status.EDITORIAL_REVIEW, GalleryMedia.Status.APPROVED):
             raise ValidationError("Media must complete its rights review before story approval.")
         if not 30 <= len(story.summary.split()) <= 60:
