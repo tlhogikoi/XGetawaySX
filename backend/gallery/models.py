@@ -122,6 +122,13 @@ class GalleryHistoryPublicationConsent(models.Model):
     granted_at = models.DateTimeField()
     revoked_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="gallery_history_consents_revoked")
     revoked_at = models.DateTimeField(null=True, blank=True)
+    review_status = models.CharField(max_length=16, choices=ReviewStatus.choices, default=ReviewStatus.PENDING)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT,
+        related_name="gallery_media_permissions_reviewed",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    review_notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -220,6 +227,11 @@ class GalleryMediaPermissionGrant(models.Model):
     class Purpose(models.TextChoices):
         GALLERY_PROMOTION = "gallery_promotion", "XGetawaySX Gallery promotion"
 
+    class ReviewStatus(models.TextChoices):
+        PENDING = "pending", "Pending editorial rights review"
+        APPROVED = "approved", "Rights approved"
+        REJECTED = "rejected", "Rights rejected"
+
     media = models.ForeignKey(
         GalleryMedia, on_delete=models.PROTECT, related_name="permission_grants"
     )
@@ -270,6 +282,11 @@ class GalleryMediaPermissionGrant(models.Model):
             raise ValidationError({"expires_at": "Expiry must be later than the grant date."})
         if self.revoked_at and not self.revoked_by_id:
             raise ValidationError({"revoked_by": "Record who revoked this permission."})
+        if self.review_status in (self.ReviewStatus.APPROVED, self.ReviewStatus.REJECTED):
+            if not self.reviewed_by_id or not self.reviewed_at:
+                raise ValidationError("A completed rights review requires an editorial reviewer and timestamp.")
+        elif self.reviewed_by_id or self.reviewed_at:
+            raise ValidationError("Pending rights reviews cannot have a reviewer or review timestamp.")
 
     @property
     def is_active(self):
@@ -277,6 +294,7 @@ class GalleryMediaPermissionGrant(models.Model):
             self.revoked_at is None
             and (self.expires_at is None or self.expires_at > timezone.now())
             and self.purpose == self.Purpose.GALLERY_PROMOTION
+            and self.review_status == self.ReviewStatus.APPROVED
         )
 
     def __str__(self):
