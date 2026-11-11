@@ -1,6 +1,6 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 
 from partners.models import Partner
@@ -64,6 +64,9 @@ class GalleryStory(models.Model):
     ai_assisted = models.BooleanField(default=False)
     ai_source_facts = models.JSONField(default=list, blank=True)
     status = models.CharField(max_length=24, choices=Status.choices, default=Status.DRAFT)
+    current_version = models.PositiveIntegerField(default=1)
+    owner_approved_version = models.PositiveIntegerField(null=True, blank=True)
+    editorial_approved_version = models.PositiveIntegerField(null=True, blank=True)
     owner_approved_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="gallery_owner_approvals")
     owner_approved_at = models.DateTimeField(null=True, blank=True)
     editorial_approved_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="gallery_editorial_approvals")
@@ -83,11 +86,19 @@ class GalleryStory(models.Model):
         count = self.word_count(self.summary)
         if self.summary and not 30 <= count <= 60:
             raise ValidationError({"summary": "Published story summaries must contain 30–60 words."})
-        if not self.owner_history_private and not (self.original_history_public_permission and self.owner_approved_at):
-            raise ValidationError("Publishing the owner's original history requires separate explicit owner permission and story approval.")
+        if not self.owner_history_private:
+            consent_exists = self.history_publication_consents.filter(
+                story_version=self.current_version,
+                revoked_at__isnull=True,
+                granted_by_id=self.media.partner.owner_id,
+            ).exists()
+            if not (self.original_history_public_permission and consent_exists):
+                raise ValidationError("Publishing original history requires separate, current-version owner consent.")
         if self.status == self.Status.PUBLISHED:
-            if not (self.owner_approved_at and self.editorial_approved_at):
-                raise ValidationError("Owner and editorial approval are both required.")
+            if not (self.owner_approved_at and self.owner_approved_version == self.current_version):
+                raise ValidationError("The current story version must have owner approval.")
+            if not (self.editorial_approved_at and self.editorial_approved_version == self.current_version):
+                raise ValidationError("The current story version must have editorial approval.")
             if self.media.status != GalleryMedia.Status.APPROVED:
                 raise ValidationError("The associated media must be approved.")
             if self.media.partner.gallery_status != Partner.ApprovalStatus.APPROVED:
@@ -97,6 +108,30 @@ class GalleryStory(models.Model):
 
     def __str__(self):
         return f"Story for {self.media.title}"
+
+
+class GalleryHistoryPublicationConsent(models.Model):
+    story = models.ForeignKey(GalleryStory, on_delete=models.PROTECT, related_name="history_publication_consents")
+    story_version = models.PositiveIntegerField()
+    granted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="gallery_history_consents_granted")
+    granted_at = models.DateTimeField()
+    revoked_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="gallery_history_consents_revoked")
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-granted_at",)
+        constraints = [
+            models.UniqueConstraint(fields=("story", "story_version"), name="gal_history_consent_version_unique"),
+        ]
+
+    def clean(self):
+        if self.granted_by_id != self.story.media.partner.owner_id:
+            raise ValidationError("Only the partner owner may grant publication permission for original history.")
+        if self.story_version != self.story.current_version:
+            raise ValidationError("Original-history permission must apply to the current story version.")
+
 
 
 
@@ -120,17 +155,41 @@ class GalleryStoryRevision(models.Model):
         ]
 
     @classmethod
+    @transaction.atomic
     def capture(cls, story, actor=None, reason=""):
-        latest = cls.objects.filter(story=story).order_by("-version").first()
+        locked_story = GalleryStory.objects.select_for_update().get(pk=story.pk)
+        latest = cls.objects.filter(story=locked_story).order_by("-version").first()
+        version = (latest.version + 1) if latest else 1
+        # A material content change always returns the original history to private
+        # and invalidates approvals/consent associated with the previous version.
+        locked_story.current_version = version
+        locked_story.owner_history_private = True
+        locked_story.original_history_public_permission = False
+        locked_story.owner_approved_by = None
+        locked_story.owner_approved_at = None
+        locked_story.owner_approved_version = None
+        locked_story.editorial_approved_by = None
+        locked_story.editorial_approved_at = None
+        locked_story.editorial_approved_version = None
+        locked_story.published_at = None
+        locked_story.save(update_fields=(
+            "current_version", "owner_history_private", "original_history_public_permission",
+            "owner_approved_by", "owner_approved_at", "owner_approved_version",
+            "editorial_approved_by", "editorial_approved_at", "editorial_approved_version",
+            "published_at", "updated_at",
+        ))
+        story.current_version = version
+        story.owner_history_private = True
+        story.original_history_public_permission = False
         return cls.objects.create(
-            story=story,
-            version=(latest.version + 1) if latest else 1,
-            summary=story.summary,
-            owner_original_history_snapshot=story.owner_original_history,
-            owner_history_private=story.owner_history_private,
-            original_history_public_permission=story.original_history_public_permission,
-            ai_assisted=story.ai_assisted,
-            ai_source_facts_snapshot=story.ai_source_facts,
+            story=locked_story,
+            version=version,
+            summary=locked_story.summary,
+            owner_original_history_snapshot=locked_story.owner_original_history,
+            owner_history_private=locked_story.owner_history_private,
+            original_history_public_permission=locked_story.original_history_public_permission,
+            ai_assisted=locked_story.ai_assisted,
+            ai_source_facts_snapshot=locked_story.ai_source_facts,
             changed_by=actor,
             change_reason=reason,
         )
