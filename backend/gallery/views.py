@@ -25,6 +25,7 @@ class PublicGalleryStoriesView(generics.ListAPIView):
             media__status=GalleryMedia.Status.APPROVED,
             media__partner__gallery_status=Partner.ApprovalStatus.APPROVED,
             media__permission_grants__purpose=GalleryMediaPermissionGrant.Purpose.GALLERY_PROMOTION,
+            media__permission_grants__review_status=GalleryMediaPermissionGrant.ReviewStatus.APPROVED,
             media__permission_grants__revoked_at__isnull=True,
             owner_approved_version=F("current_version"),
             editorial_approved_version=F("current_version"),
@@ -367,3 +368,49 @@ class GalleryMediaPermissionRevokeView(APIView):
                 details={"permission_id": grant.pk, "purpose": grant.purpose},
             )
         return Response({"id": grant.pk, "active": grant.is_active, "revoked_at": grant.revoked_at})
+
+
+class GalleryMediaPermissionReviewView(APIView):
+    """Editorial staff verify the private evidence before a grant can authorise publication."""
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk, grant_id):
+        if not request.user.is_staff:
+            raise PermissionDenied("Media-rights evidence review is restricted to authorised editorial staff.")
+        media = generics.get_object_or_404(
+            GalleryMedia.objects.select_for_update().select_related("partner"), pk=pk
+        )
+        grant = generics.get_object_or_404(
+            GalleryMediaPermissionGrant.objects.select_for_update(),
+            pk=grant_id, media=media,
+        )
+        decision = request.data.get("decision")
+        if decision not in ("approve", "reject"):
+            raise ValidationError({"decision": "Use 'approve' or 'reject'."})
+        if grant.revoked_at:
+            raise ValidationError("A revoked permission grant cannot be reviewed for publication.")
+        if grant.expires_at and grant.expires_at <= timezone.now():
+            raise ValidationError("An expired permission grant cannot be approved.")
+        grant.review_status = (
+            GalleryMediaPermissionGrant.ReviewStatus.APPROVED
+            if decision == "approve"
+            else GalleryMediaPermissionGrant.ReviewStatus.REJECTED
+        )
+        grant.reviewed_by = request.user
+        grant.reviewed_at = timezone.now()
+        grant.review_notes = str(request.data.get("review_notes", ""))[:4000]
+        grant.full_clean()
+        grant.save(update_fields=(
+            "review_status", "reviewed_by", "reviewed_at", "review_notes", "updated_at",
+        ))
+        GalleryAuditEvent.objects.create(
+            actor=request.user, partner=media.partner, media=media,
+            action="media_permission_" + grant.review_status,
+            details={"permission_id": grant.pk},
+        )
+        return Response({
+            "id": grant.pk,
+            "review_status": grant.review_status,
+            "reviewed_at": grant.reviewed_at,
+        })
