@@ -76,8 +76,9 @@ Inspected on the feature branch `feat/application-foundation`:
 **Current API proposal implemented on the feature branch**
 - `POST /api/v1/gallery/media/{media_id}/permissions/` — partner owner records the rights holder, permitted channels, private evidence reference and optional expiry.
 - `POST /api/v1/gallery/media/{media_id}/permissions/{grant_id}/revoke/` — partner owner revokes a grant.
+- `POST /api/v1/gallery/media/{media_id}/permissions/{grant_id}/review/` — authorised editorial staff approve/reject the private evidence.
 - The public API never returns the private evidence reference.
-- A grant must be active, unrevoked and unexpired at editorial approval and public-query time.
+- A grant must be editorially approved, active, unrevoked and unexpired at publication and public-query time.
 
 **Tasks**
 - Replace client-trusted rights booleans/timestamps as the sole evidence with a `MediaPermissionGrant` record.
@@ -266,10 +267,10 @@ A Gallery release is ready for controlled staging only when the P0 acceptance cr
 The following work is present on `feat/application-foundation`; it has not been merged or deployed:
 
 - Added `GalleryMediaPermissionGrant` with rights holder, Gallery-promotion purpose, permitted channels, private evidence reference, granting actor/time, optional expiry and revocation actor/time.
-- Added migration `0004_gallery_media_permission_grants.py`.
-- Added owner-only permission grant and revocation endpoints.
-- Editorial media approval and story publication now require an active evidence-backed permission grant in addition to the legacy compatibility fields.
-- Public Gallery queries exclude media with missing, revoked or expired grants.
+- Added migrations `0004_gallery_media_permission_grants.py` and `0005_media_permission_editorial_review.py`.
+- Added owner-only permission grant and revocation endpoints, plus an editorial evidence-review endpoint.
+- Editorial media approval and story publication require a formally recorded grant that has passed editorial evidence review.
+- Public Gallery queries exclude media with missing, pending, rejected, revoked or expired grants.
 - Added focused tests for grant/revoke, owner isolation, expired permissions and revoked permissions.
 - Registered permission records as read-only in Django admin.
 
@@ -280,3 +281,4 @@ The following work is present on `feat/application-foundation`; it has not been 
 - Have legal review the rights-holder declaration, permitted channels, expiry and withdrawal wording.
 - Decide whether the legacy rights booleans can be deprecated after existing records are reconciled.
 - Add an editorial UI for reviewing permission evidence without exposing it to public APIs or unauthorised partner users.
+- Confirm whether one permission record can cover all rights holders for a media asset, or whether the data model must support multiple independently required rights holders and releases.
