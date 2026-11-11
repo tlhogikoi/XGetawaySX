@@ -32,8 +32,18 @@ class PublicGalleryStorySerializer(serializers.ModelSerializer):
 class GalleryStoryDraftSerializer(serializers.ModelSerializer):
     class Meta:
         model = GalleryStory
-        fields = ("id", "media", "owner_original_history", "owner_history_private", "original_history_public_permission", "summary", "ai_assisted", "ai_source_facts", "status")
-        read_only_fields = ("status", "owner_history_private", "original_history_public_permission", "ai_assisted")
+        fields = (
+            "id", "media", "owner_original_history", "owner_history_private",
+            "original_history_public_permission", "summary", "ai_assisted",
+            "ai_source_facts", "status", "current_version",
+            "owner_approved_version", "editorial_approved_version",
+            "owner_approved_at", "editorial_approved_at",
+        )
+        read_only_fields = (
+            "status", "owner_history_private", "original_history_public_permission",
+            "ai_assisted", "current_version", "owner_approved_version",
+            "editorial_approved_version", "owner_approved_at", "editorial_approved_at",
+        )
 
     def validate_summary(self, value):
         count = len(value.split())
