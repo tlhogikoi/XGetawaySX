@@ -111,8 +111,9 @@ class GalleryPublicationTests(TestCase):
             owner_approved_at=timezone.now(),
             owner_approved_version=1,
         )
-        self.media.permission_granted_at = None
-        self.media.save(update_fields=("permission_granted_at",))
+        self.permission.revoked_by = self.owner
+        self.permission.revoked_at = timezone.now()
+        self.permission.save(update_fields=("revoked_by", "revoked_at", "updated_at"))
         self.client.force_authenticate(self.editor)
         response = self.client.post(f"/api/v1/gallery/stories/{story.id}/editorial-approve/")
         self.assertEqual(response.status_code, 400)
