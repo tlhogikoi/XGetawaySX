@@ -23,6 +23,7 @@ class PublicGalleryStoriesView(generics.ListAPIView):
             media__partner__gallery_status=Partner.ApprovalStatus.APPROVED,
             media__rights_confirmed=True,
             media__promotional_permission=True,
+            media__permission_granted_at__isnull=False,
             owner_approved_version=F("current_version"),
             editorial_approved_version=F("current_version"),
         ).select_related("media", "media__partner").prefetch_related("history_publication_consents")
@@ -36,7 +37,10 @@ class GalleryMediaCreateView(generics.CreateAPIView):
         partner = serializer.validated_data["partner"]
         if not self.request.user.is_staff and partner.owner_id != self.request.user.id:
             raise PermissionDenied("Only the partner owner may submit media.")
-        serializer.save(submitted_by=self.request.user)
+        media = serializer.save(submitted_by=self.request.user)
+        GalleryAuditEvent.objects.create(
+            actor=self.request.user, partner=partner, media=media, action="media_submitted",
+        )
 
 
 class GalleryStoryCreateView(generics.CreateAPIView):
@@ -101,6 +105,10 @@ class GalleryMediaEditorialApprovalView(APIView):
         media.status = GalleryMedia.Status.APPROVED
         media.full_clean()
         media.save()
+        GalleryAuditEvent.objects.create(
+            actor=request.user, partner=media.partner, media=media,
+            action="media_editorially_approved",
+        )
         return Response({"status": media.status})
 
 
