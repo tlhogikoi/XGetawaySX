@@ -78,6 +78,39 @@ class GalleryPublicationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data[0]["owner_original_history"], story.owner_original_history)
 
+    def test_editorial_approval_rejects_stale_owner_approved_version(self):
+        story = GalleryStory.objects.create(
+            media=self.media,
+            summary=" ".join(["A verified short story about this place and its setting."] * 5),
+            status=GalleryStory.Status.EDITORIAL_REVIEW,
+            current_version=2,
+            owner_approved_by=self.owner,
+            owner_approved_at=timezone.now(),
+            owner_approved_version=1,
+        )
+        self.client.force_authenticate(self.editor)
+        response = self.client.post(f"/api/v1/gallery/stories/{story.id}/editorial-approve/")
+        self.assertEqual(response.status_code, 400)
+        story.refresh_from_db()
+        self.assertEqual(story.status, GalleryStory.Status.EDITORIAL_REVIEW)
+
+    def test_editorial_approval_rechecks_dated_media_permission(self):
+        story = GalleryStory.objects.create(
+            media=self.media,
+            summary=" ".join(["A verified short story about this place and its setting."] * 5),
+            status=GalleryStory.Status.EDITORIAL_REVIEW,
+            owner_approved_by=self.owner,
+            owner_approved_at=timezone.now(),
+            owner_approved_version=1,
+        )
+        self.media.permission_granted_at = None
+        self.media.save(update_fields=("permission_granted_at",))
+        self.client.force_authenticate(self.editor)
+        response = self.client.post(f"/api/v1/gallery/stories/{story.id}/editorial-approve/")
+        self.assertEqual(response.status_code, 400)
+        story.refresh_from_db()
+        self.assertEqual(story.status, GalleryStory.Status.EDITORIAL_REVIEW)
+
     def test_unapproved_partner_story_is_not_public(self):
         self.partner.gallery_status = Partner.ApprovalStatus.PENDING
         self.partner.save()
