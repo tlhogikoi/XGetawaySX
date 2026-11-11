@@ -216,6 +216,38 @@ class GalleryPublicationTests(TestCase):
         grant.refresh_from_db()
         self.assertEqual(grant.review_status, GalleryMediaPermissionGrant.ReviewStatus.APPROVED)
         self.assertEqual(grant.reviewed_by, self.editor)
+\n\n
+
+    def test_new_permission_grant_resets_existing_publication_approvals(self):
+        story = GalleryStory.objects.create(
+            media=self.media,
+            summary=" ".join(["A verified short story about this place and its setting."] * 5),
+            status=GalleryStory.Status.PUBLISHED,
+            owner_approved_by=self.owner,
+            owner_approved_at=timezone.now(),
+            owner_approved_version=1,
+            editorial_approved_by=self.editor,
+            editorial_approved_at=timezone.now(),
+            editorial_approved_version=1,
+            published_at=timezone.now(),
+        )
+        self.client.force_authenticate(self.owner)
+        response = self.client.post(
+            f"/api/v1/gallery/media/{self.media.id}/permissions/",
+            {
+                "rights_holder": "Photographer",
+                "permitted_channels": ["website"],
+                "evidence_reference": "private-evidence://new-release",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        story.refresh_from_db()
+        self.media.refresh_from_db()
+        self.assertEqual(self.media.status, GalleryMedia.Status.OWNER_REVIEW)
+        self.assertEqual(story.status, GalleryStory.Status.OWNER_REVIEW)
+        self.assertIsNone(story.owner_approved_version)
+        self.assertIsNone(story.editorial_approved_version)
 \n\n    def test_unapproved_partner_story_is_not_public(self):
         self.partner.gallery_status = Partner.ApprovalStatus.PENDING
         self.partner.save()
