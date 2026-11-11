@@ -26,7 +26,7 @@ class GalleryPublicationTests(TestCase):
             rights_holder="The Lodge",
             rights_confirmed=True,
             promotional_permission=True,
-            permission_granted_at=__import__("django.utils.timezone", fromlist=["now"]).now(),
+            permission_granted_at=timezone.now(),
             status=GalleryMedia.Status.APPROVED,
             submitted_by=self.owner,
         )
@@ -86,9 +86,11 @@ class GalleryPublicationTests(TestCase):
             summary=" ".join(["A concise account of the place, based only on owner supplied facts."] * 5),
             status=GalleryStory.Status.PUBLISHED,
             owner_approved_by=self.owner,
-            owner_approved_at=__import__("django.utils.timezone", fromlist=["now"]).now(),
+            owner_approved_at=timezone.now(),
+            owner_approved_version=1,
             editorial_approved_by=self.editor,
-            editorial_approved_at=__import__("django.utils.timezone", fromlist=["now"]).now(),
+            editorial_approved_at=timezone.now(),
+            editorial_approved_version=1,
             published_at=__import__("django.utils.timezone", fromlist=["now"]).now(),
         )
         response = self.client.get("/api/v1/gallery/stories/")
