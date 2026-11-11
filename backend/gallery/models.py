@@ -106,6 +106,7 @@ class GalleryStory(models.Model):
             now = timezone.now()
             has_active_permission = self.media.permission_grants.filter(
                 purpose=GalleryMediaPermissionGrant.Purpose.GALLERY_PROMOTION,
+                review_status=GalleryMediaPermissionGrant.ReviewStatus.APPROVED,
                 revoked_at__isnull=True,
             ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now)).exists()
             if not has_active_permission:
