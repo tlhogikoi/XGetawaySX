@@ -4,6 +4,7 @@ from .models import GalleryAuditEvent, GalleryMedia, GalleryStory, GalleryStoryR
 
 
 class PublicGalleryStorySerializer(serializers.ModelSerializer):
+    title = serializers.CharField(source="media.title", read_only=True)
     image = serializers.URLField(source="media.image", read_only=True)
     alt_text = serializers.CharField(source="media.alt_text", read_only=True)
     partner_name = serializers.CharField(source="media.partner.name", read_only=True)
@@ -24,7 +25,7 @@ class PublicGalleryStorySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = GalleryStory
-        fields = ("id", "summary", "published_at", "image", "alt_text", "partner_name", "partner_slug", "partner_city", "owner_original_history")
+        fields = ("id", "title", "summary", "published_at", "image", "alt_text", "partner_name", "partner_slug", "partner_city", "owner_original_history")
         read_only_fields = fields
 
 
