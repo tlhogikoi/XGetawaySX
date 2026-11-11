@@ -24,9 +24,6 @@ class PublicGalleryStoriesView(generics.ListAPIView):
             status=GalleryStory.Status.PUBLISHED,
             media__status=GalleryMedia.Status.APPROVED,
             media__partner__gallery_status=Partner.ApprovalStatus.APPROVED,
-            media__rights_confirmed=True,
-            media__promotional_permission=True,
-            media__permission_granted_at__isnull=False,
             media__permission_grants__purpose=GalleryMediaPermissionGrant.Purpose.GALLERY_PROMOTION,
             media__permission_grants__revoked_at__isnull=True,
             owner_approved_version=F("current_version"),
@@ -103,8 +100,6 @@ class GalleryMediaEditorialApprovalView(APIView):
         if not request.user.is_staff:
             raise PermissionDenied("Editorial approval is restricted to authorised staff.")
         media = generics.get_object_or_404(GalleryMedia.objects.select_for_update(), pk=pk)
-        if not (media.rights_confirmed and media.promotional_permission and media.permission_granted_at):
-            raise ValidationError("Confirmed media rights and dated promotional permission are required.")
         if not has_active_gallery_media_permission(media):
             raise ValidationError("An active, evidence-backed Gallery media permission grant is required.")
         if media.partner.gallery_status != Partner.ApprovalStatus.APPROVED:
@@ -137,8 +132,6 @@ class GalleryStoryEditorialApprovalView(APIView):
             raise ValidationError("Media must be editorially approved first.")
         if story.media.partner.gallery_status != Partner.ApprovalStatus.APPROVED:
             raise ValidationError("Partner must be approved for Gallery advertising.")
-        if not (story.media.rights_confirmed and story.media.promotional_permission and story.media.permission_granted_at):
-            raise ValidationError("Current media rights and dated promotional permission are required.")
         if not has_active_gallery_media_permission(story.media):
             raise ValidationError("An active, evidence-backed Gallery media permission grant is required.")
         story.editorial_approved_by = request.user
