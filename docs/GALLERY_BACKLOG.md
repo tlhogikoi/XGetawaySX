@@ -27,7 +27,7 @@ Inspected on the feature branch `feat/application-foundation`:
 - A public partner list exists, but a partner detail/profile API has not been established.
 - React/Vite/TypeScript includes a branded landing page, `GalleryPartnerGrid` and `GalleryStoryCard`.
 - The landing page currently passes an empty stories array; the public Gallery is not yet connected to the API.
-- The card has a reveal control and summary link, but the complete hover-exit, Escape and stable-ID behaviour needs refinement.
+- The card now uses a stable story ID, reveals on hover/focus/tap, closes on pointer exit or focus leaving the card, and supports Escape. Device and screen-reader QA remains outstanding.
 - No AI provider/service, media object-storage integration, partner story workspace, editorial queue, timeline or Gallery analytics implementation was found.
 - An earlier malformed story-submission statement was corrected on this feature branch. Version-bound approval fields, a separate version-scoped original-history consent record/action, and related tests have since been added. Migration 0003 is present, but backend tests, migration checks and CI have not yet been confirmed passing.
 
