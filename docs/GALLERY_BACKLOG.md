@@ -71,6 +71,14 @@ Inspected on the feature branch `feat/application-foundation`:
 **Dependencies:** G0.1; canonical partner owner identity.
 
 #### G0.3 Formal media-rights records
+**Implementation status:** Initial backend permission-grant model, owner-only grant/revoke endpoints, publication-time active-grant checks, and focused tests have been added on `feat/application-foundation`. Evidence storage integration, legal wording, and test execution remain outstanding.
+
+**Current API proposal implemented on the feature branch**
+- `POST /api/v1/gallery/media/{media_id}/permissions/` — partner owner records the rights holder, permitted channels, private evidence reference and optional expiry.
+- `POST /api/v1/gallery/media/{media_id}/permissions/{grant_id}/revoke/` — partner owner revokes a grant.
+- The public API never returns the private evidence reference.
+- A grant must be active, unrevoked and unexpired at editorial approval and public-query time.
+
 **Tasks**
 - Replace client-trusted rights booleans/timestamps as the sole evidence with a `MediaPermissionGrant` record.
 - Record rights holder, permitted channels/uses, evidence reference, granting actor, granted-at, expiry and revocation.
@@ -251,3 +259,24 @@ Inspected on the feature branch `feat/application-foundation`:
 ## 6. Definition of done
 
 A Gallery release is ready for controlled staging only when the P0 acceptance criteria and relevant automated tests pass, frontend typecheck/build pass, the migration path is verified against PostgreSQL, and a manual owner/editor/visitor accessibility walkthrough is recorded. Production release additionally requires legal review of rights/consent wording, operational editorial roles, backups, monitoring and an approved deployment plan.
+
+
+## 7. Feature-branch implementation update — media permissions
+
+The following work is present on `feat/application-foundation`; it has not been merged or deployed:
+
+- Added `GalleryMediaPermissionGrant` with rights holder, Gallery-promotion purpose, permitted channels, private evidence reference, granting actor/time, optional expiry and revocation actor/time.
+- Added migration `0004_gallery_media_permission_grants.py`.
+- Added owner-only permission grant and revocation endpoints.
+- Editorial media approval and story publication now require an active evidence-backed permission grant in addition to the legacy compatibility fields.
+- Public Gallery queries exclude media with missing, revoked or expired grants.
+- Added focused tests for grant/revoke, owner isolation, expired permissions and revoked permissions.
+- Registered permission records as read-only in Django admin.
+
+**Remaining validation and integration work**
+- Run Django checks, migration drift checks, fresh PostgreSQL migrations and the full backend suite.
+- Confirm the installed Django version supports the migration constraint syntax.
+- Connect evidence references to private object storage with access logging, retention and upload validation; a text reference alone is not proof that evidence exists.
+- Have legal review the rights-holder declaration, permitted channels, expiry and withdrawal wording.
+- Decide whether the legacy rights booleans can be deprecated after existing records are reconciled.
+- Add an editorial UI for reviewing permission evidence without exposing it to public APIs or unauthorised partner users.
