@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from partners.models import Partner
@@ -102,12 +103,13 @@ class GalleryStory(models.Model):
                 raise ValidationError("The associated media must be approved.")
             if self.media.partner.gallery_status != Partner.ApprovalStatus.APPROVED:
                 raise ValidationError("The partner must be approved for Gallery publication.")
-            if not (
-                self.media.rights_confirmed
-                and self.media.promotional_permission
-                and self.media.permission_granted_at
-            ):
-                raise ValidationError("Media rights and dated promotional permission must be confirmed.")
+            now = timezone.now()
+            has_active_permission = self.media.permission_grants.filter(
+                purpose=GalleryMediaPermissionGrant.Purpose.GALLERY_PROMOTION,
+                revoked_at__isnull=True,
+            ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now)).exists()
+            if not has_active_permission:
+                raise ValidationError("An active, evidence-backed Gallery media permission grant is required.")
 
     def __str__(self):
         return f"Story for {self.media.title}"
