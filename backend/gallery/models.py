@@ -103,8 +103,12 @@ class GalleryStory(models.Model):
                 raise ValidationError("The associated media must be approved.")
             if self.media.partner.gallery_status != Partner.ApprovalStatus.APPROVED:
                 raise ValidationError("The partner must be approved for Gallery publication.")
-            if not (self.media.rights_confirmed and self.media.promotional_permission):
-                raise ValidationError("Media rights and promotional permission must be confirmed.")
+            if not (
+                self.media.rights_confirmed
+                and self.media.promotional_permission
+                and self.media.permission_granted_at
+            ):
+                raise ValidationError("Media rights and dated promotional permission must be confirmed.")
 
     def __str__(self):
         return f"Story for {self.media.title}"
