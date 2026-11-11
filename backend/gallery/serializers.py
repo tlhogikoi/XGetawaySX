@@ -12,9 +12,15 @@ class PublicGalleryStorySerializer(serializers.ModelSerializer):
     owner_original_history = serializers.SerializerMethodField()
 
     def get_owner_original_history(self, obj):
-        if obj.original_history_public_permission and not obj.owner_history_private:
-            return obj.owner_original_history
-        return None
+        if obj.owner_history_private or not obj.original_history_public_permission:
+            return None
+        has_current_version_consent = any(
+            consent.story_version == obj.current_version
+            and consent.revoked_at is None
+            and consent.granted_by_id == obj.media.partner.owner_id
+            for consent in obj.history_publication_consents.all()
+        )
+        return obj.owner_original_history if has_current_version_consent else None
 
     class Meta:
         model = GalleryStory
@@ -26,7 +32,7 @@ class GalleryStoryDraftSerializer(serializers.ModelSerializer):
     class Meta:
         model = GalleryStory
         fields = ("id", "media", "owner_original_history", "owner_history_private", "original_history_public_permission", "summary", "ai_assisted", "ai_source_facts", "status")
-        read_only_fields = ("status",)
+        read_only_fields = ("status", "owner_history_private", "original_history_public_permission", "ai_assisted")
 
     def validate_summary(self, value):
         count = len(value.split())
