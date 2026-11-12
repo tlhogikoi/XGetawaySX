@@ -324,6 +324,6 @@ The following code has been committed to `feat/application-foundation`; it has n
 - Added owner/staff-only evidence retrieval with no-store headers and audit logging.
 - Added public image delivery guarded by partner approval, media approval, published story, current owner/editorial version approvals and active rights permission.
 - Corrected the accidental placement of media-rights review fields on the original-history consent model; those fields belong to `GalleryMediaPermissionGrant`.
-- Added migration `0006_private_gallery_file_storage.py` and focused upload/access tests.
+- Added migrations `0006_private_gallery_file_storage.py` and `0007_legacy_image_url_optional.py` and focused upload/access tests.
 
 **Not yet complete:** CI/test execution, PostgreSQL migration validation, malware scanning, image decode/re-encode, durable private object storage, production bucket policy, retention/backup policy, upload quotas and deployment configuration.
