@@ -20,6 +20,7 @@ type DraftStory = {
 
 type ApiError = { detail?: string; [key: string]: unknown };
 type PartnerNotification = { id: number; story_id: number; kind: "story_published" | "story_changes_requested"; title: string; message: string; read_at: string | null; created_at: string };
+type PartnerActivity = { id: number; event_type: string; label: string; media_id: number | null; media_title: string | null; story_id: number | null; story_version: number | null; occurred_at: string };
 type StoryRevision = { id: number; version: number; summary: string; owner_history_private: boolean; ai_assisted: boolean; change_reason: string; changed_by: string | null; created_at: string };
 
 type Props = {
@@ -93,6 +94,7 @@ export default function PartnerGalleryWorkspace({
   const [storyId, setStoryId] = useState<number | null>(null);
   const [drafts, setDrafts] = useState<DraftStory[]>([]);
   const [notifications, setNotifications] = useState<PartnerNotification[]>([]);
+  const [activity, setActivity] = useState<PartnerActivity[]>([]);
   const [editingStoryId, setEditingStoryId] = useState<number | null>(null);
   const [editSummary, setEditSummary] = useState("");
   const [editHistory, setEditHistory] = useState("");
@@ -111,6 +113,12 @@ export default function PartnerGalleryWorkspace({
     setNotifications(extractList(payload));
   }, [accessToken, api]);
 
+  const loadActivity = useCallback(async () => {
+    if (!accessToken) return;
+    const payload = await request<PartnerActivity[] | { results?: PartnerActivity[] }>(api + "/partners/" + partnerId + "/activity/", accessToken);
+    setActivity(extractList(payload));
+  }, [accessToken, api, partnerId]);
+
   const loadDrafts = useCallback(async () => {
     if (!accessToken) return;
     const payload = await request<DraftStory[] | { results?: DraftStory[] }>(`${api}/stories/drafts/`, accessToken);
@@ -126,8 +134,11 @@ export default function PartnerGalleryWorkspace({
     request<PartnerNotification[] | { results?: PartnerNotification[] }>(`${api}/notifications/`, accessToken)
       .then((payload) => { if (active) setNotifications(extractList(payload)); })
       .catch((err: Error) => { if (active) setError(err.message); });
+    request<PartnerActivity[] | { results?: PartnerActivity[] }>(api + "/partners/" + partnerId + "/activity/", accessToken)
+      .then((payload) => { if (active) setActivity(extractList(payload)); })
+      .catch((err: Error) => { if (active) setError(err.message); });
     return () => { active = false; };
-  }, [accessToken, api]);
+  }, [accessToken, api, partnerId]);
 
   async function markNotificationRead(id: number) {
     try {
@@ -252,7 +263,7 @@ export default function PartnerGalleryWorkspace({
 
   async function refresh() {
     setBusy("refresh"); setError("");
-    try { await loadDrafts(); await loadNotifications(); }
+    try { await loadDrafts(); await loadNotifications(); await loadActivity(); }
     catch (err) { setError(err instanceof Error ? err.message : "Could not refresh stories."); }
     finally { setBusy(null); }
   }
@@ -279,6 +290,11 @@ export default function PartnerGalleryWorkspace({
       <section className="pgw-notifications" aria-labelledby="pgw-notifications-title">
         <div className="pgw-drafts-heading"><div><p className="pgw-eyebrow">REVIEW COMMUNICATION</p><h2 id="pgw-notifications-title">Notifications</h2></div><span className="pgw-unread-count">{notifications.filter((item) => !item.read_at).length} unread</span></div>
         {notifications.length === 0 ? <p className="pgw-empty">You are up to date. Publication and review updates will appear here.</p> : <ul className="pgw-notification-list">{notifications.map((item) => <li className={item.read_at ? "is-read" : "is-unread"} key={item.id}><div><strong>{item.title}</strong><p>{item.message}</p><small>Story #{item.story_id} · {new Date(item.created_at).toLocaleString()}</small></div>{!item.read_at && <button type="button" className="pgw-refresh" onClick={() => markNotificationRead(item.id)}>Mark as read</button>}</li>)}</ul>}
+      </section>
+
+      <section className="pgw-activity" aria-labelledby="pgw-activity-title">
+        <div className="pgw-drafts-heading"><div><p className="pgw-eyebrow">SUBMISSION TRACKING</p><h2 id="pgw-activity-title">Activity timeline</h2></div><span className="pgw-unread-count">Latest {activity.length} events</span></div>
+        {activity.length === 0 ? <p className="pgw-empty">Your submission milestones will appear here as your Gallery content moves through review.</p> : <ol className="pgw-activity-list">{activity.map((item) => <li key={item.id}><span className="pgw-activity-marker" aria-hidden="true" /><div><strong>{item.label}</strong><p>{item.media_title ?? `Gallery media #${item.media_id ?? "—"}`}{item.story_id ? ` · Story #${item.story_id}` : ""}{item.story_version ? ` · Version ${item.story_version}` : ""}</p><small>{new Date(item.occurred_at).toLocaleString()}</small></div></li>)}</ol>}
       </section>
 
       <div className="pgw-layout">
