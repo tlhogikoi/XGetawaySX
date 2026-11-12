@@ -1,4 +1,5 @@
 import gallery.storage
+import gallery.models
 import gallery.validators
 from django.db import migrations, models
 
@@ -16,7 +17,7 @@ class Migration(migrations.Migration):
                 blank=True,
                 null=True,
                 storage=gallery.storage.PrivateGalleryStorage(),
-                upload_to="gallery/media/",
+                upload_to=gallery.models.gallery_media_upload_path,
                 validators=[gallery.validators.validate_gallery_image],
             ),
         ),
@@ -27,7 +28,7 @@ class Migration(migrations.Migration):
                 blank=True,
                 null=True,
                 storage=gallery.storage.PrivateGalleryStorage(),
-                upload_to="gallery/evidence/",
+                upload_to=gallery.models.gallery_evidence_upload_path,
                 validators=[gallery.validators.validate_gallery_evidence],
             ),
         ),
