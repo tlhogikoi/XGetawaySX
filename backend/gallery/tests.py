@@ -1,4 +1,5 @@
 from django.test import TestCase
+from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APIClient
 from django.utils import timezone
 
@@ -34,7 +35,8 @@ class GalleryPublicationTests(TestCase):
             media=self.media,
             rights_holder="The Lodge",
             permitted_channels=["website", "social_media"],
-            evidence_reference="private-evidence://permission/approved-lodge",
+            evidence_reference="",
+            evidence_file=SimpleUploadedFile("rights.pdf", b"%PDF-1.4 private permission evidence"),
             granted_by=self.owner,
             granted_at=timezone.now(),
             review_status=GalleryMediaPermissionGrant.ReviewStatus.APPROVED,
@@ -158,8 +160,9 @@ class GalleryPublicationTests(TestCase):
         response = self.client.post(url, {
             "rights_holder": "Photographer",
             "permitted_channels": ["website", "social_media"],
-            "evidence_reference": "private-evidence://contracts/photo-licence-01",
-        }, format="json")
+            "evidence_file": SimpleUploadedFile("licence.pdf", b"%PDF-1.4 signed licence"),
+            "permitted_channels": '["website", "social_media"]',
+        }, format="multipart")
         self.assertEqual(response.status_code, 201)
         permission_id = response.data["id"]
         self.assertNotIn("evidence_reference", response.data)
@@ -178,9 +181,10 @@ class GalleryPublicationTests(TestCase):
             {
                 "rights_holder": "Photographer",
                 "permitted_channels": ["website"],
-                "evidence_reference": "private-evidence://unauthorised",
+                "evidence_file": SimpleUploadedFile("licence.pdf", b"%PDF-1.4 signed licence"),
+                "permitted_channels": '["website"]',
             },
-            format="json",
+            format="multipart",
         )
         self.assertEqual(response.status_code, 403)
 \n\n
@@ -199,7 +203,8 @@ class GalleryPublicationTests(TestCase):
             media=self.media,
             rights_holder="Independent photographer",
             permitted_channels=["website"],
-            evidence_reference="private-evidence://photographer/licence",
+            evidence_reference="",
+            evidence_file=SimpleUploadedFile("photographer.pdf", b"%PDF-1.4 photographer release"),
             granted_by=self.owner,
             granted_at=timezone.now(),
         )
@@ -237,9 +242,10 @@ class GalleryPublicationTests(TestCase):
             {
                 "rights_holder": "Photographer",
                 "permitted_channels": ["website"],
-                "evidence_reference": "private-evidence://new-release",
+                "evidence_file": SimpleUploadedFile("new-release.pdf", b"%PDF-1.4 new signed release"),
+                "permitted_channels": '["website"]',
             },
-            format="json",
+            format="multipart",
         )
         self.assertEqual(response.status_code, 201)
         story.refresh_from_db()
@@ -248,7 +254,59 @@ class GalleryPublicationTests(TestCase):
         self.assertEqual(story.status, GalleryStory.Status.OWNER_REVIEW)
         self.assertIsNone(story.owner_approved_version)
         self.assertIsNone(story.editorial_approved_version)
-\n\n    def test_unapproved_partner_story_is_not_public(self):
+\n\n
+
+    def test_private_evidence_is_not_downloadable_by_another_partner(self):
+        other = User.objects.create_user(email="evidence-other@example.com", password="test-password")
+        self.client.force_authenticate(other)
+        response = self.client.get(
+            f"/api/v1/gallery/media/{self.media.id}/permissions/{self.permission.id}/evidence/"
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_partner_owner_can_download_private_evidence(self):
+        self.client.force_authenticate(self.owner)
+        response = self.client.get(
+            f"/api/v1/gallery/media/{self.media.id}/permissions/{self.permission.id}/evidence/"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Cache-Control"], "private, no-store")
+        self.assertEqual(response["X-Content-Type-Options"], "nosniff")
+
+    def test_public_image_delivery_requires_a_published_story_and_approved_media(self):
+        self.media.image_file = SimpleUploadedFile(
+            "sunrise.png", bytes([137, 80, 78, 71, 13, 10, 26, 10]) + b"private image bytes"
+        )
+        self.media.save()
+        GalleryStory.objects.create(
+            media=self.media,
+            summary=" ".join(["A verified short story about this place and its setting."] * 5),
+            status=GalleryStory.Status.PUBLISHED,
+            owner_approved_by=self.owner,
+            owner_approved_at=timezone.now(),
+            owner_approved_version=1,
+            editorial_approved_by=self.editor,
+            editorial_approved_at=timezone.now(),
+            editorial_approved_version=1,
+            published_at=timezone.now(),
+        )
+        response = self.client.get(f"/api/v1/gallery/media/{self.media.id}/image/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(response["Cache-Control"], "public, max-age=300")
+
+        self.media.status = GalleryMedia.Status.DRAFT
+        self.media.save()
+        blocked = self.client.get(f"/api/v1/gallery/media/{self.media.id}/image/")
+        self.assertEqual(blocked.status_code, 404)
+
+    def test_image_validator_rejects_unsupported_file_content(self):
+        from .validators import validate_gallery_image
+        with self.assertRaises(Exception):
+            validate_gallery_image(SimpleUploadedFile("script.svg", b"<svg></svg>"))
+
+
+    def test_unapproved_partner_story_is_not_public(self):
         self.partner.gallery_status = Partner.ApprovalStatus.PENDING
         self.partner.save()
         story = GalleryStory.objects.create(
