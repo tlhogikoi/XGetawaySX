@@ -366,3 +366,14 @@ The following code has been committed to `feat/application-foundation`; it has n
 
 **Not yet verified:** No frontend build, browser test, backend test run, PostgreSQL migration run, merge or deployment has been completed in this phase.
 
+
+
+## Development 4 — Editorial Review Dashboard
+
+- Added the staff-only `GET /api/v1/gallery/editorial/queue/` endpoint. It returns pending rights-evidence grants, media awaiting approval after rights verification, and stories awaiting editorial review.
+- Queue payloads are intentionally minimised: original owner history and revision snapshots are not returned. AI source facts are included only as the story's explicitly supplied fact list for reviewer verification.
+- Added `frontend/src/components/EditorialGalleryDashboard.tsx` and `editorial-gallery.css`. The dashboard supports private evidence download, approve/reject decisions for rights evidence, media approval, story publication, queue refresh and recent audit activity.
+- Existing backend review actions remain the source of truth and enforce staff access, active evidence, partner approval, and current-version owner approval. Evidence access is separately audited.
+- Integration remains pending: mount the dashboard inside the authenticated staff route and pass the staff access token. The public-facing `App.tsx` is intentionally unchanged.
+- Verification status: backend tests were added for staff-only queue access and exclusion of private owner history. No test suite, TypeScript build, migration, merge or deployment has been run as part of this change.
+- Known workflow limitation: story editorial approval currently supports publication approval only; a formal story return/rejection workflow with partner resubmission semantics remains a separate task. Rights evidence supports both approval and rejection.
