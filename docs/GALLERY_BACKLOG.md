@@ -412,3 +412,20 @@ The following code has been committed to `feat/application-foundation`; it has n
 **Delivery boundary:** these are in-app notifications only. Email, SMS, push notifications, background delivery/retries and notification preferences are not configured or claimed. The existing component remains a reusable workspace awaiting host portal route/auth integration.
 
 **Not yet verified:** Django test suite, migration application/drift, TypeScript typecheck, Vite production build, browser workflow and CI. No merge or deployment has been performed.
+
+
+## Development 7 — Partner activity timeline and submission tracking
+
+**Committed on `feat/application-foundation`; not merged or deployed.**
+
+- Added owner-scoped `GET /api/v1/gallery/partners/{partner_id}/activity/`.
+- The activity feed presents the latest 100 audit milestones with event label, media/story references, safe version number and timestamp.
+- Supported milestones include media submission, rights evidence submission/review/revocation, media approval, story submission, owner approval, edits, editorial change requests and publication.
+- The API deliberately does not serialise arbitrary audit `details`, private owner history, evidence contents, review notes or internal editorial comments.
+- Partner owners can only view their own partner activity; unauthorised partner access is denied. Staff can inspect activity for a partner through the same endpoint.
+- Added activity timeline UI to the partner workspace and refreshes it after upload, rights submission, story creation/editing, owner approval and manual refresh.
+- Added tests for owner access, cross-partner denial, anonymous access and omission of private audit details.
+
+**Delivery boundary:** this is an audit-event timeline, not a separate configurable workflow engine. The feed is limited to the latest 100 events and depends on workflow actions continuing to write audit records. It does not expose staff-only internal notes or promise email/push alerts.
+
+**Not yet verified:** Django tests/checks, migration application/drift, TypeScript typecheck, Vite production build, browser accessibility, CI, merge or deployment.
