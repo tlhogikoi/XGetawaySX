@@ -500,3 +500,54 @@ class GalleryHistoryConsentTests(TestCase):
         self.assertFalse(self.story.original_history_public_permission)
         self.assertIsNone(self.story.owner_approved_version)
         self.assertFalse(self.story.history_publication_consents.filter(story_version=2, revoked_at__isnull=True).exists())
+
+
+class GalleryEditorialQueueTests(TestCase):
+    def setUp(self):
+        self.private_storage_dir = tempfile.mkdtemp(prefix="xgetawaysx-editorial-tests-")
+        self.storage_settings = override_settings(PRIVATE_GALLERY_STORAGE_ROOT=self.private_storage_dir)
+        self.storage_settings.enable()
+        self.client = APIClient()
+        self.owner = User.objects.create_user(email="queue-owner@example.com", password="test-password")
+        self.editor = User.objects.create_superuser(email="queue-editor@example.com", password="test-password")
+        self.partner = Partner.objects.create(
+            owner=self.owner, name="Editorial Queue Lodge",
+            category=Partner.Category.ACCOMMODATION,
+            gallery_status=Partner.ApprovalStatus.APPROVED,
+        )
+        self.media = GalleryMedia.objects.create(
+            partner=self.partner, title="Queue image", image="https://images.example.test/queue.jpg",
+            alt_text="A quiet garden", rights_holder="Photographer",
+            submitted_by=self.owner, status=GalleryMedia.Status.APPROVED,
+        )
+        self.grant = GalleryMediaPermissionGrant.objects.create(
+            media=self.media, rights_holder="Photographer", permitted_channels=["website"],
+            evidence_file=SimpleUploadedFile("queue.pdf", b"%PDF-1.4 rights evidence"),
+            granted_by=self.owner, granted_at=timezone.now(),
+        )
+        self.story = GalleryStory.objects.create(
+            media=self.media, owner_original_history="PRIVATE ORIGINAL HISTORY MUST NEVER APPEAR IN THE QUEUE",
+            summary="A verified description of the lodge and its peaceful garden, based on information supplied by the owner and checked by the editorial team before it is shared with travellers.",
+            status=GalleryStory.Status.EDITORIAL_REVIEW,
+            owner_approved_by=self.owner, owner_approved_at=timezone.now(), owner_approved_version=1,
+        )
+
+    def tearDown(self):
+        self.storage_settings.disable()
+        shutil.rmtree(self.private_storage_dir, ignore_errors=True)
+
+    def test_editorial_queue_is_staff_only(self):
+        self.client.force_authenticate(self.owner)
+        response = self.client.get("/api/v1/gallery/editorial/queue/")
+        self.assertEqual(response.status_code, 403)
+
+    def test_editorial_queue_returns_review_items_without_private_owner_history(self):
+        self.client.force_authenticate(self.editor)
+        response = self.client.get("/api/v1/gallery/editorial/queue/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["rights_reviews"][0]["id"], self.grant.id)
+        self.assertEqual(response.data["story_reviews"][0]["id"], self.story.id)
+        self.assertNotIn("owner_original_history", str(response.data))
+        self.assertNotIn("PRIVATE ORIGINAL HISTORY", str(response.data))
+        self.assertNotIn("ai_source_facts_snapshot", str(response.data))
+
