@@ -577,6 +577,7 @@ class GalleryStoryRevisionWorkflowTests(TestCase):
             status=GalleryStory.Status.EDITORIAL_REVIEW,
             owner_approved_by=self.owner, owner_approved_at=timezone.now(), owner_approved_version=1,
         )
+        GalleryStoryRevision.capture(self.story, self.owner, "Initial owner story submission")
 
     def tearDown(self):
         self.storage_settings.disable()
