@@ -523,6 +523,11 @@ class GalleryMediaPermissionEvidenceView(APIView):
             raise PermissionDenied("Only the partner owner or authorised editorial staff may view rights evidence.")
         if not grant.evidence_file:
             raise Http404
+        GalleryAuditEvent.objects.create(
+            actor=request.user, partner=grant.media.partner, media=grant.media,
+            action="media_permission_evidence_viewed",
+            details={"permission_id": grant.pk},
+        )
         response = FileResponse(grant.evidence_file.open("rb"), content_type="application/octet-stream")
         response["Content-Disposition"] = 'attachment; filename="gallery-rights-evidence"'
         response["X-Content-Type-Options"] = "nosniff"
