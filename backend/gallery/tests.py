@@ -9,7 +9,7 @@ from django.utils import timezone
 
 from accounts.models import User
 from partners.models import Partner
-from .models import GalleryHistoryPublicationConsent, GalleryMedia, GalleryMediaPermissionGrant, GalleryStory, GalleryStoryRevision
+from .models import GalleryAuditEvent, GalleryHistoryPublicationConsent, GalleryMedia, GalleryMediaPermissionGrant, GalleryStory, GalleryStoryRevision
 
 
 class GalleryPublicationTests(TestCase):
@@ -707,3 +707,52 @@ class GalleryPartnerNotificationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.notification.refresh_from_db()
         self.assertIsNotNone(self.notification.read_at)
+
+
+class GalleryPartnerActivityTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.owner = User.objects.create_user(email="activity-owner@example.com", password="test-password")
+        self.other = User.objects.create_user(email="activity-other@example.com", password="test-password")
+        self.partner = Partner.objects.create(
+            owner=self.owner, name="Activity Lodge",
+            category=Partner.Category.ACCOMMODATION,
+            gallery_status=Partner.ApprovalStatus.APPROVED,
+        )
+        self.media = GalleryMedia.objects.create(
+            partner=self.partner, title="Garden view",
+            image="https://images.example.test/activity.jpg",
+            alt_text="A garden view", rights_holder="Owner",
+            submitted_by=self.owner,
+        )
+        self.story = GalleryStory.objects.create(
+            media=self.media,
+            summary="A verified account of the garden and its surroundings, based on facts supplied by the partner and reviewed before publication for visitors.",
+        )
+        self.event = GalleryAuditEvent.objects.create(
+            actor=self.owner, partner=self.partner, media=self.media,
+            story=self.story, action="story_submitted",
+            details={"story_version": 1, "internal_editorial_note": "CONFIDENTIAL REVIEW NOTE"},
+        )
+
+    def test_partner_owner_can_view_safe_submission_activity(self):
+        self.client.force_authenticate(self.owner)
+        response = self.client.get(f"/api/v1/gallery/partners/{self.partner.id}/activity/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        item = response.data[0]
+        self.assertEqual(item["event_type"], "story_submitted")
+        self.assertEqual(item["story_id"], self.story.id)
+        self.assertEqual(item["media_title"], "Garden view")
+        self.assertEqual(item["story_version"], 1)
+        self.assertNotIn("details", item)
+        self.assertNotIn("CONFIDENTIAL REVIEW NOTE", str(response.data))
+
+    def test_another_partner_owner_cannot_view_activity(self):
+        self.client.force_authenticate(self.other)
+        response = self.client.get(f"/api/v1/gallery/partners/{self.partner.id}/activity/")
+        self.assertEqual(response.status_code, 403)
+
+    def test_anonymous_user_cannot_view_partner_activity(self):
+        response = self.client.get(f"/api/v1/gallery/partners/{self.partner.id}/activity/")
+        self.assertEqual(response.status_code, 401)
