@@ -6,6 +6,7 @@ type DraftStory = {
   id: number;
   media: number;
   summary: string;
+  owner_original_history?: string;
   status: string;
   current_version: number;
   owner_approved_version: number | null;
@@ -17,6 +18,7 @@ type DraftStory = {
 };
 
 type ApiError = { detail?: string; [key: string]: unknown };
+type StoryRevision = { id: number; version: number; summary: string; owner_history_private: boolean; ai_assisted: boolean; change_reason: string; changed_by: string | null; created_at: string };
 
 type Props = {
   accessToken: string;
@@ -88,6 +90,11 @@ export default function PartnerGalleryWorkspace({
   const [grantId, setGrantId] = useState<number | null>(null);
   const [storyId, setStoryId] = useState<number | null>(null);
   const [drafts, setDrafts] = useState<DraftStory[]>([]);
+  const [editingStoryId, setEditingStoryId] = useState<number | null>(null);
+  const [editSummary, setEditSummary] = useState("");
+  const [editHistory, setEditHistory] = useState("");
+  const [revisions, setRevisions] = useState<Record<number, StoryRevision[]>>({});
+  const [revisionStoryId, setRevisionStoryId] = useState<number | null>(null);
   const [busy, setBusy] = useState<"media" | "rights" | "story" | "approve" | "refresh" | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -173,6 +180,44 @@ export default function PartnerGalleryWorkspace({
     } finally { setBusy(null); }
   }
 
+
+  function beginEdit(draft: DraftStory) {
+    setEditingStoryId(draft.id);
+    setEditSummary(draft.summary);
+    setEditHistory(draft.owner_original_history ?? "");
+    setError(""); setNotice("");
+  }
+
+  async function saveStoryEdit(id: number) {
+    if (!wordCount(editSummary) || wordCount(editSummary) < 30 || wordCount(editSummary) > 60) {
+      setError("The public summary must contain 30–60 words.");
+      return;
+    }
+    setBusy("refresh"); setError(""); setNotice("");
+    try {
+      const result = await request<DraftStory>(`${api}/stories/${id}/draft/`, accessToken, {
+        method: "PATCH",
+        body: JSON.stringify({ summary: editSummary.trim(), owner_original_history: editHistory.trim() }),
+      });
+      setEditingStoryId(null);
+      setNotice(`Story saved as version ${result.current_version}. Previous owner and editorial approvals have been reset; please review and approve this version again.`);
+      await loadDrafts();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Story revision failed.");
+    } finally { setBusy(null); }
+  }
+
+  async function loadRevisions(id: number) {
+    if (revisionStoryId === id) { setRevisionStoryId(null); return; }
+    setBusy("refresh"); setError("");
+    try {
+      const payload = await request<StoryRevision[] | { results?: StoryRevision[] }>(`${api}/stories/${id}/revisions/`, accessToken);
+      setRevisions((current) => ({ ...current, [id]: extractList(payload) }));
+      setRevisionStoryId(id);
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not load story revisions."); }
+    finally { setBusy(null); }
+  }
+
   async function approveStory(id: number) {
     setBusy("approve"); setError(""); setNotice("");
     try {
@@ -255,7 +300,10 @@ export default function PartnerGalleryWorkspace({
 
       <section className="pgw-drafts">
         <div className="pgw-drafts-heading"><div><p className="pgw-eyebrow">CONTENT STATUS</p><h2>Your submitted stories</h2></div><button className="pgw-refresh" type="button" onClick={refresh} disabled={busy !== null}><RefreshCw size={16} className={busy === "refresh" ? "pgw-spin" : ""} />Refresh</button></div>
-        {drafts.length === 0 ? <p className="pgw-empty">No story submissions yet. Your saved stories will appear here.</p> : <div className="pgw-draft-list">{drafts.map((draft) => <article className="pgw-draft-row" key={draft.id}><div><strong>Story #{draft.id} · Image #{draft.media}</strong><p>{draft.summary || "Summary not added yet"}</p></div><div className="pgw-draft-actions"><span className="pgw-status">{statusLabel[draft.status] ?? draft.status}</span>{draft.status === "owner_review" && draft.media_status === "approved" && draft.partner_gallery_status === "approved" && <button type="button" className="pgw-approve" onClick={() => approveStory(draft.id)} disabled={busy !== null}>{busy === "approve" ? "Saving…" : "Approve this version"}</button>}{draft.status === "owner_review" && (draft.media_status !== "approved" || draft.partner_gallery_status !== "approved") && <small className="pgw-waiting">Waiting for partner and media approval</small>}</div></article>)}</div>}
+        {drafts.length === 0 ? <p className="pgw-empty">No story submissions yet. Your saved stories will appear here.</p> : <div className="pgw-draft-list">{drafts.map((draft) => <article className="pgw-draft-row" key={draft.id}><div><strong>Story #{draft.id} · Image #{draft.media}</strong><p>{draft.summary || "Summary not added yet"}</p>
+        {editingStoryId === draft.id ? <div className="pgw-story-editor"><label>Revised public summary<textarea rows={5} value={editSummary} onChange={(e) => setEditSummary(e.target.value)} maxLength={600}/><small>{wordCount(editSummary)} words · 30–60 required</small></label><label>Owner's original history <span className="pgw-private-label"><ShieldCheck size={12}/> Private by default</span><textarea rows={4} value={editHistory} onChange={(e) => setEditHistory(e.target.value)} /></label><div className="pgw-edit-actions"><button type="button" className="pgw-button pgw-button--secondary" onClick={() => setEditingStoryId(null)}>Cancel</button><button type="button" className="pgw-button" disabled={busy !== null} onClick={() => saveStoryEdit(draft.id)}>{busy === "refresh" ? "Saving…" : "Save new version"}</button></div></div> : <div className="pgw-draft-tools"><button type="button" className="pgw-refresh" onClick={() => beginEdit(draft)} disabled={draft.status === "published" || draft.status === "withdrawn"}>Edit / respond to review</button><button type="button" className="pgw-refresh" onClick={() => loadRevisions(draft.id)} disabled={busy !== null}> {revisionStoryId === draft.id ? "Hide version history" : "Version history"} </button></div>}
+        {revisionStoryId === draft.id && <div className="pgw-version-list"><strong>Recorded versions</strong>{(revisions[draft.id] ?? []).map((revision) => <div key={revision.id}><span>Version {revision.version}</span><small>{new Date(revision.created_at).toLocaleString()} · {revision.change_reason || "Content revision"}</small><p>{revision.summary}</p></div>)}</div>}
+        </div><div className="pgw-draft-actions"><span className="pgw-status">{statusLabel[draft.status] ?? draft.status}</span>{draft.status === "owner_review" && draft.media_status === "approved" && draft.partner_gallery_status === "approved" && <button type="button" className="pgw-approve" onClick={() => approveStory(draft.id)} disabled={busy !== null}>{busy === "approve" ? "Saving…" : "Approve this version"}</button>}{draft.status === "owner_review" && (draft.media_status !== "approved" || draft.partner_gallery_status !== "approved") && <small className="pgw-waiting">Waiting for partner and media approval</small>}</div></article>)}</div>}
       </section>
     </section>
   );
