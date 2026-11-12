@@ -613,7 +613,7 @@ class GalleryStoryRevisionWorkflowTests(TestCase):
         self.story.owner_approved_version = None
         self.story.save()
         self.client.force_authenticate(self.owner)
-        updated_summary = "A revised and carefully verified description of the property, its garden and surrounding landscape, with clearer details supplied directly by the partner owner for visitors."
+        updated_summary = "A revised and carefully verified description of the property, its garden and surrounding landscape, with clearer details supplied directly by the partner owner for visitors seeking an authentic and comfortable local stay."
         response = self.client.patch(
             f"/api/v1/gallery/stories/{self.story.id}/draft/",
             {"summary": updated_summary},
