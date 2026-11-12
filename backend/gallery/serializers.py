@@ -5,12 +5,19 @@ from .models import GalleryAuditEvent, GalleryMedia, GalleryStory, GalleryStoryR
 
 class PublicGalleryStorySerializer(serializers.ModelSerializer):
     title = serializers.CharField(source="media.title", read_only=True)
-    image = serializers.URLField(source="media.image", read_only=True)
+    image = serializers.SerializerMethodField()
     alt_text = serializers.CharField(source="media.alt_text", read_only=True)
     partner_name = serializers.CharField(source="media.partner.name", read_only=True)
     partner_slug = serializers.CharField(source="media.partner.slug", read_only=True)
     partner_city = serializers.CharField(source="media.partner.city", read_only=True)
     owner_original_history = serializers.SerializerMethodField()
+
+    def get_image(self, obj):
+        if obj.media.image_file:
+            request = self.context.get("request")
+            path = f"/api/v1/gallery/media/{obj.media_id}/image/"
+            return request.build_absolute_uri(path) if request else path
+        return obj.media.image
 
     def get_owner_original_history(self, obj):
         if obj.owner_history_private or not obj.original_history_public_permission:
@@ -67,8 +74,13 @@ class GalleryStoryDraftSerializer(serializers.ModelSerializer):
 class GalleryMediaDraftSerializer(serializers.ModelSerializer):
     class Meta:
         model = GalleryMedia
-        fields = ("id", "partner", "title", "image", "alt_text", "caption", "media_credit", "rights_holder", "rights_reference", "rights_confirmed", "promotional_permission", "permission_granted_at", "status")
+        fields = ("id", "partner", "title", "image", "image_file", "alt_text", "caption", "media_credit", "rights_holder", "rights_reference", "rights_confirmed", "promotional_permission", "permission_granted_at", "status")
         read_only_fields = ("status",)
+
+    def validate(self, attrs):
+        if not attrs.get("image_file") and not attrs.get("image"):
+            raise serializers.ValidationError("Upload an image file or provide a legacy externally hosted image URL.")
+        return attrs
 
     def validate_partner(self, value):
         request = self.context.get("request")
