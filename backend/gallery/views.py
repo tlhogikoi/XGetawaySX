@@ -9,7 +9,7 @@ from rest_framework import generics, status
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.views import APIView
 
 from partners.models import Partner
@@ -53,7 +53,7 @@ class PublicGalleryStoriesView(generics.ListAPIView):
 class GalleryMediaCreateView(generics.CreateAPIView):
     serializer_class = GalleryMediaDraftSerializer
     permission_classes = [IsAuthenticated]
-    parser_classes = [MultiPartParser, FormParser]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def perform_create(self, serializer):
         partner = serializer.validated_data["partner"]
