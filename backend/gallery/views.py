@@ -237,6 +237,13 @@ class GalleryStoryEditorialApprovalView(APIView):
             raise ValidationError("Partner must be approved for Gallery advertising.")
         if not has_active_gallery_media_permission(story.media):
             raise ValidationError("An active, evidence-backed Gallery media permission grant is required.")
+        quality_review = story.editorial_quality_reviews.filter(
+            story_version=story.current_version, claims_verified=True,
+            source_facts_checked=True, unsupported_claims_resolved=True,
+            media_context_accurate=True,
+        ).first()
+        if not quality_review:
+            raise ValidationError("Complete the current-version editorial quality review before publication.")
         story.editorial_approved_by = request.user
         story.editorial_approved_at = timezone.now()
         story.editorial_approved_version = story.current_version
