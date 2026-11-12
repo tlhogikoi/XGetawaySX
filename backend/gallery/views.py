@@ -15,6 +15,7 @@ from rest_framework.views import APIView
 from partners.models import Partner
 from .models import GalleryAuditEvent, GalleryHistoryPublicationConsent, GalleryMedia, GalleryMediaPermissionGrant, GalleryPartnerNotification, GalleryStory, GalleryStoryRevision
 from .validators import gallery_image_content_type
+from .story_drafting import draft_story_summary
 from .serializers import GalleryAuditEventSerializer, GalleryMediaDraftSerializer, GalleryPartnerNotificationSerializer, GalleryStoryDraftSerializer, GalleryStoryRevisionSerializer, PublicGalleryStorySerializer
 
 
@@ -789,3 +790,36 @@ class GalleryMediaPermissionEvidenceView(APIView):
         response["X-Content-Type-Options"] = "nosniff"
         response["Cache-Control"] = "private, no-store"
         return response
+
+
+class GalleryStoryAIDraftView(APIView):
+    """Generate an owner-review draft; AI cannot approve or publish."""
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        story = generics.get_object_or_404(
+            GalleryStory.objects.select_for_update().select_related("media__partner"), pk=pk
+        )
+        if story.media.partner.owner_id != request.user.id:
+            raise PermissionDenied("Only the partner owner may request an AI draft.")
+        if story.status not in (GalleryStory.Status.DRAFT, GalleryStory.Status.OWNER_REVIEW):
+            raise ValidationError("AI drafting is only available before owner approval.")
+        summary = draft_story_summary(story)
+        story.summary = summary
+        story.ai_assisted = True
+        story.status = GalleryStory.Status.OWNER_REVIEW
+        story.save(update_fields=("summary", "ai_assisted", "status", "updated_at"))
+        revision = GalleryStoryRevision.capture(story, request.user, "AI-assisted draft; owner review required")
+        GalleryAuditEvent.objects.create(
+            actor=request.user, partner=story.media.partner, media=story.media,
+            story=story, action="ai_draft_created",
+            details={"story_version": revision.version},
+        )
+        return Response({
+            "summary": summary,
+            "story_version": revision.version,
+            "status": story.status,
+            "owner_approval_required": True,
+            "editorial_approval_required": True,
+        }, status=status.HTTP_200_OK)
