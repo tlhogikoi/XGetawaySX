@@ -231,7 +231,7 @@ class GalleryStoryRevisionListView(generics.ListAPIView):
     serializer_class = GalleryStoryRevisionSerializer
 
     def get_queryset(self):
-        queryset = GalleryStoryRevision.objects.select_related("story", "changed_by", "story__media", "story__media__partner")
+        queryset = GalleryStoryRevision.objects.select_related("story", "changed_by", "story__media", "story__media__partner").filter(story_id=self.kwargs["pk"])
         if self.request.user.is_staff:
             return queryset
         return queryset.filter(story__media__partner__owner=self.request.user)
