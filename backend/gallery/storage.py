@@ -15,5 +15,9 @@ class PrivateGalleryStorage(FileSystemStorage):
             directory_permissions_mode=0o750,
         )
 
+    @property
+    def location(self):
+        return str(Path(settings.PRIVATE_GALLERY_STORAGE_ROOT))
+
     def url(self, name):
         raise ValueError("Private Gallery files do not have public storage URLs.")
