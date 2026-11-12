@@ -159,7 +159,6 @@ class GalleryPublicationTests(TestCase):
         url = f"/api/v1/gallery/media/{self.media.id}/permissions/"
         response = self.client.post(url, {
             "rights_holder": "Photographer",
-            "permitted_channels": ["website", "social_media"],
             "evidence_file": SimpleUploadedFile("licence.pdf", b"%PDF-1.4 signed licence"),
             "permitted_channels": '["website", "social_media"]',
         }, format="multipart")
@@ -180,7 +179,6 @@ class GalleryPublicationTests(TestCase):
             f"/api/v1/gallery/media/{self.media.id}/permissions/",
             {
                 "rights_holder": "Photographer",
-                "permitted_channels": ["website"],
                 "evidence_file": SimpleUploadedFile("licence.pdf", b"%PDF-1.4 signed licence"),
                 "permitted_channels": '["website"]',
             },
@@ -241,7 +239,6 @@ class GalleryPublicationTests(TestCase):
             f"/api/v1/gallery/media/{self.media.id}/permissions/",
             {
                 "rights_holder": "Photographer",
-                "permitted_channels": ["website"],
                 "evidence_file": SimpleUploadedFile("new-release.pdf", b"%PDF-1.4 new signed release"),
                 "permitted_channels": '["website"]',
             },
