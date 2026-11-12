@@ -264,6 +264,28 @@ class GalleryPublicationTests(TestCase):
         self.assertIsNone(story.editorial_approved_version)
 \n\n
 
+
+    def test_partner_image_upload_uses_private_storage_and_returns_no_file_url(self):
+        valid_png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC")
+        self.client.force_authenticate(self.owner)
+        response = self.client.post(
+            "/api/v1/gallery/media/create/",
+            {
+                "partner": self.partner.id,
+                "title": "Uploaded sunrise",
+                "alt_text": "Sunrise over the lodge",
+                "rights_holder": "The Lodge",
+                "image_file": SimpleUploadedFile("sunrise.png", valid_png, content_type="image/png"),
+            },
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertNotIn("image_file", response.data)
+        media = GalleryMedia.objects.get(pk=response.data["id"])
+        self.assertTrue(media.image_file.name.startswith("gallery/media/"))
+        with self.assertRaises(ValueError):
+            media.image_file.url
+
     def test_private_evidence_is_not_downloadable_by_another_partner(self):
         other = User.objects.create_user(email="evidence-other@example.com", password="test-password")
         self.client.force_authenticate(other)
