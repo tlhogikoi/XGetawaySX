@@ -55,6 +55,19 @@ class GalleryPublicationTests(TestCase):
         self.storage_settings.disable()
         shutil.rmtree(self.private_storage_dir, ignore_errors=True)
 
+
+    def test_partner_draft_list_exposes_publication_gate_status(self):
+        GalleryStory.objects.create(
+            media=self.media,
+            summary=" ".join(["A verified short story about this place and its setting."] * 5),
+            status=GalleryStory.Status.OWNER_REVIEW,
+        )
+        self.client.force_authenticate(self.owner)
+        response = self.client.get("/api/v1/gallery/stories/drafts/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data[0]["media_status"], GalleryMedia.Status.APPROVED)
+        self.assertEqual(response.data[0]["partner_gallery_status"], Partner.ApprovalStatus.APPROVED)
+
     def test_private_original_history_is_not_public(self):
         story = GalleryStory.objects.create(
             media=self.media,
