@@ -551,3 +551,79 @@ class GalleryEditorialQueueTests(TestCase):
         self.assertNotIn("PRIVATE ORIGINAL HISTORY", str(response.data))
         self.assertNotIn("ai_source_facts_snapshot", str(response.data))
 
+
+
+class GalleryStoryRevisionWorkflowTests(TestCase):
+    def setUp(self):
+        self.private_storage_dir = tempfile.mkdtemp(prefix="xgetawaysx-story-revisions-")
+        self.storage_settings = override_settings(PRIVATE_GALLERY_STORAGE_ROOT=self.private_storage_dir)
+        self.storage_settings.enable()
+        self.client = APIClient()
+        self.owner = User.objects.create_user(email="revision-owner@example.com", password="test-password")
+        self.editor = User.objects.create_superuser(email="revision-editor@example.com", password="test-password")
+        self.partner = Partner.objects.create(
+            owner=self.owner, name="Revision Workflow Lodge",
+            category=Partner.Category.ACCOMMODATION,
+            gallery_status=Partner.ApprovalStatus.APPROVED,
+        )
+        self.media = GalleryMedia.objects.create(
+            partner=self.partner, title="Revision image", image="https://images.example.test/revision.jpg",
+            alt_text="A garden", rights_holder="Photographer",
+            submitted_by=self.owner, status=GalleryMedia.Status.APPROVED,
+        )
+        self.story = GalleryStory.objects.create(
+            media=self.media,
+            summary="A carefully verified description of the property, its garden and the surrounding landscape for visitors planning a considered stay.",
+            status=GalleryStory.Status.EDITORIAL_REVIEW,
+            owner_approved_by=self.owner, owner_approved_at=timezone.now(), owner_approved_version=1,
+        )
+
+    def tearDown(self):
+        self.storage_settings.disable()
+        shutil.rmtree(self.private_storage_dir, ignore_errors=True)
+
+    def test_editorial_staff_can_request_changes_with_reason_and_clear_approvals(self):
+        self.client.force_authenticate(self.editor)
+        response = self.client.post(
+            f"/api/v1/gallery/stories/{self.story.id}/request-changes/",
+            {"reason": "Please verify the stated property history and clarify the experience described."},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.story.refresh_from_db()
+        self.assertEqual(self.story.status, GalleryStory.Status.REJECTED)
+        self.assertIsNone(self.story.owner_approved_version)
+        self.assertIsNone(self.story.editorial_approved_version)
+        event = self.story.audit_events.get(action="story_changes_requested")
+        self.assertIn("verify the stated property history", event.details["reason"])
+
+    def test_partner_cannot_request_editorial_changes(self):
+        self.client.force_authenticate(self.owner)
+        response = self.client.post(
+            f"/api/v1/gallery/stories/{self.story.id}/request-changes/",
+            {"reason": "Please change the story wording."},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_rejected_story_can_be_revised_and_requires_fresh_owner_approval(self):
+        self.story.status = GalleryStory.Status.REJECTED
+        self.story.owner_approved_by = None
+        self.story.owner_approved_at = None
+        self.story.owner_approved_version = None
+        self.story.save()
+        self.client.force_authenticate(self.owner)
+        updated_summary = "A revised and carefully verified description of the property, its garden and surrounding landscape, with clearer details supplied directly by the partner owner for visitors."
+        response = self.client.patch(
+            f"/api/v1/gallery/stories/{self.story.id}/draft/",
+            {"summary": updated_summary},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.story.refresh_from_db()
+        self.assertEqual(self.story.status, GalleryStory.Status.OWNER_REVIEW)
+        self.assertEqual(self.story.current_version, 2)
+        self.assertIsNone(self.story.owner_approved_version)
+        self.assertIsNone(self.story.editorial_approved_version)
+        self.assertTrue(self.story.revisions.filter(version=2).exists())
+
