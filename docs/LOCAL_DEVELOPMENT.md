@@ -45,5 +45,6 @@ npm run build
 - Partner listing and initial Gallery submission/review APIs are present on the `feat/application-foundation` branch.
 - Gallery work remains in progress: version-bound approvals, separate original-history consent, formal media permission grants and editorial evidence review have been added on the feature branch; automated validation and PostgreSQL migration checks still need to be run.
 - The frontend is a branded shell with an initial accessible Gallery story-card component; it is not yet connected to live Gallery API data.
-- Private evidence object storage/upload, partner story workspace, editorial UI, AI drafting, timelines, analytics, payments and deployment are not complete.
+- Initial private filesystem uploads for Gallery images and rights evidence are present on the feature branch. Set `PRIVATE_GALLERY_STORAGE_ROOT` to a writable directory outside all static/web roots before local use. Production S3-compatible object storage, malware scanning, image re-encoding and retention/backup controls are not complete.
+- Partner story workspace, editorial UI, AI drafting, timelines, analytics, payments and deployment are not complete.
 - The feature branch is not the production/default branch. Do not treat the Gallery as live or public until its tests, review and deployment gates pass.
