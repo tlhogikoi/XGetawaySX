@@ -38,6 +38,9 @@ class PublicGalleryStorySerializer(serializers.ModelSerializer):
 
 
 class GalleryStoryDraftSerializer(serializers.ModelSerializer):
+    media_status = serializers.CharField(source="media.status", read_only=True)
+    partner_gallery_status = serializers.CharField(source="media.partner.gallery_status", read_only=True)
+
     class Meta:
         model = GalleryStory
         fields = (
@@ -45,7 +48,7 @@ class GalleryStoryDraftSerializer(serializers.ModelSerializer):
             "original_history_public_permission", "summary", "ai_assisted",
             "ai_source_facts", "status", "current_version",
             "owner_approved_version", "editorial_approved_version",
-            "owner_approved_at", "editorial_approved_at",
+            "owner_approved_at", "editorial_approved_at", "media_status", "partner_gallery_status",
         )
         read_only_fields = (
             "status", "owner_history_private", "original_history_public_permission",
