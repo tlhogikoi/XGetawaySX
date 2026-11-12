@@ -444,3 +444,18 @@ The following code has been committed to `feat/application-foundation`; it has n
 - Added migration `0009_gallery_story_editorial_quality_review.py`.
 
 **Not yet verified:** Django tests/checks, migration application/drift, PostgreSQL upgrade path, frontend typecheck/build, browser workflow, CI, merge or deployment.
+
+## Development 9 — Public partner profiles and Gallery integration
+
+**Implemented on `feat/application-foundation`; not merged or deployed.**
+
+- Added public partner detail API `GET /api/v1/partners/{slug}/`. It returns only Gallery-approved partner profile fields and that partner's stories from the existing fully gated public Gallery queryset.
+- Partner profiles hidden from Gallery or in pending/suspended/rejected approval states return 404. Owner IDs, enquiry/booking approval states and internal account fields are not serialised.
+- Connected the homepage Gallery grid to `GET /api/v1/gallery/stories/`, with loading, empty and error states. Each image retains its individual 30–60-word story reveal and links to the associated partner profile.
+- Added a public partner profile page with approved description, category, location, optional website link and its published story collection.
+- The profile story collection uses the same public story serializer and does not include private original history unless the existing separate, current-version consent gate allows it.
+- Added partner profile API tests for approved visibility, hidden unapproved profiles and omission of internal fields.
+
+**Integration boundary:** direct `/partners/{slug}/` navigation requires the production host to serve the React app fallback for this route. Configure the backend API origin through `VITE_API_BASE_URL` when frontend and API are hosted on different origins.
+
+**Not yet verified:** Django tests/checks, frontend typecheck/build, browser navigation, CORS and production route fallback, CI, merge or deployment.
