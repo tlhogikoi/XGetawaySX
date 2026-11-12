@@ -19,6 +19,7 @@ type DraftStory = {
 };
 
 type ApiError = { detail?: string; [key: string]: unknown };
+type PartnerNotification = { id: number; story_id: number; kind: "story_published" | "story_changes_requested"; title: string; message: string; read_at: string | null; created_at: string };
 type StoryRevision = { id: number; version: number; summary: string; owner_history_private: boolean; ai_assisted: boolean; change_reason: string; changed_by: string | null; created_at: string };
 
 type Props = {
@@ -91,6 +92,7 @@ export default function PartnerGalleryWorkspace({
   const [grantId, setGrantId] = useState<number | null>(null);
   const [storyId, setStoryId] = useState<number | null>(null);
   const [drafts, setDrafts] = useState<DraftStory[]>([]);
+  const [notifications, setNotifications] = useState<PartnerNotification[]>([]);
   const [editingStoryId, setEditingStoryId] = useState<number | null>(null);
   const [editSummary, setEditSummary] = useState("");
   const [editHistory, setEditHistory] = useState("");
@@ -102,6 +104,12 @@ export default function PartnerGalleryWorkspace({
 
   const count = useMemo(() => wordCount(summary), [summary]);
   const summaryValid = count >= 30 && count <= 60;
+
+  const loadNotifications = useCallback(async () => {
+    if (!accessToken) return;
+    const payload = await request<PartnerNotification[] | { results?: PartnerNotification[] }>(`${api}/notifications/`, accessToken);
+    setNotifications(extractList(payload));
+  }, [accessToken, api]);
 
   const loadDrafts = useCallback(async () => {
     if (!accessToken) return;
@@ -117,6 +125,15 @@ export default function PartnerGalleryWorkspace({
       .catch((err: Error) => { if (active) setError(err.message); });
     return () => { active = false; };
   }, [accessToken, api]);
+
+  async function markNotificationRead(id: number) {
+    try {
+      const result = await request<{ id: number; read_at: string }>(`${api}/notifications/${id}/read/`, accessToken, { method: "POST", body: "{}" });
+      setNotifications((current) => current.map((item) => item.id === id ? { ...item, read_at: result.read_at } : item));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update notification.");
+    }
+  }
 
   async function submitMedia() {
     if (!imageFile || !title.trim() || !altText.trim() || !rightsHolder.trim()) {
@@ -175,7 +192,7 @@ export default function PartnerGalleryWorkspace({
       });
       setStoryId(result.id);
       setNotice("Story draft created. Its original history remains private. Owner and editorial approval are separate publication steps.");
-      try { await loadDrafts(); } catch { /* Keep the successful creation notice; the list can be refreshed separately. */ }
+      try { await loadDrafts(); await loadNotifications(); } catch { /* Keep the successful action notice; refresh can be retried separately. */ }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Story draft creation failed.");
     } finally { setBusy(null); }
@@ -224,7 +241,7 @@ export default function PartnerGalleryWorkspace({
     try {
       await request<{ status: string }>(`${api}/stories/${id}/owner-approve/`, accessToken, { method: "POST", body: "{}" });
       setNotice("Your approval has been recorded for this story version. Editorial approval is still required.");
-      try { await loadDrafts(); } catch { /* Approval succeeded; refresh can be retried without repeating the action. */ }
+      try { await loadDrafts(); await loadNotifications(); } catch { /* Approval succeeded; refresh can be retried without repeating the action. */ }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Owner approval failed.");
     } finally { setBusy(null); }
@@ -232,7 +249,7 @@ export default function PartnerGalleryWorkspace({
 
   async function refresh() {
     setBusy("refresh"); setError("");
-    try { await loadDrafts(); }
+    try { await loadDrafts(); await loadNotifications(); }
     catch (err) { setError(err instanceof Error ? err.message : "Could not refresh stories."); }
     finally { setBusy(null); }
   }
@@ -255,6 +272,13 @@ export default function PartnerGalleryWorkspace({
       {galleryApprovalStatus !== "approved" && <div className="pgw-notice"><AlertCircle size={20} /><p>Your partner profile is not yet approved for Gallery publication. You can prepare content, but it will not appear publicly until the partner approval is granted.</p></div>}
       {error && <div className="pgw-feedback pgw-feedback--error" role="alert"><AlertCircle size={18} />{error}</div>}
       {notice && <div className="pgw-feedback pgw-feedback--success" role="status"><CheckCircle2 size={18} />{notice}</div>}
+
+      {notice && <div className="pgw-feedback pgw-feedback--success" role="status"><CheckCircle2 size={18} />{notice}</div>}
+
+      <section className="pgw-notifications" aria-labelledby="pgw-notifications-title">
+        <div className="pgw-drafts-heading"><div><p className="pgw-eyebrow">REVIEW COMMUNICATION</p><h2 id="pgw-notifications-title">Notifications</h2></div><span className="pgw-unread-count">{notifications.filter((item) => !item.read_at).length} unread</span></div>
+        {notifications.length === 0 ? <p className="pgw-empty">You are up to date. Publication and review updates will appear here.</p> : <ul className="pgw-notification-list">{notifications.map((item) => <li className={item.read_at ? "is-read" : "is-unread"} key={item.id}><div><strong>{item.title}</strong><p>{item.message}</p><small>Story #{item.story_id} · {new Date(item.created_at).toLocaleString()}</small></div>{!item.read_at && <button type="button" className="pgw-refresh" onClick={() => markNotificationRead(item.id)}>Mark as read</button>}</li>)}</ul>}
+      </section>
 
       <div className="pgw-layout">
         <div className="pgw-form-column">
