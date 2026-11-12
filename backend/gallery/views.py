@@ -382,6 +382,39 @@ class GalleryStoryRequestChangesView(APIView):
         }, status=status.HTTP_200_OK)
 
 
+class GalleryStoryEditorialQualityReviewView(APIView):
+    """Staff-only quality review for the current story version."""
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        if not request.user.is_staff:
+            raise PermissionDenied("Editorial quality review is restricted to authorised staff.")
+        story = generics.get_object_or_404(GalleryStory.objects.select_for_update(), pk=pk)
+        if story.status != GalleryStory.Status.EDITORIAL_REVIEW:
+            raise ValidationError("Only stories awaiting editorial review can receive a quality review.")
+        try:
+            version = int(request.data.get("story_version"))
+        except (TypeError, ValueError):
+            raise ValidationError({"story_version": "A valid story version is required."})
+        if version != story.current_version:
+            raise ValidationError({"story_version": "The story changed. Refresh and review the current version."})
+        fields = ("claims_verified", "source_facts_checked", "unsupported_claims_resolved", "media_context_accurate")
+        checks = {}
+        for field in fields:
+            value = request.data.get(field)
+            if not isinstance(value, bool):
+                raise ValidationError({field: "Provide an explicit true or false decision."})
+            checks[field] = value
+        notes = str(request.data.get("reviewer_notes", "")).strip()
+        if len(notes) < 10:
+            raise ValidationError({"reviewer_notes": "Record at least 10 characters of review notes."})
+        if not all(checks.values()):
+            raise ValidationError("All quality checks must pass before a review can be recorded.")
+        review = GalleryStoryEditorialReview.objects.create(story=story, story_version=story.current_version, reviewer=request.user, reviewer_notes=notes, **checks)
+        GalleryAuditEvent.objects.create(actor=request.user, partner=story.media.partner, media=story.media, story=story, action="story_quality_reviewed", details={"story_version": story.current_version, "quality_review_id": review.pk})
+        return Response({"id": review.pk, "story_id": story.pk, "story_version": review.story_version}, status=status.HTTP_201_CREATED)
+
 class GalleryEditorialQueueView(APIView):
     """Staff-only, privacy-minimised work queue for Gallery publication reviews."""
     permission_classes = [IsAuthenticated]
@@ -444,6 +477,7 @@ class GalleryEditorialQueueView(APIView):
                 "ai_assisted": story.ai_assisted,
                 "ai_source_facts": story.ai_source_facts,
                 "revision_count": story.revisions.count(),
+                "quality_review_version": story.editorial_quality_reviews.filter(story_version=story.current_version, claims_verified=True, source_facts_checked=True, unsupported_claims_resolved=True, media_context_accurate=True).values_list("story_version", flat=True).first(),
             } for story in stories],
         })
 
