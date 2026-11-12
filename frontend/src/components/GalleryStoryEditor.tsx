@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { CheckCircle2, FileText, LockKeyhole, Sparkles } from "lucide-react";
 import "./gallery.css";
 
@@ -26,7 +26,8 @@ const statusLabel: Record<string, string> = {
 };
 
 export default function GalleryStoryEditor() {
-  const [token, setToken] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [drafts, setDrafts] = useState<StoryDraft[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [history, setHistory] = useState("");
@@ -45,7 +46,7 @@ export default function GalleryStoryEditor() {
     const response = await fetch(`${API_BASE}${path}`, {
       method,
       headers: {
-        Authorization: `Bearer ${token.trim()}`,
+        Authorization: `Basic ${btoa(`${email.trim()}:${password}`)}`,
         ...(body instanceof FormData ? {} : { "Content-Type": "application/json" }),
       },
       body: body instanceof FormData ? body : body === undefined ? undefined : JSON.stringify(body),
@@ -130,8 +131,6 @@ export default function GalleryStoryEditor() {
     finally { setBusy(false); }
   }
 
-  useEffect(() => { /* Credentials are intentionally session-only; connect after entering a short-lived access token. */ }, []);
-
   return <main className="gallery-editor-shell">
     <header className="gallery-editor-heading">
       <p className="eyebrow">XGETAWAYSX PARTNER WORKSPACE</p>
@@ -139,10 +138,12 @@ export default function GalleryStoryEditor() {
       <p>Share the story behind your place or experience. Your original history and source notes stay private unless you separately authorise publication.</p>
     </header>
     <section className="gallery-editor-access">
-      <label htmlFor="gallery-access-token">Partner access token</label>
-      <input id="gallery-access-token" type="password" autoComplete="off" value={token} onChange={event => setToken(event.target.value)} placeholder="Paste your access token for this session" />
-      <button type="button" disabled={!token.trim() || busy} onClick={loadDrafts}>{busy ? "Connecting…" : "Load my story drafts"}</button>
-      <small>Token is kept in this page session only and is not saved to the browser.</small>
+      <label htmlFor="gallery-partner-email">Partner account email</label>
+      <input id="gallery-partner-email" type="email" autoComplete="username" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@yourbusiness.co.za" />
+      <label htmlFor="gallery-partner-password">Password</label>
+      <input id="gallery-partner-password" type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} placeholder="Your partner account password" />
+      <button type="button" disabled={!email.trim() || !password || busy} onClick={loadDrafts}>{busy ? "Connecting…" : "Load my story drafts"}</button>
+      <small>Credentials are held in page memory only. This uses the backend’s configured HTTP Basic authentication; use HTTPS outside local development.</small>
     </section>
     {error && <p className="gallery-editor-message is-error" role="alert">{error}</p>}
     {notice && <p className="gallery-editor-message" role="status">{notice}</p>}
