@@ -377,3 +377,21 @@ The following code has been committed to `feat/application-foundation`; it has n
 - Integration remains pending: mount the dashboard inside the authenticated staff route and pass the staff access token. The public-facing `App.tsx` is intentionally unchanged.
 - Verification status: backend tests were added for staff-only queue access and exclusion of private owner history. No test suite, TypeScript build, migration, merge or deployment has been run as part of this change.
 - Known workflow limitation: story editorial approval currently supports publication approval only; a formal story return/rejection workflow with partner resubmission semantics remains a separate task. Rights evidence supports both approval and rejection.
+
+
+## Development 5 — Story editing and editorial revision workflow
+
+**Committed on `feat/application-foundation`; not merged or deployed.**
+
+- Added staff-only `POST /api/v1/gallery/stories/{id}/request-changes/`. Editors must provide a reason (10–1,000 characters); the action is audited with the story version and reason.
+- A returned story moves to the partner's `rejected` / “Changes requested” state. Its previous owner/editorial approvals and publication timestamp are cleared.
+- Updated partner draft editing access so the owner can revise a returned story. A material edit creates a new immutable revision record and increments the story version; the story returns to owner review and requires fresh owner approval and subsequent editorial approval.
+- Added partner workspace controls to edit the public summary and private original history, view safe revision history, and respond to requested changes.
+- Added editorial dashboard controls to request changes with a documented reason or approve/publish the current owner-approved version.
+- Revision history shown to partners contains summary/version metadata only; private original-history snapshots and internal AI source-fact snapshots are not exposed by the revision serializer.
+
+**Automated tests added:** staff-only change requests, required reason/audit details, denial of partner-initiated editorial actions, and partner revision of a returned story with fresh version/approval gates.
+
+**Not yet verified:** Django test suite, TypeScript typecheck, Vite build, browser workflow, PostgreSQL migrations, CI, merge and deployment. No database migration was introduced by this stage.
+
+**Workflow note:** editorial request-changes is available only while a story is awaiting editorial review. Published stories are not editable through the current partner draft endpoint; any post-publication correction/withdrawal process requires a separate controlled workflow.
