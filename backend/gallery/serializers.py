@@ -118,7 +118,7 @@ class GalleryAuditEventSerializer(serializers.ModelSerializer):
 
 
 class GalleryPartnerNotificationSerializer(serializers.ModelSerializer):
-    story_id = serializers.IntegerField(source="story_id", read_only=True)
+    story_id = serializers.IntegerField(read_only=True)
     class Meta:
         model = GalleryPartnerNotification
         fields = ("id", "story_id", "kind", "title", "message", "read_at", "created_at")
