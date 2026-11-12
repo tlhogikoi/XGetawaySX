@@ -123,6 +123,9 @@ export default function PartnerGalleryWorkspace({
     request<DraftStory[] | { results?: DraftStory[] }>(`${api}/stories/drafts/`, accessToken)
       .then((payload) => { if (active) setDrafts(extractList(payload)); })
       .catch((err: Error) => { if (active) setError(err.message); });
+    request<PartnerNotification[] | { results?: PartnerNotification[] }>(`${api}/notifications/`, accessToken)
+      .then((payload) => { if (active) setNotifications(extractList(payload)); })
+      .catch((err: Error) => { if (active) setError(err.message); });
     return () => { active = false; };
   }, [accessToken, api]);
 
@@ -271,8 +274,6 @@ export default function PartnerGalleryWorkspace({
 
       {galleryApprovalStatus !== "approved" && <div className="pgw-notice"><AlertCircle size={20} /><p>Your partner profile is not yet approved for Gallery publication. You can prepare content, but it will not appear publicly until the partner approval is granted.</p></div>}
       {error && <div className="pgw-feedback pgw-feedback--error" role="alert"><AlertCircle size={18} />{error}</div>}
-      {notice && <div className="pgw-feedback pgw-feedback--success" role="status"><CheckCircle2 size={18} />{notice}</div>}
-
       {notice && <div className="pgw-feedback pgw-feedback--success" role="status"><CheckCircle2 size={18} />{notice}</div>}
 
       <section className="pgw-notifications" aria-labelledby="pgw-notifications-title">
