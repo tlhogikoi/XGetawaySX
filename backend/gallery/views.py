@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.http import FileResponse, Http404
 from django.db.models import F, Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -6,6 +7,7 @@ from rest_framework import generics, status
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.views import APIView
 
 from partners.models import Partner
@@ -45,6 +47,7 @@ class PublicGalleryStoriesView(generics.ListAPIView):
 class GalleryMediaCreateView(generics.CreateAPIView):
     serializer_class = GalleryMediaDraftSerializer
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
 
     def perform_create(self, serializer):
         partner = serializer.validated_data["partner"]
@@ -313,6 +316,9 @@ class GalleryMediaPermissionGrantView(APIView):
         if media.partner.owner_id != request.user.id:
             raise PermissionDenied("Only the partner owner may record media publication permission.")
         rights_holder = request.data.get("rights_holder", "")
+        evidence_file = request.FILES.get("evidence_file")
+        if not evidence_file:
+            raise ValidationError({"evidence_file": "Upload the signed rights or promotional permission document."})
         evidence_reference = request.data.get("evidence_reference", "")
         permitted_channels = request.data.get("permitted_channels", [])
         expires_raw = request.data.get("expires_at")
@@ -329,6 +335,7 @@ class GalleryMediaPermissionGrantView(APIView):
             rights_holder=rights_holder,
             permitted_channels=permitted_channels,
             evidence_reference=evidence_reference,
+            evidence_file=evidence_file,
             granted_by=request.user,
             granted_at=timezone.now(),
             expires_at=expires_at,
@@ -433,6 +440,8 @@ class GalleryMediaPermissionReviewView(APIView):
         decision = request.data.get("decision")
         if decision not in ("approve", "reject"):
             raise ValidationError({"decision": "Use 'approve' or 'reject'."})
+        if not grant.evidence_file:
+            raise ValidationError("A private evidence document must be uploaded before review.")
         if grant.revoked_at:
             raise ValidationError("A revoked permission grant cannot be reviewed for publication.")
         if grant.expires_at and grant.expires_at <= timezone.now():
@@ -459,3 +468,54 @@ class GalleryMediaPermissionReviewView(APIView):
             "review_status": grant.review_status,
             "reviewed_at": grant.reviewed_at,
         })
+
+
+class GalleryMediaImageView(APIView):
+    """Serve an uploaded image publicly only after every Gallery publication gate passes."""
+    permission_classes = [AllowAny]
+
+    def get(self, request, pk):
+        media = generics.get_object_or_404(
+            GalleryMedia.objects.select_related("partner").prefetch_related("permission_grants"),
+            pk=pk,
+        )
+        if (
+            media.status != GalleryMedia.Status.APPROVED
+            or media.partner.gallery_status != Partner.ApprovalStatus.APPROVED
+            or not has_active_gallery_media_permission(media)
+        ):
+            raise Http404
+        story = getattr(media, "story", None)
+        if not story or (
+            story.status != GalleryStory.Status.PUBLISHED
+            or story.owner_approved_version != story.current_version
+            or story.editorial_approved_version != story.current_version
+        ):
+            raise Http404
+        if not media.image_file:
+            raise Http404
+        response = FileResponse(media.image_file.open("rb"), content_type="application/octet-stream")
+        response["Content-Disposition"] = 'inline; filename="gallery-image"'
+        response["X-Content-Type-Options"] = "nosniff"
+        response["Cache-Control"] = "public, max-age=300"
+        return response
+
+
+class GalleryMediaPermissionEvidenceView(APIView):
+    """Private evidence is visible only to the owning partner or authorised staff."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk, grant_id):
+        grant = generics.get_object_or_404(
+            GalleryMediaPermissionGrant.objects.select_related("media", "media__partner"),
+            pk=grant_id, media_id=pk,
+        )
+        if not request.user.is_staff and grant.media.partner.owner_id != request.user.id:
+            raise PermissionDenied("Only the partner owner or authorised editorial staff may view rights evidence.")
+        if not grant.evidence_file:
+            raise Http404
+        response = FileResponse(grant.evidence_file.open("rb"), content_type="application/octet-stream")
+        response["Content-Disposition"] = 'attachment; filename="gallery-rights-evidence"'
+        response["X-Content-Type-Options"] = "nosniff"
+        response["Cache-Control"] = "private, no-store"
+        return response
