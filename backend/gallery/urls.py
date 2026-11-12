@@ -17,6 +17,8 @@ from .views import (
     GalleryStoryHistoryConsentView,
     GalleryStoryRevisionListView,
     GalleryAuditEventListView,
+    GalleryPartnerNotificationListView,
+    GalleryPartnerNotificationReadView,
     GalleryEditorialQueueView,
     PublicGalleryStoriesView,
 )
@@ -28,6 +30,8 @@ urlpatterns = [
     path("stories/<int:pk>/history-consent/", GalleryStoryHistoryConsentView.as_view(), name="gallery-story-history-consent"),
     path("stories/<int:pk>/revisions/", GalleryStoryRevisionListView.as_view(), name="gallery-story-revisions"),
     path("audit/", GalleryAuditEventListView.as_view(), name="gallery-audit-events"),
+    path("notifications/", GalleryPartnerNotificationListView.as_view(), name="gallery-partner-notifications"),
+    path("notifications/<int:pk>/read/", GalleryPartnerNotificationReadView.as_view(), name="gallery-partner-notification-read"),
     path("editorial/queue/", GalleryEditorialQueueView.as_view(), name="gallery-editorial-queue"),
     path("stories/create/", GalleryStoryCreateView.as_view(), name="gallery-story-create"),
     path("stories/<int:pk>/owner-approve/", GalleryStoryOwnerApprovalView.as_view(), name="gallery-story-owner-approve"),
