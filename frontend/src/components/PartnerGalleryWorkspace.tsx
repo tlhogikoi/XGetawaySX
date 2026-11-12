@@ -12,6 +12,8 @@ type DraftStory = {
   editorial_approved_version: number | null;
   owner_approved_at: string | null;
   editorial_approved_at: string | null;
+  media_status: string;
+  partner_gallery_status: string;
 };
 
 type ApiError = { detail?: string; [key: string]: unknown };
@@ -253,7 +255,7 @@ export default function PartnerGalleryWorkspace({
 
       <section className="pgw-drafts">
         <div className="pgw-drafts-heading"><div><p className="pgw-eyebrow">CONTENT STATUS</p><h2>Your submitted stories</h2></div><button className="pgw-refresh" type="button" onClick={refresh} disabled={busy !== null}><RefreshCw size={16} className={busy === "refresh" ? "pgw-spin" : ""} />Refresh</button></div>
-        {drafts.length === 0 ? <p className="pgw-empty">No story submissions yet. Your saved stories will appear here.</p> : <div className="pgw-draft-list">{drafts.map((draft) => <article className="pgw-draft-row" key={draft.id}><div><strong>Story #{draft.id} · Image #{draft.media}</strong><p>{draft.summary || "Summary not added yet"}</p></div><div className="pgw-draft-actions"><span className="pgw-status">{statusLabel[draft.status] ?? draft.status}</span>{draft.status === "owner_review" && <button type="button" className="pgw-approve" onClick={() => approveStory(draft.id)} disabled={busy !== null}>{busy === "approve" ? "Saving…" : "Approve this version"}</button>}</div></article>)}</div>}
+        {drafts.length === 0 ? <p className="pgw-empty">No story submissions yet. Your saved stories will appear here.</p> : <div className="pgw-draft-list">{drafts.map((draft) => <article className="pgw-draft-row" key={draft.id}><div><strong>Story #{draft.id} · Image #{draft.media}</strong><p>{draft.summary || "Summary not added yet"}</p></div><div className="pgw-draft-actions"><span className="pgw-status">{statusLabel[draft.status] ?? draft.status}</span>{draft.status === "owner_review" && draft.media_status === "approved" && draft.partner_gallery_status === "approved" && <button type="button" className="pgw-approve" onClick={() => approveStory(draft.id)} disabled={busy !== null}>{busy === "approve" ? "Saving…" : "Approve this version"}</button>}{draft.status === "owner_review" && (draft.media_status !== "approved" || draft.partner_gallery_status !== "approved") && <small className="pgw-waiting">Waiting for partner and media approval</small>}</div></article>)}</div>}
       </section>
     </section>
   );
