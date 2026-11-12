@@ -621,6 +621,11 @@ class GalleryStoryRevisionWorkflowTests(TestCase):
         drafts = self.client.get("/api/v1/gallery/stories/drafts/")
         self.assertEqual(drafts.status_code, 200)
         self.assertIn("verify the stated property history", drafts.data[0]["editorial_feedback"])
+        from .models import GalleryPartnerNotification
+        notice = GalleryPartnerNotification.objects.get(story=self.story)
+        self.assertEqual(notice.recipient, self.owner)
+        self.assertEqual(notice.kind, GalleryPartnerNotification.Kind.STORY_CHANGES_REQUESTED)
+        self.assertIn("verify the stated property history", notice.message)
 
     def test_partner_cannot_request_editorial_changes(self):
         self.client.force_authenticate(self.owner)
