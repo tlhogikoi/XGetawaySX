@@ -71,10 +71,10 @@ Inspected on the feature branch `feat/application-foundation`:
 **Dependencies:** G0.1; canonical partner owner identity.
 
 #### G0.3 Formal media-rights records
-**Implementation status:** Initial backend permission-grant model, owner-only grant/revoke endpoints, publication-time active-grant checks, and focused tests have been added on `feat/application-foundation`. Evidence storage integration, legal wording, and test execution remain outstanding.
+**Implementation status:** Permission-grant model, owner-only grant/revoke endpoints, editorial evidence review, private local file storage, multipart uploads, and gated image/evidence delivery have been added on `feat/application-foundation`. Automated validation, malware scanning, production object storage, legal wording and PostgreSQL checks remain outstanding.
 
 **Current API proposal implemented on the feature branch**
-- `POST /api/v1/gallery/media/{media_id}/permissions/` — partner owner records the rights holder, permitted channels, private evidence reference and optional expiry.
+- `POST /api/v1/gallery/media/{media_id}/permissions/` — partner owner uploads the actual rights evidence document with the rights holder, permitted channels and optional expiry.
 - `POST /api/v1/gallery/media/{media_id}/permissions/{grant_id}/revoke/` — partner owner revokes a grant.
 - `POST /api/v1/gallery/media/{media_id}/permissions/{grant_id}/review/` — authorised editorial staff approve/reject the private evidence.
 - The public API never returns the private evidence reference.
@@ -92,7 +92,37 @@ Inspected on the feature branch `feat/application-foundation`:
 - Public serializers never return evidence references or internal permission notes.
 - A rights withdrawal is audited and removes the media from public Gallery results.
 
-**Dependencies:** partner identity; media storage/evidence retention decision; legal review of permission wording.
+**Dependencies:** partner identity; private media storage and evidence retention; legal review of permission wording.
+
+
+#### G0.3.1 Private media and evidence upload subsystem
+
+**Implementation status:** Initial private filesystem implementation is committed on `feat/application-foundation`; it is suitable for local/staging validation only and is not a production object-storage integration.
+
+**Implemented on the feature branch**
+- Added private `FileField` storage for partner images and rights evidence, using randomised storage names and a storage root outside static/media URL serving.
+- Added upload validation for file size and JPEG, PNG, WebP image signatures; PDF is also accepted for rights evidence.
+- Added multipart media and permission-evidence upload paths.
+- Added an authenticated evidence download endpoint limited to the owning partner or authorised staff, with private/no-store headers and an audit event.
+- Added public image delivery only after partner, media, story, version approvals and active rights checks pass. Uploaded images are not directly exposed through storage URLs.
+- Added tests for private evidence access, image gating, and unsupported image content.
+
+**Remaining tasks**
+- Replace local filesystem storage with a durable private S3-compatible object-storage backend for deployed environments; configure private bucket policy, encryption, lifecycle/retention, backups and access logging.
+- Add malware scanning/quarantine and full image decoding/re-encoding before editorial approval.
+- Add upload quotas, rate limiting, image dimension/pixel limits, and operational cleanup for abandoned uploads.
+- Validate reverse-proxy request limits and ensure the private storage directory is never mounted or aliased by Nginx/static hosting.
+- Confirm whether rights evidence needs a legal retention schedule and support multiple rights holders/releases per image.
+
+**Acceptance criteria**
+- Unapproved files have no public URL and cannot be retrieved anonymously.
+- Evidence can be retrieved only by the owning partner or authorised editorial staff.
+- An uploaded image is publicly retrievable only while every publication gate remains valid; delivery uses no-store caching to avoid stale access after revocation.
+- Unsupported file signatures and over-limit files are rejected.
+- Evidence review cannot be approved without an uploaded evidence file.
+- Production storage is private, durable, encrypted and independently access-logged before launch.
+
+**Dependencies:** G0.3; production hosting/storage decision; malware-scanning service; legal retention policy.
 
 #### G0.4 Partner and editorial access controls
 **Tasks**
@@ -254,7 +284,7 @@ Inspected on the feature branch `feat/application-foundation`:
 2. Do not wire public frontend data until G0.5 response contracts are stable.
 3. Do not enable AI drafting until a provider, privacy controls and source-fact schema are approved.
 4. Do not publish extended owner history until a separate version-bound consent record exists.
-5. Do not launch media upload until storage, file validation, access control and permission evidence retention are agreed.
+5. Do not launch media upload publicly until production private object storage, malware scanning, file validation, access control and permission evidence retention are agreed.
 6. Do not launch booking attribution until the booking system can provide verified completion events.
 
 ## 6. Definition of done
@@ -282,3 +312,18 @@ The following work is present on `feat/application-foundation`; it has not been 
 - Decide whether the legacy rights booleans can be deprecated after existing records are reconciled.
 - Add an editorial UI for reviewing permission evidence without exposing it to public APIs or unauthorised partner users.
 - Confirm whether one permission record can cover all rights holders for a media asset, or whether the data model must support multiple independently required rights holders and releases.
+
+
+## 8. Feature-branch implementation update — private uploads
+
+The following code has been committed to `feat/application-foundation`; it has not been merged or deployed:
+
+- Added `GalleryMedia.image_file` and `GalleryMediaPermissionGrant.evidence_file` using a private filesystem storage backend.
+- Added upload size/signature validators and randomised storage paths.
+- Added multipart upload support for partner media and rights evidence.
+- Added owner/staff-only evidence retrieval with no-store headers and audit logging.
+- Added public image delivery guarded by partner approval, media approval, published story, current owner/editorial version approvals and active rights permission.
+- Corrected the accidental placement of media-rights review fields on the original-history consent model; those fields belong to `GalleryMediaPermissionGrant`.
+- Added migration `0006_private_gallery_file_storage.py` and focused upload/access tests.
+
+**Not yet complete:** CI/test execution, PostgreSQL migration validation, malware scanning, image decode/re-encode, durable private object storage, production bucket policy, retention/backup policy, upload quotas and deployment configuration.
