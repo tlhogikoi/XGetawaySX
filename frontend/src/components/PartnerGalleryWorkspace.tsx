@@ -165,6 +165,7 @@ export default function PartnerGalleryWorkspace({
       const result = await request<{ id: number; status: string }>(`${api}/media/create/`, accessToken, { method: "POST", body });
       setMediaId(result.id);
       setNotice("Image uploaded privately. Next, submit the rights evidence for editorial verification.");
+      await loadActivity();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Image upload failed.");
     } finally { setBusy(null); }
@@ -184,6 +185,7 @@ export default function PartnerGalleryWorkspace({
       const result = await request<{ id: number; review_status: string }>(`${api}/media/${mediaId}/permissions/`, accessToken, { method: "POST", body });
       setGrantId(result.id);
       setNotice("Rights evidence submitted privately. Editorial verification is still required before publication.");
+      await loadActivity();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Rights evidence submission failed.");
     } finally { setBusy(null); }
@@ -206,7 +208,7 @@ export default function PartnerGalleryWorkspace({
       });
       setStoryId(result.id);
       setNotice("Story draft created. Its original history remains private. Owner and editorial approval are separate publication steps.");
-      try { await loadDrafts(); await loadNotifications(); } catch { /* Keep the successful action notice; refresh can be retried separately. */ }
+      try { await loadDrafts(); await loadNotifications(); await loadActivity(); } catch { /* Keep the successful action notice; refresh can be retried separately. */ }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Story draft creation failed.");
     } finally { setBusy(null); }
@@ -234,6 +236,7 @@ export default function PartnerGalleryWorkspace({
       setEditingStoryId(null);
       setNotice(`Story saved as version ${result.current_version}. Previous owner and editorial approvals have been reset; please review and approve this version again.`);
       await loadDrafts();
+      await loadActivity();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Story revision failed.");
     } finally { setBusy(null); }
@@ -255,7 +258,7 @@ export default function PartnerGalleryWorkspace({
     try {
       await request<{ status: string }>(`${api}/stories/${id}/owner-approve/`, accessToken, { method: "POST", body: "{}" });
       setNotice("Your approval has been recorded for this story version. Editorial approval is still required.");
-      try { await loadDrafts(); await loadNotifications(); } catch { /* Approval succeeded; refresh can be retried without repeating the action. */ }
+      try { await loadDrafts(); await loadNotifications(); await loadActivity(); } catch { /* Approval succeeded; refresh can be retried without repeating the action. */ }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Owner approval failed.");
     } finally { setBusy(null); }
@@ -263,7 +266,7 @@ export default function PartnerGalleryWorkspace({
 
   async function refresh() {
     setBusy("refresh"); setError("");
-    try { await loadDrafts(); await loadNotifications(); await loadActivity(); }
+    try { await loadDrafts(); await loadNotifications(); await loadActivity(); await loadActivity(); }
     catch (err) { setError(err instanceof Error ? err.message : "Could not refresh stories."); }
     finally { setBusy(null); }
   }
