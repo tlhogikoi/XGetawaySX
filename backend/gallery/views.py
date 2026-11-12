@@ -239,6 +239,73 @@ class GalleryStoryRevisionListView(generics.ListAPIView):
 
 
 
+
+class GalleryEditorialQueueView(APIView):
+    """Staff-only, privacy-minimised work queue for Gallery publication reviews."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not request.user.is_staff:
+            raise PermissionDenied("The Gallery editorial queue is restricted to authorised staff.")
+
+        now = timezone.now()
+        grants = GalleryMediaPermissionGrant.objects.filter(
+            review_status=GalleryMediaPermissionGrant.ReviewStatus.PENDING,
+            revoked_at__isnull=True,
+            evidence_file__gt="",
+        ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now)).select_related(
+            "media", "media__partner", "granted_by"
+        )
+        media_items = GalleryMedia.objects.filter(
+            status=GalleryMedia.Status.OWNER_REVIEW,
+            permission_grants__purpose=GalleryMediaPermissionGrant.Purpose.GALLERY_PROMOTION,
+            permission_grants__review_status=GalleryMediaPermissionGrant.ReviewStatus.APPROVED,
+            permission_grants__revoked_at__isnull=True,
+        ).filter(
+            Q(permission_grants__expires_at__isnull=True)
+            | Q(permission_grants__expires_at__gt=now)
+        ).select_related("partner").distinct()
+        stories = GalleryStory.objects.filter(
+            status=GalleryStory.Status.EDITORIAL_REVIEW
+        ).select_related("media", "media__partner").prefetch_related("revisions")
+
+        return Response({
+            "rights_reviews": [{
+                "id": grant.pk,
+                "media_id": grant.media_id,
+                "media_title": grant.media.title,
+                "partner_name": grant.media.partner.name,
+                "rights_holder": grant.rights_holder,
+                "permitted_channels": grant.permitted_channels,
+                "granted_at": grant.granted_at,
+                "expires_at": grant.expires_at,
+                "evidence_url": f"/api/v1/gallery/media/{grant.media_id}/permissions/{grant.pk}/evidence/",
+            } for grant in grants],
+            "media_reviews": [{
+                "id": media.pk,
+                "title": media.title,
+                "partner_name": media.partner.name,
+                "alt_text": media.alt_text,
+                "status": media.status,
+            } for media in media_items],
+            "story_reviews": [{
+                "id": story.pk,
+                "media_id": story.media_id,
+                "media_title": story.media.title,
+                "partner_name": story.media.partner.name,
+                "summary": story.summary,
+                "current_version": story.current_version,
+                "owner_approved_version": story.owner_approved_version,
+                "owner_approved_at": story.owner_approved_at,
+                "media_status": story.media.status,
+                "partner_gallery_status": story.media.partner.gallery_status,
+                "ai_assisted": story.ai_assisted,
+                "ai_source_facts": story.ai_source_facts,
+                "revision_count": story.revisions.count(),
+            } for story in stories],
+        })
+
+
 class GalleryAuditEventListView(generics.ListAPIView):
     permission_classes = [IsAuthenticated]
     serializer_class = GalleryAuditEventSerializer
