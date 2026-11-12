@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft, ArrowUpRight, MapPin, Globe2 } from "lucide-react";
-import GalleryPartnerGrid from "./GalleryPartnerGrid";
 import GalleryStoryCard, { type GalleryStoryCardProps } from "./GalleryStoryCard";
 import "./gallery.css";
 
@@ -55,7 +54,7 @@ export default function PublicPartnerProfile({ slug }: { slug: string }) {
     <section className="profile-hero">
       <p className="eyebrow">APPROVED XGETAWAYSX PARTNER</p>
       <h1>{profile.name}</h1>
-      <p className="profile-category">{profile.category.replaceAll("_", " ")}</p>
+      <p className="profile-category">{profile.category.replace(/_/g, " ")}</p>
       {(profile.city || profile.province || profile.country) && <p className="profile-location"><MapPin size={16}/>{[profile.city, profile.province, profile.country].filter(Boolean).join(", ")}</p>}
       {profile.description && <p className="profile-description">{profile.description}</p>}
       {profile.website_url && <a className="profile-website" href={profile.website_url} target="_blank" rel="noreferrer"><Globe2 size={16}/> Visit partner website <ArrowUpRight size={15}/></a>}
