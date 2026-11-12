@@ -11,7 +11,7 @@ const categories = [
 ];
 
 export default function App() {
-  const partnerMatch = window.location.pathname.match(/^\\/partners\\/([^/]+)\\/?$/);
+  const partnerMatch = window.location.pathname.match(/^\/partners\/([^/]+)\/?$/);
   if (partnerMatch) return <PublicPartnerProfile slug={decodeURIComponent(partnerMatch[1])} />;
 
   return (
