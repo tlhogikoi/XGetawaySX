@@ -1,4 +1,5 @@
 import GalleryPartnerGrid from "./components/GalleryPartnerGrid";
+import PublicPartnerProfile from "./components/PublicPartnerProfile";
 import { ArrowRight, Compass, Globe2, Heart, MapPin } from "lucide-react";
 
 const categories = [
@@ -10,6 +11,9 @@ const categories = [
 ];
 
 export default function App() {
+  const partnerMatch = window.location.pathname.match(/^\\/partners\\/([^/]+)\\/?$/);
+  if (partnerMatch) return <PublicPartnerProfile slug={decodeURIComponent(partnerMatch[1])} />;
+
   return (
     <main className="site-shell">
       <header className="topbar">
@@ -42,7 +46,7 @@ export default function App() {
         <div><p className="eyebrow">THE PEOPLE & PLACES BEHIND THE PICTURE</p><h2>Every picture tells a story.</h2><p>Discover the history and character behind our approved partner places and experiences.</p></div>
         <div className="gallery-mark"><Heart size={28} /><span>STORIES THAT<br />TAKE YOU PLACES</span><MapPin size={18} /></div>
       </section>
-      <section className="gallery-live-preview" aria-label="Approved partner gallery"><GalleryPartnerGrid stories={[]} /></section>
+      <section className="gallery-live-preview" aria-label="Approved partner gallery"><GalleryPartnerGrid /></section>
       <footer><span>© {new Date().getFullYear()} XGetawaySX</span><strong>TRAVEL THROUGH US.</strong><span>Discover. Escape. Experience.</span></footer>
     </main>
   );
