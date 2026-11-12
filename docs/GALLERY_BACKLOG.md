@@ -327,3 +327,42 @@ The following code has been committed to `feat/application-foundation`; it has n
 - Added migrations `0006_private_gallery_file_storage.py` and `0007_legacy_image_url_optional.py` and focused upload/access tests.
 
 **Not yet complete:** CI/test execution, PostgreSQL migration validation, malware scanning, image decode/re-encode, durable private object storage, production bucket policy, retention/backup policy, upload quotas and deployment configuration.
+
+## 9. Partner Gallery workspace — implementation update
+
+**Status:** Initial React/TypeScript workspace component and responsive styling are committed to `feat/application-foundation`. It is a reusable authenticated component, not yet mounted as a route or deployed.
+
+**Files**
+- `frontend/src/components/PartnerGalleryWorkspace.tsx`
+- `frontend/src/components/partner-gallery.css`
+
+**Current capabilities**
+- Requires an access token and partner context to be supplied by the host partner portal; it does not create or store credentials.
+- Uploads a partner image through the existing multipart media endpoint.
+- Uploads rights evidence and selected permitted channels through the permission-grant endpoint.
+- Creates one 30–60-word story for the uploaded image.
+- Keeps owner original history private by default and does not expose an in-workspace publication toggle.
+- Lists the authenticated owner's story drafts and exposes owner approval only after partner and media approval are both reported as approved.
+- Displays the required publication checklist and keeps editorial approval as a staff-only backend action.
+
+**API contract additions**
+- The authenticated story draft serializer now returns `media_status` and `partner_gallery_status` so the workspace can accurately reflect the approval gates.
+
+**Integration requirements before mounting**
+- Connect the component to the actual partner authentication/session provider and pass a short-lived bearer access token, partner ID, partner display name and Gallery approval state.
+- Confirm the deployed API base URL and CORS/auth configuration.
+- Add a partner portal route and navigation only after the authentication shell is available.
+- Add frontend unit/component tests and run TypeScript typecheck + Vite production build.
+- Add editorial-side media evidence review and media approval UI; those actions must remain unavailable to partner users.
+- Add story editing/versioning and explicit version-bound original-history consent controls as a separate owner action after legal/product review.
+
+**Acceptance criteria**
+- Unauthenticated users cannot load partner data or submit content.
+- Partner owners can only submit content against their own partner record; backend authorization remains authoritative.
+- Image and evidence uploads use multipart requests; private storage URLs are never exposed.
+- Owner history remains private unless separate explicit consent is recorded for the current story version.
+- Owner approval is enabled only after partner and media approval; publication still requires separate editorial approval.
+- A content edit invalidates previous approvals and requires both approvals again.
+
+**Not yet verified:** No frontend build, browser test, backend test run, PostgreSQL migration run, merge or deployment has been completed in this phase.
+
