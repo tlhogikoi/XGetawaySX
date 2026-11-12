@@ -72,6 +72,8 @@ class GalleryStoryDraftSerializer(serializers.ModelSerializer):
 
 
 class GalleryMediaDraftSerializer(serializers.ModelSerializer):
+    image_file = serializers.FileField(write_only=True, required=False, allow_null=True)
+
     class Meta:
         model = GalleryMedia
         fields = ("id", "partner", "title", "image", "image_file", "alt_text", "caption", "media_credit", "rights_holder", "rights_reference", "rights_confirmed", "promotional_permission", "permission_granted_at", "status")
