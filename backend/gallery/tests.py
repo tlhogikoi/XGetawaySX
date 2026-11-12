@@ -652,3 +652,53 @@ class GalleryStoryRevisionWorkflowTests(TestCase):
         self.assertIsNone(self.story.editorial_approved_version)
         self.assertTrue(self.story.revisions.filter(version=2).exists())
 
+
+
+class GalleryPartnerNotificationTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.owner = User.objects.create_user(email="notification-owner@example.com", password="test-password")
+        self.other = User.objects.create_user(email="notification-other@example.com", password="test-password")
+        self.partner = Partner.objects.create(
+            owner=self.owner, name="Notification Lodge",
+            category=Partner.Category.ACCOMMODATION,
+            gallery_status=Partner.ApprovalStatus.APPROVED,
+        )
+        self.media = GalleryMedia.objects.create(
+            partner=self.partner, title="Notification image",
+            image="https://images.example.test/notification.jpg",
+            alt_text="A lodge garden", rights_holder="Owner", submitted_by=self.owner,
+        )
+        self.story = GalleryStory.objects.create(
+            media=self.media,
+            summary="A verified description of the property and its garden, based on information supplied by the owner and checked by the editorial team before it is shared with visitors.",
+        )
+        from .models import GalleryPartnerNotification
+        self.notification = GalleryPartnerNotification.objects.create(
+            recipient=self.owner, partner=self.partner, story=self.story,
+            kind=GalleryPartnerNotification.Kind.STORY_CHANGES_REQUESTED,
+            title="Your Gallery story needs changes",
+            message="Please clarify the dates in the submitted story.",
+        )
+
+    def test_partner_can_list_only_own_notifications(self):
+        self.client.force_authenticate(self.owner)
+        response = self.client.get("/api/v1/gallery/notifications/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["story_id"], self.story.id)
+
+    def test_other_partner_cannot_read_or_mark_notification(self):
+        self.client.force_authenticate(self.other)
+        response = self.client.get("/api/v1/gallery/notifications/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+        denied = self.client.post(f"/api/v1/gallery/notifications/{self.notification.id}/read/")
+        self.assertEqual(denied.status_code, 404)
+
+    def test_partner_can_mark_notification_as_read(self):
+        self.client.force_authenticate(self.owner)
+        response = self.client.post(f"/api/v1/gallery/notifications/{self.notification.id}/read/")
+        self.assertEqual(response.status_code, 200)
+        self.notification.refresh_from_db()
+        self.assertIsNotNone(self.notification.read_at)
