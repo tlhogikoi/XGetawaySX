@@ -1,5 +1,9 @@
 from django.test import TestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import override_settings
+import base64
+import shutil
+import tempfile
 from rest_framework.test import APIClient
 from django.utils import timezone
 
@@ -10,6 +14,9 @@ from .models import GalleryHistoryPublicationConsent, GalleryMedia, GalleryMedia
 
 class GalleryPublicationTests(TestCase):
     def setUp(self):
+        self.private_storage_dir = tempfile.mkdtemp(prefix="xgetawaysx-gallery-tests-")
+        self.storage_settings = override_settings(PRIVATE_GALLERY_STORAGE_ROOT=self.private_storage_dir)
+        self.storage_settings.enable()
         self.client = APIClient()
         self.owner = User.objects.create_user(email="gallery-owner@example.com", password="test-password")
         self.editor = User.objects.create_superuser(email="gallery-editor@example.com", password="test-password")
@@ -43,6 +50,10 @@ class GalleryPublicationTests(TestCase):
             reviewed_by=self.editor,
             reviewed_at=timezone.now(),
         )
+
+    def tearDown(self):
+        self.storage_settings.disable()
+        shutil.rmtree(self.private_storage_dir, ignore_errors=True)
 
     def test_private_original_history_is_not_public(self):
         story = GalleryStory.objects.create(
@@ -303,6 +314,8 @@ class GalleryPublicationTests(TestCase):
         from django.core.exceptions import ValidationError
         with self.assertRaises(ValidationError):
             validate_gallery_image(SimpleUploadedFile("script.svg", b"<svg></svg>"))
+        valid_png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC")
+        validate_gallery_image(SimpleUploadedFile("pixel.png", valid_png))
 
 
     def test_unapproved_partner_story_is_not_public(self):
