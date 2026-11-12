@@ -5,8 +5,8 @@ MAX_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_EVIDENCE_BYTES = 15 * 1024 * 1024
 
 _IMAGE_SIGNATURES = (
-    (b"\\xff\\xd8\\xff", "image/jpeg"),
-    (b"\\x89PNG\\r\\n\\x1a\\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
     (b"RIFF", "image/webp"),
 )
 _EVIDENCE_SIGNATURES = _IMAGE_SIGNATURES + (
@@ -21,17 +21,12 @@ def _signature(upload, allowed, max_bytes, field_name):
     upload.seek(0)
     header = upload.read(12)
     upload.seek(position)
-    matched = False
     for signature, mime in allowed:
         if header.startswith(signature):
-            if mime == "image/webp":
-                matched = header[8:12] == b"WEBP"
-            else:
-                matched = True
-            if matched:
-                break
-    if not matched:
-        raise ValidationError({field_name: "Unsupported or invalid file content. Use JPEG, PNG, WebP" + (", or PDF." if field_name == "evidence_file" else ".")})
+            if mime == "image/webp" and header[8:12] != b"WEBP":
+                continue
+            return mime
+    raise ValidationError({field_name: "Unsupported or invalid file content. Use JPEG, PNG, WebP" + (", or PDF." if field_name == "evidence_file" else ".")})
 
 
 def validate_gallery_image(upload):
@@ -40,3 +35,16 @@ def validate_gallery_image(upload):
 
 def validate_gallery_evidence(upload):
     _signature(upload, _EVIDENCE_SIGNATURES, MAX_EVIDENCE_BYTES, "evidence_file")
+
+
+def gallery_image_content_type(upload):
+    position = upload.tell()
+    upload.seek(0)
+    header = upload.read(12)
+    upload.seek(position)
+    for signature, mime in _IMAGE_SIGNATURES:
+        if header.startswith(signature):
+            if mime == "image/webp" and header[8:12] != b"WEBP":
+                continue
+            return mime
+    raise ValidationError("Stored Gallery image has an unsupported signature.")
