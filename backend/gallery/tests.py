@@ -596,6 +596,10 @@ class GalleryStoryRevisionWorkflowTests(TestCase):
         self.assertIsNone(self.story.editorial_approved_version)
         event = self.story.audit_events.get(action="story_changes_requested")
         self.assertIn("verify the stated property history", event.details["reason"])
+        self.client.force_authenticate(self.owner)
+        drafts = self.client.get("/api/v1/gallery/stories/drafts/")
+        self.assertEqual(drafts.status_code, 200)
+        self.assertIn("verify the stated property history", drafts.data[0]["editorial_feedback"])
 
     def test_partner_cannot_request_editorial_changes(self):
         self.client.force_authenticate(self.owner)
