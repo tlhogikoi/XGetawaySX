@@ -305,7 +305,7 @@ class GalleryPublicationTests(TestCase):
 
     def test_public_image_delivery_requires_a_published_story_and_approved_media(self):
         self.media.image_file = SimpleUploadedFile(
-            "sunrise.png", bytes([137, 80, 78, 71, 13, 10, 26, 10]) + b"private image bytes"
+            "sunrise.png", base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC")
         )
         self.media.save()
         GalleryStory.objects.create(
