@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { AlertCircle, CheckCircle2, FileText, LoaderCircle, RefreshCw, ShieldCheck } from "lucide-react";
+import { AlertCircle, CheckCircle2, FileText, RefreshCw, ShieldCheck } from "lucide-react";
 import "./editorial-gallery.css";
 
 type RightsReview = {
