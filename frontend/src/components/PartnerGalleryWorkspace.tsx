@@ -167,7 +167,7 @@ export default function PartnerGalleryWorkspace({
       });
       setStoryId(result.id);
       setNotice("Story draft created. Its original history remains private. Owner and editorial approval are separate publication steps.");
-      await loadDrafts();
+      try { await loadDrafts(); } catch { /* Keep the successful creation notice; the list can be refreshed separately. */ }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Story draft creation failed.");
     } finally { setBusy(null); }
@@ -178,7 +178,7 @@ export default function PartnerGalleryWorkspace({
     try {
       await request<{ status: string }>(`${api}/stories/${id}/owner-approve/`, accessToken, { method: "POST", body: "{}" });
       setNotice("Your approval has been recorded for this story version. Editorial approval is still required.");
-      await loadDrafts();
+      try { await loadDrafts(); } catch { /* Approval succeeded; refresh can be retried without repeating the action. */ }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Owner approval failed.");
     } finally { setBusy(null); }
