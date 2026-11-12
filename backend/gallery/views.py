@@ -13,9 +13,9 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.views import APIView
 
 from partners.models import Partner
-from .models import GalleryAuditEvent, GalleryHistoryPublicationConsent, GalleryMedia, GalleryMediaPermissionGrant, GalleryStory, GalleryStoryRevision
+from .models import GalleryAuditEvent, GalleryHistoryPublicationConsent, GalleryMedia, GalleryMediaPermissionGrant, GalleryPartnerNotification, GalleryStory, GalleryStoryRevision
 from .validators import gallery_image_content_type
-from .serializers import GalleryAuditEventSerializer, GalleryMediaDraftSerializer, GalleryStoryDraftSerializer, GalleryStoryRevisionSerializer, PublicGalleryStorySerializer
+from .serializers import GalleryAuditEventSerializer, GalleryMediaDraftSerializer, GalleryPartnerNotificationSerializer, GalleryStoryDraftSerializer, GalleryStoryRevisionSerializer, PublicGalleryStorySerializer
 
 
 
@@ -26,6 +26,46 @@ def has_active_gallery_media_permission(media):
         review_status=GalleryMediaPermissionGrant.ReviewStatus.APPROVED,
         revoked_at__isnull=True,
     ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now)).exists()
+
+
+
+
+def create_partner_story_notification(story, kind, title, message):
+    """Create an in-app notice for the partner owner; never expose internal review notes."""
+    return GalleryPartnerNotification.objects.create(
+        recipient=story.media.partner.owner,
+        partner=story.media.partner,
+        story=story,
+        kind=kind,
+        title=title,
+        message=message,
+    )
+
+
+class GalleryPartnerNotificationListView(generics.ListAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = GalleryPartnerNotificationSerializer
+
+    def get_queryset(self):
+        return GalleryPartnerNotification.objects.filter(
+            recipient=self.request.user,
+            partner__owner=self.request.user,
+        ).select_related("story", "partner")
+
+
+class GalleryPartnerNotificationReadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        notification = generics.get_object_or_404(
+            GalleryPartnerNotification.objects.filter(
+                recipient=request.user, partner__owner=request.user
+            ), pk=pk,
+        )
+        if notification.read_at is None:
+            notification.read_at = timezone.now()
+            notification.save(update_fields=("read_at",))
+        return Response({"id": notification.pk, "read_at": notification.read_at})
 
 
 class PublicGalleryStoriesView(generics.ListAPIView):
@@ -164,6 +204,12 @@ class GalleryStoryEditorialApprovalView(APIView):
             story=story, action="story_published",
             details={"story_version": story.current_version},
         )
+        create_partner_story_notification(
+            story,
+            GalleryPartnerNotification.Kind.STORY_PUBLISHED,
+            "Your Gallery story is published",
+            f'"{story.media.title}" has passed editorial review and is now published in the XGetawaySX Gallery.',
+        )
         return Response({"status": story.status, "published_at": story.published_at, "story_version": story.current_version})
 
 
@@ -277,6 +323,12 @@ class GalleryStoryRequestChangesView(APIView):
             actor=request.user, partner=story.media.partner, media=story.media,
             story=story, action="story_changes_requested",
             details={"story_version": story.current_version, "reason": reason},
+        )
+        create_partner_story_notification(
+            story,
+            GalleryPartnerNotification.Kind.STORY_CHANGES_REQUESTED,
+            "Your Gallery story needs changes",
+            f'"{story.media.title}" has been returned for revision. Editorial feedback: {reason}',
         )
         return Response({
             "status": story.status,
