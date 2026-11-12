@@ -756,3 +756,40 @@ class GalleryPartnerActivityTests(TestCase):
     def test_anonymous_user_cannot_view_partner_activity(self):
         response = self.client.get(f"/api/v1/gallery/partners/{self.partner.id}/activity/")
         self.assertEqual(response.status_code, 401)
+
+
+class GalleryStoryEditorialQualityReviewTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.owner = User.objects.create_user(email="qc-owner@example.com", password="test-password")
+        self.editor = User.objects.create_superuser(email="qc-editor@example.com", password="test-password")
+        self.partner = Partner.objects.create(owner=self.owner, name="QC Lodge", category=Partner.Category.ACCOMMODATION, gallery_status=Partner.ApprovalStatus.APPROVED)
+        self.media = GalleryMedia.objects.create(partner=self.partner, title="QC image", image="https://images.example.test/qc.jpg", alt_text="A garden", rights_holder="Owner", submitted_by=self.owner, status=GalleryMedia.Status.APPROVED)
+        GalleryMediaPermissionGrant.objects.create(media=self.media, rights_holder="Owner", permitted_channels=["website"], evidence_file=SimpleUploadedFile("qc.pdf", b"%PDF-1.4 evidence"), granted_by=self.owner, granted_at=timezone.now(), review_status=GalleryMediaPermissionGrant.ReviewStatus.APPROVED, reviewed_by=self.editor, reviewed_at=timezone.now())
+        self.story = GalleryStory.objects.create(media=self.media, summary="A carefully checked account of the lodge and its garden, using information supplied by the owner and reviewed for accuracy before visitors see the story.", status=GalleryStory.Status.EDITORIAL_REVIEW, owner_approved_by=self.owner, owner_approved_at=timezone.now(), owner_approved_version=1)
+
+    def payload(self, **overrides):
+        data = {"story_version": self.story.current_version, "claims_verified": True, "source_facts_checked": True, "unsupported_claims_resolved": True, "media_context_accurate": True, "reviewer_notes": "All claims checked against owner supplied facts and image context."}
+        data.update(overrides)
+        return data
+
+    def test_only_staff_can_submit_quality_review(self):
+        self.client.force_authenticate(self.owner)
+        response = self.client.post(f"/api/v1/gallery/stories/{self.story.id}/quality-review/", self.payload(), format="json")
+        self.assertEqual(response.status_code, 403)
+
+    def test_all_checks_and_current_version_are_required(self):
+        self.client.force_authenticate(self.editor)
+        bad = self.client.post(f"/api/v1/gallery/stories/{self.story.id}/quality-review/", self.payload(source_facts_checked=False), format="json")
+        self.assertEqual(bad.status_code, 400)
+        stale = self.client.post(f"/api/v1/gallery/stories/{self.story.id}/quality-review/", self.payload(story_version=0), format="json")
+        self.assertEqual(stale.status_code, 400)
+
+    def test_publication_requires_passing_current_version_quality_review(self):
+        self.client.force_authenticate(self.editor)
+        publish = self.client.post(f"/api/v1/gallery/stories/{self.story.id}/editorial-approve/")
+        self.assertEqual(publish.status_code, 400)
+        review = self.client.post(f"/api/v1/gallery/stories/{self.story.id}/quality-review/", self.payload(), format="json")
+        self.assertEqual(review.status_code, 201)
+        publish = self.client.post(f"/api/v1/gallery/stories/{self.story.id}/editorial-approve/")
+        self.assertEqual(publish.status_code, 200)
