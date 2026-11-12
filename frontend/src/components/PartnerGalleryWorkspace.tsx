@@ -266,7 +266,7 @@ export default function PartnerGalleryWorkspace({
 
   async function refresh() {
     setBusy("refresh"); setError("");
-    try { await loadDrafts(); await loadNotifications(); await loadActivity(); await loadActivity(); }
+    try { await loadDrafts(); await loadNotifications(); await loadActivity(); }
     catch (err) { setError(err instanceof Error ? err.message : "Could not refresh stories."); }
     finally { setBusy(null); }
   }
