@@ -2,8 +2,10 @@ from pathlib import Path
 
 from django.conf import settings
 from django.core.files.storage import FileSystemStorage
+from django.utils.deconstruct import deconstructible
 
 
+@deconstructible
 class PrivateGalleryStorage(FileSystemStorage):
     """Private filesystem storage; files are never exposed through MEDIA_URL."""
 
