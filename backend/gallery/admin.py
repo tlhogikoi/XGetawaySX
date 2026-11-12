@@ -15,7 +15,13 @@ class GalleryReadOnlyAdmin(admin.ModelAdmin):
 class GalleryMediaAdmin(GalleryReadOnlyAdmin):
     list_display = ("title", "partner", "status", "rights_confirmed", "promotional_permission")
     list_filter = ("status", "rights_confirmed", "promotional_permission")
-    readonly_fields = tuple(field.name for field in GalleryMedia._meta.fields)
+    exclude = ("image_file",)
+    readonly_fields = tuple(field.name for field in GalleryMedia._meta.fields if field.name != "image_file") + ("image_storage_key",)
+
+    @admin.display(description="Private image storage key")
+    def image_storage_key(self, obj):
+        return obj.image_file.name if obj.image_file else "No uploaded file"
+
     search_fields = ("title", "partner__name", "rights_holder")
 
 
@@ -51,4 +57,9 @@ class GalleryMediaPermissionGrantAdmin(GalleryReadOnlyAdmin):
     list_display = ("media", "rights_holder", "purpose", "review_status", "reviewed_by", "granted_at", "expires_at", "revoked_at")
     list_filter = ("purpose", "review_status", "revoked_at")
     search_fields = ("media__title", "media__partner__name", "rights_holder")
-    readonly_fields = tuple(field.name for field in GalleryMediaPermissionGrant._meta.fields)
+    exclude = ("evidence_file",)
+    readonly_fields = tuple(field.name for field in GalleryMediaPermissionGrant._meta.fields if field.name != "evidence_file") + ("evidence_storage_key",)
+
+    @admin.display(description="Private evidence storage key")
+    def evidence_storage_key(self, obj):
+        return obj.evidence_file.name if obj.evidence_file else "No uploaded evidence"
