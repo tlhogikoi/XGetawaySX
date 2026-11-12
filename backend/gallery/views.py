@@ -1,3 +1,5 @@
+import json
+
 from django.db import transaction
 from django.http import FileResponse, Http404
 from django.db.models import F, Q
@@ -321,6 +323,11 @@ class GalleryMediaPermissionGrantView(APIView):
             raise ValidationError({"evidence_file": "Upload the signed rights or promotional permission document."})
         evidence_reference = request.data.get("evidence_reference", "")
         permitted_channels = request.data.get("permitted_channels", [])
+        if isinstance(permitted_channels, str):
+            try:
+                permitted_channels = json.loads(permitted_channels)
+            except json.JSONDecodeError:
+                raise ValidationError({"permitted_channels": "Provide a JSON array of permitted channels."})
         expires_raw = request.data.get("expires_at")
         expires_at = parse_datetime(expires_raw) if expires_raw else None
         if expires_raw and not expires_at:
