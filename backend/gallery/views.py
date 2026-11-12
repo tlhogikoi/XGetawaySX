@@ -187,7 +187,7 @@ class GalleryStoryDraftUpdateView(generics.UpdateAPIView):
             return GalleryStory.objects.filter(status__in=[GalleryStory.Status.DRAFT, GalleryStory.Status.OWNER_REVIEW, GalleryStory.Status.EDITORIAL_REVIEW, GalleryStory.Status.REJECTED])
         return GalleryStory.objects.filter(
             media__partner__owner=self.request.user,
-            status__in=[GalleryStory.Status.DRAFT, GalleryStory.Status.OWNER_REVIEW, GalleryStory.Status.EDITORIAL_REVIEW],
+            status__in=[GalleryStory.Status.DRAFT, GalleryStory.Status.OWNER_REVIEW, GalleryStory.Status.EDITORIAL_REVIEW, GalleryStory.Status.REJECTED],
         )
 
     @transaction.atomic
