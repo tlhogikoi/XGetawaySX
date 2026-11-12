@@ -335,6 +335,22 @@ class GalleryMediaPermissionGrant(models.Model):
         return f"{self.media_id}: {self.purpose} ({self.rights_holder})"
 
 
+class GalleryStoryEditorialReview(models.Model):
+    """Staff-only quality review tied to one exact story version."""
+    story = models.ForeignKey(GalleryStory, on_delete=models.PROTECT, related_name="editorial_quality_reviews")
+    story_version = models.PositiveIntegerField()
+    reviewer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="gallery_quality_reviews")
+    claims_verified = models.BooleanField(default=False)
+    source_facts_checked = models.BooleanField(default=False)
+    unsupported_claims_resolved = models.BooleanField(default=False)
+    media_context_accurate = models.BooleanField(default=False)
+    reviewer_notes = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=("story", "story_version", "created_at"), name="gal_story_qc_version_idx")]
+
 class GalleryPartnerNotification(models.Model):
     """In-app publication workflow notice for the owning partner account."""
 
