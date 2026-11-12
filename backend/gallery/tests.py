@@ -793,3 +793,49 @@ class GalleryStoryEditorialQualityReviewTests(TestCase):
         self.assertEqual(review.status_code, 201)
         publish = self.client.post(f"/api/v1/gallery/stories/{self.story.id}/editorial-approve/")
         self.assertEqual(publish.status_code, 200)
+
+
+class GalleryAIDraftingSafetyTests(TestCase):
+    def test_ai_drafting_fails_closed_without_provider(self):
+        from django.test import override_settings
+        from rest_framework.exceptions import APIException
+        from .story_drafting import StoryDraftingUnavailable, draft_story_summary
+
+        class Story:
+            ai_source_facts = ["The lodge opened in 2018.", "It is family-owned."]
+
+        with override_settings(GALLERY_STORY_DRAFTER=""):
+            with self.assertRaises(StoryDraftingUnavailable):
+                draft_story_summary(Story())
+
+    def test_ai_drafting_rejects_empty_owner_facts(self):
+        from django.test import override_settings
+        from rest_framework.exceptions import ValidationError
+        from .story_drafting import draft_story_summary
+
+        class Story:
+            ai_source_facts = []
+
+        with override_settings(GALLERY_STORY_DRAFTER="builtins.str"):
+            with self.assertRaises(ValidationError):
+                draft_story_summary(Story())
+
+    def test_ai_drafting_rejects_unsupported_claims(self):
+        from django.test import override_settings
+        from unittest.mock import patch
+        from rest_framework.exceptions import ValidationError
+        from .story_drafting import draft_story_summary
+
+        class Story:
+            ai_source_facts = ["The lodge opened in 2018."]
+
+        def fake_provider(**kwargs):
+            return {
+                "summary": " ".join(["This family-owned lodge opened in 2018 and welcomes visitors to enjoy its peaceful setting and carefully prepared hospitality throughout every season."] * 2),
+                "unsupported_claims": ["Award-winning heritage property"],
+            }
+
+        with override_settings(GALLERY_STORY_DRAFTER="gallery.tests.fake_provider"):
+            with patch("gallery.tests.fake_provider", fake_provider, create=True):
+                with self.assertRaises(ValidationError):
+                    draft_story_summary(Story())
