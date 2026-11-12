@@ -12,7 +12,7 @@ type StoryReview = {
   id: number; media_id: number; media_title: string; partner_name: string;
   summary: string; current_version: number; owner_approved_version: number | null;
   owner_approved_at: string | null; media_status: string; partner_gallery_status: string;
-  ai_assisted: boolean; ai_source_facts: string[]; revision_count: number;
+  ai_assisted: boolean; ai_source_facts: string[]; revision_count: number; quality_review_version: number | null;
 };
 type Queue = { rights_reviews: RightsReview[]; media_reviews: MediaReview[]; story_reviews: StoryReview[] };
 type AuditEvent = { id: number; action: string; actor_email: string | null; partner_name: string | null; created_at: string; details: Record<string, unknown> };
@@ -35,6 +35,10 @@ export default function EditorialGalleryDashboard({ accessToken, apiBaseUrl = DE
   const [queue, setQueue] = useState<Queue>({ rights_reviews: [], media_reviews: [], story_reviews: [] });
   const [audit, setAudit] = useState<AuditEvent[]>([]);
   const [notes, setNotes] = useState<Record<number, string>>({});
+  const [qualityNotes, setQualityNotes] = useState<Record<number, string>>({});
+  const [qualityChecks, setQualityChecks] = useState<Record<number, Record<string, boolean>>>({});
+  const [comparisons, setComparisons] = useState<Record<number, Array<{version:number;summary:string;change_reason:string;created_at:string}>>>({});
+  const [expanded, setExpanded] = useState<Record<number, boolean>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -59,6 +63,22 @@ export default function EditorialGalleryDashboard({ accessToken, apiBaseUrl = DE
       await refresh();
     } catch (err) { setError(err instanceof Error ? err.message : "The review action failed."); }
     finally { setBusy(null); }
+  }
+
+  async function compareVersions(item: StoryReview) {
+    if (comparisons[item.id]) { setExpanded(current => ({ ...current, [item.id]: !current[item.id] })); return; }
+    setBusy(`compare-${item.id}`); setError("");
+    try {
+      const result = await api<Array<{version:number;summary:string;change_reason:string;created_at:string}>>(`${base}/stories/${item.id}/revisions/`, accessToken);
+      setComparisons(current => ({ ...current, [item.id]: result }));
+      setExpanded(current => ({ ...current, [item.id]: true }));
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not load story versions."); }
+    finally { setBusy(null); }
+  }
+
+  function saveQualityReview(item: StoryReview) {
+    const checks = qualityChecks[item.id] ?? {};
+    act(`quality-${item.id}`, `${base}/stories/${item.id}/quality-review/`, { story_version: item.current_version, ...checks, reviewer_notes: qualityNotes[item.id] ?? "" });
   }
 
   async function downloadEvidence(item: RightsReview) {
@@ -97,9 +117,16 @@ export default function EditorialGalleryDashboard({ accessToken, apiBaseUrl = DE
     </section>
 
     <section className="egd-section"><div className="egd-section-title"><div><p className="egd-kicker">03 · STORY GOVERNANCE</p><h2>Owner-approved stories</h2></div><span>{queue.story_reviews.length} pending</span></div>
-      {queue.story_reviews.length === 0 ? <p className="egd-empty">No stories awaiting editorial review.</p> : <div className="egd-grid">{queue.story_reviews.map(item => <article className="egd-card" key={item.id}><div className="egd-card-top"><span className="egd-tag">Owner approved · v{item.owner_approved_version}</span><small>Story #{item.id}</small></div><h3>{item.media_title}</h3><p className="egd-partner">{item.partner_name}</p><blockquote className="egd-story">{item.summary}</blockquote><dl><div><dt>Current version</dt><dd>{item.current_version}</dd></div><div><dt>Revision records</dt><dd>{item.revision_count}</dd></div><div><dt>Media status</dt><dd>{item.media_status}</dd></div><div><dt>Partner status</dt><dd>{item.partner_gallery_status}</dd></div></dl>{item.ai_assisted && <div className="egd-ai-note">AI-assisted draft · verify every claim against the supplied source facts ({item.ai_source_facts.length} recorded).</div>}<p className="egd-privacy">Private original history and internal source notes are deliberately excluded from this review screen.</p><label className="egd-note">Request changes from partner<textarea value={notes[item.id] ?? ""} onChange={e => setNotes(current => ({ ...current, [item.id]: e.target.value }))} maxLength={1000} rows={3} placeholder="Explain the factual correction or clarification required (minimum 10 characters)." /></label>
+      {queue.story_reviews.length === 0 ? <p className="egd-empty">No stories awaiting editorial review.</p> : <div className="egd-grid">{queue.story_reviews.map(item => <article className="egd-card" key={item.id}><div className="egd-card-top"><span className="egd-tag">Owner approved · v{item.owner_approved_version}</span><small>Story #{item.id}</small></div><h3>{item.media_title}</h3><p className="egd-partner">{item.partner_name}</p><blockquote className="egd-story">{item.summary}</blockquote><dl><div><dt>Current version</dt><dd>{item.current_version}</dd></div><div><dt>Revision records</dt><dd>{item.revision_count}</dd></div><div><dt>Media status</dt><dd>{item.media_status}</dd></div><div><dt>Partner status</dt><dd>{item.partner_gallery_status}</dd></div></dl>{item.ai_assisted && <div className="egd-ai-note">AI-assisted draft · verify every claim against the supplied source facts ({item.ai_source_facts.length} recorded).</div>}<p className="egd-privacy">Private original history and internal source notes are deliberately excluded from this review screen.</p>
+      <button className="egd-evidence" onClick={() => compareVersions(item)} disabled={busy !== null}>{expanded[item.id] ? "Hide version comparison" : "Compare story versions"}</button>
+      {expanded[item.id] && <div className="egd-comparison"><h4>Version history</h4>{(comparisons[item.id] ?? []).map(revision => <article key={revision.version}><strong>Version {revision.version}</strong><small>{date(revision.created_at)} · {revision.change_reason}</small><p>{revision.summary}</p></article>)}<article className="egd-current"><strong>Current version {item.current_version}</strong><p>{item.summary}</p></article></div>}
+      <div className="egd-quality"><h4>Editorial quality control · version {item.current_version}</h4>
+      {([["claims_verified","Factual claims verified"],["source_facts_checked","Checked against owner-supplied facts"],["unsupported_claims_resolved","Unsupported claims removed or clarified"],["media_context_accurate","Image and story context accurate"]] as const).map(([key,label]) => <label className="egd-check" key={key}><input type="checkbox" checked={Boolean(qualityChecks[item.id]?.[key])} onChange={event => setQualityChecks(current => ({ ...current, [item.id]: { ...current[item.id], [key]: event.target.checked } }))} />{label}</label>)}
+      <label className="egd-note">Internal reviewer notes<textarea value={qualityNotes[item.id] ?? ""} onChange={event => setQualityNotes(current => ({ ...current, [item.id]: event.target.value }))} maxLength={2000} rows={2} placeholder="Record the source checks and editorial assessment." /></label>
+      <button className="egd-approve egd-full" disabled={busy !== null || !["claims_verified","source_facts_checked","unsupported_claims_resolved","media_context_accurate"].every(key => qualityChecks[item.id]?.[key] === true) || (qualityNotes[item.id] ?? "").trim().length < 10} onClick={() => saveQualityReview(item)}>{busy === `quality-${item.id}` ? "Saving…" : "Save quality review"}</button>
+      {item.quality_review_version === item.current_version && <p className="egd-quality-ok">A quality review is recorded for this version.</p>}</div><label className="egd-note">Request changes from partner<textarea value={notes[item.id] ?? ""} onChange={e => setNotes(current => ({ ...current, [item.id]: e.target.value }))} maxLength={1000} rows={3} placeholder="Explain the factual correction or clarification required (minimum 10 characters)." /></label>
       <div className="egd-story-actions"><button className="egd-reject" disabled={busy !== null || (notes[item.id] ?? "").trim().length < 10} onClick={() => act(`story-changes-${item.id}`, `${base}/stories/${item.id}/request-changes/`, { reason: notes[item.id].trim() })}>{busy === `story-changes-${item.id}` ? "Sending…" : "Return for changes"}</button>
-      <button className="egd-approve" disabled={busy !== null || item.owner_approved_version !== item.current_version || item.media_status !== "approved" || item.partner_gallery_status !== "approved"} onClick={() => act(`story-${item.id}`, `${base}/stories/${item.id}/editorial-approve/`, {})}>{busy === `story-${item.id}` ? "Publishing…" : "Approve & publish current version"}</button></div></article>)}</div>}
+      <button className="egd-approve" disabled={busy !== null || item.owner_approved_version !== item.current_version || item.quality_review_version !== item.current_version || item.media_status !== "approved" || item.partner_gallery_status !== "approved"} onClick={() => act(`story-${item.id}`, `${base}/stories/${item.id}/editorial-approve/`, {})}>{busy === `story-${item.id}` ? "Publishing…" : "Approve & publish current version"}</button></div></article>)}</div>}
     </section>
 
     <section className="egd-section"><div className="egd-section-title"><div><p className="egd-kicker">04 · ACCOUNTABILITY</p><h2>Recent audit activity</h2></div></div>
