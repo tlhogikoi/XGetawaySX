@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import GalleryStoryCard, { type GalleryStoryCardProps } from "./GalleryStoryCard";
+import GalleryContentPlaceholder from "./GalleryContentPlaceholder";
 import "./gallery.css";
 
 type PublicStory = {
@@ -53,7 +54,7 @@ export default function GalleryPartnerGrid() {
   }
 
   if (stories.length === 0) {
-    return <div className="gallery-empty-state"><p className="eyebrow">APPROVED PARTNER STORIES</p><h2>Stories worth discovering.</h2><p>Partner stories will appear here after the business, image rights and story have been approved by the owner and XGetawaySX editorial team.</p></div>;
+    return <GalleryContentPlaceholder eyebrow="THE XGETAWAYSX GALLERY" title="New stories are on the way." message="We’re preparing more places and experiences to discover. Check back soon for stories worth sharing." />;
   }
 
   return <div className="gallery-partner-grid">{stories.map(story => <GalleryStoryCard key={story.storyId} {...story} />)}</div>;
