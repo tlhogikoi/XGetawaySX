@@ -43,7 +43,10 @@ class PublicGalleryStoriesView(generics.ListAPIView):
             media__permission_grants__review_status=GalleryMediaPermissionGrant.ReviewStatus.APPROVED,
             media__permission_grants__revoked_at__isnull=True,
             owner_approved_version=F("current_version"),
+            owner_approved_at__isnull=False,
             editorial_approved_version=F("current_version"),
+            editorial_approved_at__isnull=False,
+            published_at__isnull=False,
         ).select_related("media", "media__partner").prefetch_related("history_publication_consents").distinct()
 
 
@@ -498,6 +501,9 @@ class GalleryMediaImageView(APIView):
             story.status != GalleryStory.Status.PUBLISHED
             or story.owner_approved_version != story.current_version
             or story.editorial_approved_version != story.current_version
+            or not story.owner_approved_at
+            or not story.editorial_approved_at
+            or not story.published_at
         ):
             raise Http404
         if not media.image_file:
