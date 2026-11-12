@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from .models import GalleryAuditEvent, GalleryMedia, GalleryStory, GalleryStoryRevision
+from .validators import validate_gallery_image
 
 
 class PublicGalleryStorySerializer(serializers.ModelSerializer):
@@ -72,7 +73,7 @@ class GalleryStoryDraftSerializer(serializers.ModelSerializer):
 
 
 class GalleryMediaDraftSerializer(serializers.ModelSerializer):
-    image_file = serializers.FileField(write_only=True, required=False, allow_null=True)
+    image_file = serializers.FileField(write_only=True, required=False, allow_null=True, validators=[validate_gallery_image])
 
     class Meta:
         model = GalleryMedia
