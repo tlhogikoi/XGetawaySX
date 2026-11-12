@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft, ArrowUpRight, MapPin, Globe2 } from "lucide-react";
 import GalleryStoryCard, { type GalleryStoryCardProps } from "./GalleryStoryCard";
+import GalleryContentPlaceholder from "./GalleryContentPlaceholder";
 import "./gallery.css";
 
 type PartnerProfileData = {
@@ -59,7 +60,7 @@ export default function PublicPartnerProfile({ slug }: { slug: string }) {
       {profile.description && <p className="profile-description">{profile.description}</p>}
       {profile.website_url && <a className="profile-website" href={profile.website_url} target="_blank" rel="noreferrer"><Globe2 size={16}/> Visit partner website <ArrowUpRight size={15}/></a>}
     </section>
-    <section className="profile-stories"><p className="eyebrow">THE STORIES BEHIND THE PICTURES</p><h2>Discover {profile.name}</h2>{stories.length ? <div className="gallery-partner-grid">{stories.map(story => <GalleryStoryCard key={story.storyId} {...story}/>)}</div> : <p className="profile-empty">This partner has not published any Gallery stories yet.</p>}</section>
+    <section className="profile-stories"><p className="eyebrow">THE STORIES BEHIND THE PICTURES</p><h2>Discover {profile.name}</h2>{stories.length ? <div className="gallery-partner-grid">{stories.map(story => <GalleryStoryCard key={story.storyId} {...story}/>)}</div> : <GalleryContentPlaceholder compact eyebrow="MORE TO DISCOVER" title="More stories are on the way." message="This partner’s Gallery collection is being prepared. Please check back soon." />}</section>
     <footer><span>© {new Date().getFullYear()} XGetawaySX</span><a href="/">Discover more getaways</a></footer>
   </main>;
 }
