@@ -1,5 +1,6 @@
 import GalleryPartnerGrid from "./components/GalleryPartnerGrid";
 import PublicPartnerProfile from "./components/PublicPartnerProfile";
+import GalleryStoryEditor from "./components/GalleryStoryEditor";
 import { ArrowRight, Compass, Globe2, Heart, MapPin } from "lucide-react";
 
 const categories = [
@@ -11,6 +12,7 @@ const categories = [
 ];
 
 export default function App() {
+  if (window.location.pathname === "/partner/gallery" || window.location.pathname === "/partner/gallery/") return <GalleryStoryEditor />;
   const partnerMatch = window.location.pathname.match(/^\/partners\/([^/]+)\/?$/);
   if (partnerMatch) return <PublicPartnerProfile slug={decodeURIComponent(partnerMatch[1])} />;
 
