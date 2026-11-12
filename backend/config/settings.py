@@ -73,6 +73,9 @@ USE_I18N = True
 USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+PRIVATE_GALLERY_STORAGE_ROOT = Path(os.getenv("PRIVATE_GALLERY_STORAGE_ROOT", str(BASE_DIR / "private_gallery_storage"))).resolve()
+FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
+DATA_UPLOAD_MAX_MEMORY_SIZE = 20 * 1024 * 1024
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 CORS_ALLOWED_ORIGINS = [
