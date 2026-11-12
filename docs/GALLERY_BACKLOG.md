@@ -459,3 +459,15 @@ The following code has been committed to `feat/application-foundation`; it has n
 **Integration boundary:** direct `/partners/{slug}/` navigation requires the production host to serve the React app fallback for this route. Configure the backend API origin through `VITE_API_BASE_URL` when frontend and API are hosted on different origins.
 
 **Not yet verified:** Django tests/checks, frontend typecheck/build, browser navigation, CORS and production route fallback, CI, merge or deployment.
+
+## Development 10 — Public-facing unpublished-content placeholders
+
+**Implemented on `feat/application-foundation`; not merged or deployed.**
+
+- Added a reusable branded `GalleryContentPlaceholder` component for public empty states.
+- Replaced the Gallery empty state with neutral wording that invites visitors to return for new stories.
+- Replaced the empty partner-story message with a compact version of the same placeholder.
+- Placeholder copy does not disclose whether content is awaiting partner approval, rights review, owner approval, editorial review, or has been returned for changes.
+- Public Gallery and partner-profile APIs remain the source of truth: only eligible approved/published content is rendered. The placeholder does not reveal unpublished records or internal workflow status.
+
+**Not yet verified:** frontend typecheck/build, component/browser tests, backend tests, CI, merge, deployment and production visual QA.
