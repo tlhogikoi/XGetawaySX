@@ -38,6 +38,7 @@ class PublicGalleryStorySerializer(serializers.ModelSerializer):
 
 
 class GalleryStoryDraftSerializer(serializers.ModelSerializer):
+    editorial_feedback = serializers.SerializerMethodField()
     media_status = serializers.CharField(source="media.status", read_only=True)
     partner_gallery_status = serializers.CharField(source="media.partner.gallery_status", read_only=True)
 
@@ -46,7 +47,7 @@ class GalleryStoryDraftSerializer(serializers.ModelSerializer):
         fields = (
             "id", "media", "owner_original_history", "owner_history_private",
             "original_history_public_permission", "summary", "ai_assisted",
-            "ai_source_facts", "status", "current_version",
+            "ai_source_facts", "status", "current_version", "editorial_feedback",
             "owner_approved_version", "editorial_approved_version",
             "owner_approved_at", "editorial_approved_at", "media_status", "partner_gallery_status",
         )
@@ -55,6 +56,10 @@ class GalleryStoryDraftSerializer(serializers.ModelSerializer):
             "ai_assisted", "current_version", "owner_approved_version",
             "editorial_approved_version", "owner_approved_at", "editorial_approved_at",
         )
+
+    def get_editorial_feedback(self, obj):
+        event = obj.audit_events.filter(action="story_changes_requested").order_by("-created_at").first()
+        return event.details.get("reason") if event else None
 
     def validate_summary(self, value):
         count = len(value.split())
