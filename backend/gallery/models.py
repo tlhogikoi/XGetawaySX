@@ -3,6 +3,22 @@ from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.db.models import Q
 from django.utils import timezone
+from pathlib import Path
+from uuid import uuid4
+
+from .storage import PrivateGalleryStorage
+from .validators import validate_gallery_evidence, validate_gallery_image
+
+
+private_gallery_storage = PrivateGalleryStorage()
+
+def gallery_media_upload_path(instance, filename):
+    suffix = Path(filename).suffix.lower()
+    return f"gallery/media/{timezone.now():%Y/%m}/{uuid4().hex}{suffix}"
+
+def gallery_evidence_upload_path(instance, filename):
+    suffix = Path(filename).suffix.lower()
+    return f"gallery/evidence/{timezone.now():%Y/%m}/{uuid4().hex}{suffix}"
 
 from partners.models import Partner
 
@@ -18,7 +34,11 @@ class GalleryMedia(models.Model):
 
     partner = models.ForeignKey(Partner, on_delete=models.PROTECT, related_name="gallery_media")
     title = models.CharField(max_length=180)
-    image = models.URLField(max_length=1000)
+    image = models.URLField(max_length=1000, blank=True)
+    image_file = models.FileField(
+        storage=private_gallery_storage, upload_to=gallery_media_upload_path,
+        blank=True, null=True, validators=[validate_gallery_image],
+    )
     alt_text = models.CharField(max_length=250)
     caption = models.CharField(max_length=250, blank=True)
     media_credit = models.CharField(max_length=180, blank=True)
@@ -130,13 +150,6 @@ class GalleryHistoryPublicationConsent(models.Model):
     granted_at = models.DateTimeField()
     revoked_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="gallery_history_consents_revoked")
     revoked_at = models.DateTimeField(null=True, blank=True)
-    review_status = models.CharField(max_length=16, choices=ReviewStatus.choices, default=ReviewStatus.PENDING)
-    reviewed_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT,
-        related_name="gallery_media_permissions_reviewed",
-    )
-    reviewed_at = models.DateTimeField(null=True, blank=True)
-    review_notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -248,7 +261,11 @@ class GalleryMediaPermissionGrant(models.Model):
     )
     rights_holder = models.CharField(max_length=180)
     permitted_channels = models.JSONField(default=list, blank=True)
-    evidence_reference = models.CharField(max_length=500)
+    evidence_reference = models.CharField(max_length=500, blank=True)
+    evidence_file = models.FileField(
+        storage=private_gallery_storage, upload_to=gallery_evidence_upload_path,
+        blank=True, null=True, validators=[validate_gallery_evidence],
+    )
     granted_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
         related_name="gallery_media_permissions_granted",
@@ -280,8 +297,8 @@ class GalleryMediaPermissionGrant(models.Model):
             raise ValidationError({"granted_by": "Only the owning partner may grant media publication permission."})
         if not self.rights_holder.strip():
             raise ValidationError({"rights_holder": "A rights holder is required."})
-        if not self.evidence_reference.strip():
-            raise ValidationError({"evidence_reference": "A private evidence reference is required."})
+        if self.review_status == self.ReviewStatus.APPROVED and not self.evidence_file:
+            raise ValidationError({"evidence_file": "An uploaded evidence document is required before rights approval."})
         if not isinstance(self.permitted_channels, list) or not self.permitted_channels:
             raise ValidationError({"permitted_channels": "At least one permitted channel is required."})
         if any(not isinstance(channel, str) or not channel.strip() for channel in self.permitted_channels):
