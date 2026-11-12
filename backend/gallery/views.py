@@ -184,7 +184,7 @@ class GalleryStoryDraftUpdateView(generics.UpdateAPIView):
 
     def get_queryset(self):
         if self.request.user.is_staff:
-            return GalleryStory.objects.filter(status__in=[GalleryStory.Status.DRAFT, GalleryStory.Status.OWNER_REVIEW, GalleryStory.Status.EDITORIAL_REVIEW])
+            return GalleryStory.objects.filter(status__in=[GalleryStory.Status.DRAFT, GalleryStory.Status.OWNER_REVIEW, GalleryStory.Status.EDITORIAL_REVIEW, GalleryStory.Status.REJECTED])
         return GalleryStory.objects.filter(
             media__partner__owner=self.request.user,
             status__in=[GalleryStory.Status.DRAFT, GalleryStory.Status.OWNER_REVIEW, GalleryStory.Status.EDITORIAL_REVIEW],
@@ -238,6 +238,51 @@ class GalleryStoryRevisionListView(generics.ListAPIView):
 
 
 
+
+
+
+class GalleryStoryRequestChangesView(APIView):
+    """Return an owner-approved story to its partner for a documented revision."""
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        if not request.user.is_staff:
+            raise PermissionDenied("Only authorised editorial staff may request story changes.")
+        story = generics.get_object_or_404(
+            GalleryStory.objects.select_for_update().select_related("media", "media__partner"), pk=pk
+        )
+        if story.status != GalleryStory.Status.EDITORIAL_REVIEW:
+            raise ValidationError("Only stories awaiting editorial review can be returned for changes.")
+        reason = str(request.data.get("reason", "")).strip()
+        if len(reason) < 10:
+            raise ValidationError({"reason": "Provide a clear change request of at least 10 characters."})
+        if len(reason) > 1000:
+            raise ValidationError({"reason": "Change requests must be 1,000 characters or fewer."})
+
+        story.status = GalleryStory.Status.REJECTED
+        story.owner_approved_by = None
+        story.owner_approved_at = None
+        story.owner_approved_version = None
+        story.editorial_approved_by = None
+        story.editorial_approved_at = None
+        story.editorial_approved_version = None
+        story.published_at = None
+        story.save(update_fields=(
+            "status", "owner_approved_by", "owner_approved_at", "owner_approved_version",
+            "editorial_approved_by", "editorial_approved_at", "editorial_approved_version",
+            "published_at", "updated_at",
+        ))
+        GalleryAuditEvent.objects.create(
+            actor=request.user, partner=story.media.partner, media=story.media,
+            story=story, action="story_changes_requested",
+            details={"story_version": story.current_version, "reason": reason},
+        )
+        return Response({
+            "status": story.status,
+            "story_version": story.current_version,
+            "reason": reason,
+        }, status=status.HTTP_200_OK)
 
 
 class GalleryEditorialQueueView(APIView):
