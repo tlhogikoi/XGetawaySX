@@ -290,7 +290,8 @@ class GalleryPublicationTests(TestCase):
         response = self.client.get(f"/api/v1/gallery/media/{self.media.id}/image/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["X-Content-Type-Options"], "nosniff")
-        self.assertEqual(response["Cache-Control"], "public, max-age=300")
+        self.assertEqual(response["Cache-Control"], "no-store")
+        self.assertEqual(response["Content-Type"], "image/png")
 
         self.media.status = GalleryMedia.Status.DRAFT
         self.media.save()
@@ -299,7 +300,8 @@ class GalleryPublicationTests(TestCase):
 
     def test_image_validator_rejects_unsupported_file_content(self):
         from .validators import validate_gallery_image
-        with self.assertRaises(Exception):
+        from django.core.exceptions import ValidationError
+        with self.assertRaises(ValidationError):
             validate_gallery_image(SimpleUploadedFile("script.svg", b"<svg></svg>"))
 
 
