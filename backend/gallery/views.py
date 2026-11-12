@@ -68,6 +68,51 @@ class GalleryPartnerNotificationReadView(APIView):
         return Response({"id": notification.pk, "read_at": notification.read_at})
 
 
+
+
+class GalleryPartnerActivityView(APIView):
+    """Return a privacy-minimised submission timeline for the owning partner."""
+    permission_classes = [IsAuthenticated]
+
+    EVENT_LABELS = {
+        "media_submitted": "Image submitted",
+        "media_permission_granted": "Rights evidence submitted",
+        "media_permission_revoked": "Media permission withdrawn",
+        "media_permission_approved": "Media rights approved",
+        "media_permission_rejected": "Media rights not approved",
+        "media_editorially_approved": "Media approved for Gallery use",
+        "story_submitted": "Story submitted for owner review",
+        "owner_approved": "Story version approved by partner owner",
+        "story_edited": "Story revised; approvals reset",
+        "story_changes_requested": "Editorial changes requested",
+        "story_published": "Story published in the Gallery",
+    }
+
+    def get(self, request, partner_id):
+        partner = generics.get_object_or_404(Partner, pk=partner_id)
+        if not request.user.is_staff and partner.owner_id != request.user.id:
+            raise PermissionDenied("You can only view activity for your own partner profile.")
+
+        events = GalleryAuditEvent.objects.filter(partner=partner).select_related(
+            "media", "story"
+        ).order_by("-created_at")[:100]
+        return Response([{
+            "id": event.pk,
+            "event_type": event.action,
+            "label": self.EVENT_LABELS.get(event.action, "Gallery activity updated"),
+            "media_id": event.media_id,
+            "media_title": event.media.title if event.media_id else None,
+            "story_id": event.story_id,
+            "story_version": (
+                event.details.get("story_version")
+                if isinstance(event.details, dict)
+                and isinstance(event.details.get("story_version"), int)
+                else None
+            ),
+            "occurred_at": event.created_at,
+        } for event in events])
+
+
 class PublicGalleryStoriesView(generics.ListAPIView):
     serializer_class = PublicGalleryStorySerializer
     permission_classes = [AllowAny]
