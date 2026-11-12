@@ -1,5 +1,9 @@
 from django.test import TestCase
 from rest_framework.test import APIClient
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.utils import timezone
+
+from gallery.models import GalleryMedia, GalleryMediaPermissionGrant, GalleryStory
 
 from accounts.models import User
 from .models import Partner
@@ -57,6 +61,38 @@ class PublicPartnerDetailTests(TestCase):
         self.assertNotIn("owner", response.data)
         self.assertNotIn("booking_status", response.data)
         self.assertNotIn("enquiry_status", response.data)
+
+    def test_profile_includes_only_published_stories_with_approved_rights(self):
+        partner = Partner.objects.create(
+            owner=self.owner, name="Story Profile Lodge",
+            category=Partner.Category.ACCOMMODATION,
+            gallery_status=Partner.ApprovalStatus.APPROVED,
+        )
+        media = GalleryMedia.objects.create(
+            partner=partner, title="Garden at sunrise",
+            image="https://images.example.test/garden.jpg",
+            alt_text="Garden at sunrise", rights_holder="Lodge",
+            submitted_by=self.owner, status=GalleryMedia.Status.APPROVED,
+        )
+        GalleryMediaPermissionGrant.objects.create(
+            media=media, rights_holder="Lodge", permitted_channels=["website"],
+            evidence_file=SimpleUploadedFile("release.pdf", b"%PDF-1.4 signed release"),
+            granted_by=self.owner, granted_at=timezone.now(),
+            review_status=GalleryMediaPermissionGrant.ReviewStatus.APPROVED,
+        )
+        GalleryStory.objects.create(
+            media=media, summary="This carefully prepared story describes the lodge garden and its setting using information supplied by the owner and approved for public visitors.",
+            status=GalleryStory.Status.PUBLISHED,
+            owner_approved_at=timezone.now(), owner_approved_version=1,
+            editorial_approved_at=timezone.now(), editorial_approved_version=1,
+            published_at=timezone.now(),
+            owner_original_history="PRIVATE PARTNER HISTORY",
+        )
+        response = self.client.get(f"/api/v1/partners/{partner.slug}/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data["stories"]), 1)
+        self.assertNotIn("PRIVATE PARTNER HISTORY", str(response.data))
+        self.assertNotIn("ai_source_facts", response.data["stories"][0])
 
     def test_unapproved_partner_profile_is_not_public(self):
         partner = Partner.objects.create(
