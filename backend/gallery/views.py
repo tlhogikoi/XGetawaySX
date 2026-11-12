@@ -14,6 +14,7 @@ from rest_framework.views import APIView
 
 from partners.models import Partner
 from .models import GalleryAuditEvent, GalleryHistoryPublicationConsent, GalleryMedia, GalleryMediaPermissionGrant, GalleryStory, GalleryStoryRevision
+from .validators import gallery_image_content_type
 from .serializers import GalleryAuditEventSerializer, GalleryMediaDraftSerializer, GalleryStoryDraftSerializer, GalleryStoryRevisionSerializer, PublicGalleryStorySerializer
 
 
@@ -501,10 +502,11 @@ class GalleryMediaImageView(APIView):
             raise Http404
         if not media.image_file:
             raise Http404
-        response = FileResponse(media.image_file.open("rb"), content_type="application/octet-stream")
+        image_handle = media.image_file.open("rb")
+        response = FileResponse(image_handle, content_type=gallery_image_content_type(image_handle))
         response["Content-Disposition"] = 'inline; filename="gallery-image"'
         response["X-Content-Type-Options"] = "nosniff"
-        response["Cache-Control"] = "public, max-age=300"
+        response["Cache-Control"] = "no-store"
         return response
 
 
