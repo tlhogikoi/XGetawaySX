@@ -429,3 +429,18 @@ The following code has been committed to `feat/application-foundation`; it has n
 **Delivery boundary:** this is an audit-event timeline, not a separate configurable workflow engine. The feed is limited to the latest 100 events and depends on workflow actions continuing to write audit records. It does not expose staff-only internal notes or promise email/push alerts.
 
 **Not yet verified:** Django tests/checks, migration application/drift, TypeScript typecheck, Vite production build, browser accessibility, CI, merge or deployment.
+
+
+## Development 8 — Editorial quality control and version comparison
+
+**Implemented on `feat/application-foundation`; not merged or deployed.**
+
+- Added staff-only, version-bound quality reviews for factual claims, owner-supplied source facts, unsupported claims and image/context accuracy.
+- Internal reviewer notes are stored with the review record and excluded from partner/public serializers.
+- Publishing requires a passing quality review for the exact current story version, alongside the existing owner approval, partner/media approval and active evidence-backed rights permission.
+- Extended the editorial queue with the version number carrying a passing quality review.
+- Added a dashboard checklist, internal notes and a safe revision comparison using summary/version metadata only. Private original-history snapshots remain excluded.
+- Added tests for staff-only access, required checks, stale-version rejection and the publication gate.
+- Added migration `0009_gallery_story_editorial_quality_review.py`.
+
+**Not yet verified:** Django tests/checks, migration application/drift, PostgreSQL upgrade path, frontend typecheck/build, browser workflow, CI, merge or deployment.
