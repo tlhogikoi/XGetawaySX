@@ -553,6 +553,24 @@ class GalleryEditorialQueueTests(TestCase):
 
 
 
+    def test_revision_endpoint_returns_only_the_requested_story_versions(self):
+        other_media = GalleryMedia.objects.create(
+            partner=self.partner, title="Second revision image",
+            image="https://images.example.test/second-revision.jpg",
+            alt_text="A second garden", rights_holder="Photographer",
+            submitted_by=self.owner, status=GalleryMedia.Status.APPROVED,
+        )
+        other_story = GalleryStory.objects.create(
+            media=other_media, summary="A second verified story describing the property garden and the surrounding landscape for prospective visitors.",
+            status=GalleryStory.Status.DRAFT,
+        )
+        GalleryStoryRevision.capture(other_story, self.owner, "Second story draft")
+        self.client.force_authenticate(self.owner)
+        response = self.client.get(f"/api/v1/gallery/stories/{self.story.id}/revisions/")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(all(item["story"] == self.story.id for item in response.data))
+
+
 class GalleryStoryRevisionWorkflowTests(TestCase):
     def setUp(self):
         self.private_storage_dir = tempfile.mkdtemp(prefix="xgetawaysx-story-revisions-")
