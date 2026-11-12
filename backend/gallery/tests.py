@@ -564,11 +564,13 @@ class GalleryEditorialQueueTests(TestCase):
             media=other_media, summary="A second verified story describing the property garden and the surrounding landscape for prospective visitors.",
             status=GalleryStory.Status.DRAFT,
         )
+        GalleryStoryRevision.capture(self.story, self.owner, "First story draft")
         GalleryStoryRevision.capture(other_story, self.owner, "Second story draft")
         self.client.force_authenticate(self.owner)
         response = self.client.get(f"/api/v1/gallery/stories/{self.story.id}/revisions/")
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(all(item["story"] == self.story.id for item in response.data))
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["story"], self.story.id)
 
 
 class GalleryStoryRevisionWorkflowTests(TestCase):
