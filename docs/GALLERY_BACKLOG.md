@@ -395,3 +395,20 @@ The following code has been committed to `feat/application-foundation`; it has n
 **Not yet verified:** Django test suite, TypeScript typecheck, Vite build, browser workflow, PostgreSQL migrations, CI, merge and deployment. No database migration was introduced by this stage.
 
 **Workflow note:** editorial request-changes is available only while a story is awaiting editorial review. Published stories are not editable through the current partner draft endpoint; any post-publication correction/withdrawal process requires a separate controlled workflow.
+
+
+## Development 6 — Partner notifications and review communication
+
+**Committed on `feat/application-foundation`; not merged or deployed.**
+
+- Added `GalleryPartnerNotification` for in-app notices addressed to the owning partner account, with story reference, notification kind, timestamp and read state.
+- Added authenticated partner endpoints: `GET /api/v1/gallery/notifications/` and `POST /api/v1/gallery/notifications/{id}/read/`.
+- Notification queries and read actions are scoped to both the authenticated recipient and the partner owner. Other partner accounts cannot view or mark another owner's notice as read.
+- Editorial publication creates a partner notification that the story is now published.
+- Editorial request-changes creates a partner notification containing the specific feedback intended for that partner. Internal audit history and private owner history are not included in notification payloads.
+- Added notification list, unread count, timestamps and mark-as-read interaction to `PartnerGalleryWorkspace`.
+- Added automated tests for owner-only listing, cross-partner denial and read-state updates.
+
+**Delivery boundary:** these are in-app notifications only. Email, SMS, push notifications, background delivery/retries and notification preferences are not configured or claimed. The existing component remains a reusable workspace awaiting host portal route/auth integration.
+
+**Not yet verified:** Django test suite, migration application/drift, TypeScript typecheck, Vite production build, browser workflow and CI. No merge or deployment has been performed.
