@@ -333,3 +333,32 @@ class GalleryMediaPermissionGrant(models.Model):
 
     def __str__(self):
         return f"{self.media_id}: {self.purpose} ({self.rights_holder})"
+
+
+class GalleryPartnerNotification(models.Model):
+    """In-app publication workflow notice for the owning partner account."""
+
+    class Kind(models.TextChoices):
+        STORY_PUBLISHED = "story_published", "Story published"
+        STORY_CHANGES_REQUESTED = "story_changes_requested", "Changes requested"
+
+    recipient = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name="gallery_partner_notifications",
+    )
+    partner = models.ForeignKey(Partner, on_delete=models.CASCADE, related_name="gallery_notifications")
+    story = models.ForeignKey(GalleryStory, on_delete=models.CASCADE, related_name="partner_notifications")
+    kind = models.CharField(max_length=40, choices=Kind.choices)
+    title = models.CharField(max_length=180)
+    message = models.TextField(max_length=1200)
+    read_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(fields=("recipient", "read_at", "created_at"), name="gal_notice_recipient_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.recipient_id}: {self.title}"
