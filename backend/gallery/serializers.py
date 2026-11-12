@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import GalleryAuditEvent, GalleryMedia, GalleryStory, GalleryStoryRevision
+from .models import GalleryAuditEvent, GalleryMedia, GalleryPartnerNotification, GalleryStory, GalleryStoryRevision
 from .validators import validate_gallery_image
 
 
@@ -114,4 +114,12 @@ class GalleryAuditEventSerializer(serializers.ModelSerializer):
     class Meta:
         model = GalleryAuditEvent
         fields = ("id", "actor_email", "partner_name", "action", "details", "created_at")
+        read_only_fields = fields
+
+
+class GalleryPartnerNotificationSerializer(serializers.ModelSerializer):
+    story_id = serializers.IntegerField(source="story_id", read_only=True)
+    class Meta:
+        model = GalleryPartnerNotification
+        fields = ("id", "story_id", "kind", "title", "message", "read_at", "created_at")
         read_only_fields = fields
