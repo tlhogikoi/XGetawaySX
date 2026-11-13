@@ -121,3 +121,9 @@ class PaymentProviderEventAdmin(admin.ModelAdmin):
     list_filter = ("provider", "signature_verified")
     search_fields = ("event_id", "payload_sha256")
     readonly_fields = ("provider", "event_id", "payload_sha256", "signature_verified", "received_at", "processed_at")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
