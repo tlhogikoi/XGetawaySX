@@ -792,3 +792,37 @@ class DualGatewayIntegrationTests(TestCase):
         self.payment.refresh_from_db()
         self.assertEqual(self.payment.provider, "payfast")
         self.assertEqual(self.payment.checkout_session_id, str(self.payment.pk))
+
+    def test_yoco_checkout_uses_server_key_amount_and_idempotency_key(self):
+        import json
+        from unittest.mock import MagicMock, patch
+        from django.test import override_settings
+        from .gateways import create_yoco_checkout
+        mock_response = MagicMock()
+        mock_response.__enter__.return_value.read.return_value = json.dumps({
+            "id": "ch_yoco_created", "amount": 5000, "currency": "ZAR",
+            "redirectUrl": "https://c.yoco.com/checkout/ch_yoco_created",
+        }).encode()
+        with override_settings(YOCO_SECRET_KEY="sk_test_example"):
+            with patch("partners.gateways.urlopen", return_value=mock_response) as send:
+                result = create_yoco_checkout(self.payment)
+        self.assertEqual(result["checkout_session_id"], "ch_yoco_created")
+        self.assertEqual(result["checkout_url"], "https://c.yoco.com/checkout/ch_yoco_created")
+        outgoing = send.call_args.args[0]
+        self.assertEqual(outgoing.get_header("Authorization"), "Bearer sk_test_example")
+        self.assertEqual(outgoing.get_header("Idempotency-key"), self.payment.idempotency_key)
+
+    def test_yoco_checkout_rejects_unexpected_redirect_host(self):
+        import json
+        from unittest.mock import MagicMock, patch
+        from django.test import override_settings
+        from .gateways import GatewayError, create_yoco_checkout
+        mock_response = MagicMock()
+        mock_response.__enter__.return_value.read.return_value = json.dumps({
+            "id": "ch_bad", "amount": 5000, "currency": "ZAR",
+            "redirectUrl": "https://attacker.example/checkout",
+        }).encode()
+        with override_settings(YOCO_SECRET_KEY="sk_test_example"):
+            with patch("partners.gateways.urlopen", return_value=mock_response):
+                with self.assertRaises(GatewayError):
+                    create_yoco_checkout(self.payment)
