@@ -7,6 +7,7 @@ class PublicPartnerSerializer(serializers.ModelSerializer):
     class Meta:
         model = Partner
         fields = (
+            "id",
             "name",
             "slug",
             "category",
@@ -144,6 +145,7 @@ class PartnerEnquiryCreateSerializer(serializers.Serializer):
 
 class PartnerEnquirySerializer(serializers.ModelSerializer):
     partner = PublicPartnerSerializer(read_only=True)
+    trip_plan_id = serializers.IntegerField(read_only=True)
     customer_email = serializers.EmailField(source="customer.email", read_only=True)
 
     class Meta:
