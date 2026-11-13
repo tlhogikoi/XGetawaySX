@@ -309,3 +309,111 @@ class EnquiryReadyPartnerDiscoveryTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual([item["name"] for item in response.data], ["Ready Lodge"])
         self.assertIn("id", response.data[0])
+
+class ReservationFoundationTests(TestCase):
+    def setUp(self):
+        from datetime import date, timedelta
+        from .models import PartnerAvailability
+        self.client = APIClient()
+        self.customer = User.objects.create_user(email="reservation-customer@example.com", password="test-password")
+        self.owner = User.objects.create_user(email="reservation-owner@example.com", password="test-password", role=User.Role.PARTNER)
+        self.partner = Partner.objects.create(
+            owner=self.owner, name="Reservation Lodge", category=Partner.Category.ACCOMMODATION,
+            gallery_status=Partner.ApprovalStatus.APPROVED,
+            booking_status=Partner.ApprovalStatus.APPROVED,
+        )
+        self.start = date(2027, 4, 10)
+        for offset in range(3):
+            PartnerAvailability.objects.create(
+                partner=self.partner, date=self.start + timedelta(days=offset), capacity=4
+            )
+
+    def make_request(self, guests=2):
+        return self.client.post("/api/v1/partners/reservations/", {
+            "partner_id": self.partner.pk, "start_date": "2027-04-10",
+            "end_date": "2027-04-12", "guests": guests,
+            "message": "Please confirm our weekend reservation.",
+        }, format="json")
+
+    def test_customer_can_request_published_dates_but_request_is_not_auto_confirmed(self):
+        self.client.force_authenticate(user=self.customer)
+        response = self.make_request()
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["status"], "pending")
+        self.assertIsNone(response.data["booking_reference"])
+
+    def test_partner_confirmation_reserves_each_night_and_issues_reference(self):
+        from .models import PartnerAvailability
+        self.client.force_authenticate(user=self.customer)
+        request = self.make_request(guests=3)
+        self.assertEqual(request.status_code, 201)
+        self.client.force_authenticate(user=self.owner)
+        decision = self.client.post(
+            f"/api/v1/partners/partner/reservations/{request.data['id']}/decision/",
+            {"status": "confirmed", "partner_response": "Your reservation is confirmed."},
+            format="json",
+        )
+        self.assertEqual(decision.status_code, 200)
+        self.assertEqual(decision.data["status"], "confirmed")
+        self.assertTrue(decision.data["booking_reference"])
+        self.assertEqual(list(PartnerAvailability.objects.filter(partner=self.partner).order_by("date").values_list("booked_count", flat=True)), [3, 3, 0])
+
+    def test_confirmation_rechecks_capacity_after_request_submission(self):
+        from .models import PartnerAvailability
+        self.client.force_authenticate(user=self.customer)
+        request = self.make_request(guests=2)
+        PartnerAvailability.objects.filter(partner=self.partner, date=self.start).update(booked_count=3)
+        self.client.force_authenticate(user=self.owner)
+        decision = self.client.post(
+            f"/api/v1/partners/partner/reservations/{request.data['id']}/decision/",
+            {"status": "confirmed", "partner_response": "Confirm this reservation."},
+            format="json",
+        )
+        self.assertEqual(decision.status_code, 400)
+        self.assertEqual(decision.data["status"], "pending")
+
+    def test_customer_cancellation_releases_confirmed_capacity(self):
+        from .models import PartnerAvailability, ReservationRequest
+        from django.utils import timezone
+        import uuid
+        item = ReservationRequest.objects.create(
+            customer=self.customer, partner=self.partner, start_date=self.start,
+            end_date=self.start + timezone.timedelta(days=2), guests=2,
+            status=ReservationRequest.Status.CONFIRMED, booking_reference=uuid.uuid4(),
+        )
+        PartnerAvailability.objects.filter(partner=self.partner, date__lt=item.end_date).update(booked_count=2)
+        self.client.force_authenticate(user=self.customer)
+        response = self.client.post(f"/api/v1/partners/reservations/{item.pk}/cancel/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["status"], "cancelled")
+        self.assertEqual(list(PartnerAvailability.objects.filter(partner=self.partner).order_by("date").values_list("booked_count", flat=True)), [0, 0, 0])
+
+    def test_partner_cannot_decide_another_partners_reservation(self):
+        from .models import ReservationRequest
+        item = ReservationRequest.objects.create(
+            customer=self.customer, partner=self.partner, start_date=self.start,
+            end_date=self.start + __import__("datetime").timedelta(days=1), guests=1,
+        )
+        other = User.objects.create_user(email="reservation-other@example.com", password="test-password", role=User.Role.PARTNER)
+        self.client.force_authenticate(user=other)
+        response = self.client.post(
+            f"/api/v1/partners/partner/reservations/{item.pk}/decision/",
+            {"status": "declined", "partner_response": "We cannot accommodate this request."},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_partner_availability_management_is_owner_scoped(self):
+        self.client.force_authenticate(user=self.owner)
+        response = self.client.post("/api/v1/partners/partner/availability/", {
+            "partner_id": self.partner.pk, "date": "2027-04-20", "capacity": 5,
+            "is_open": True, "currency": "ZAR",
+        }, format="json")
+        self.assertEqual(response.status_code, 201)
+        other = User.objects.create_user(email="availability-other@example.com", password="test-password", role=User.Role.PARTNER)
+        self.client.force_authenticate(user=other)
+        denied = self.client.post("/api/v1/partners/partner/availability/", {
+            "partner_id": self.partner.pk, "date": "2027-04-21", "capacity": 2,
+        }, format="json")
+        self.assertEqual(denied.status_code, 404)
+
