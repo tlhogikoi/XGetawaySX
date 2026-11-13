@@ -323,3 +323,27 @@ class PartnerCommissionLedgerSerializer(serializers.ModelSerializer):
         fields = ("id", "payment_id", "reservation_reference", "gross_amount", "commission_rate", "commission_amount", "partner_net_amount", "status", "created_at")
         read_only_fields = fields
 
+
+from .models import ReservationRefund, PartnerCommissionAdjustment
+
+
+class ReservationRefundSerializer(serializers.ModelSerializer):
+    payment_id = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = ReservationRefund
+        fields = ("id", "payment_id", "amount", "currency", "status", "provider", "provider_reference", "reason", "reconciled_at", "created_at")
+        read_only_fields = fields
+
+
+class RefundReconciliationSerializer(serializers.Serializer):
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=0.01)
+    provider = serializers.CharField(max_length=40)
+    provider_reference = serializers.CharField(max_length=160)
+    reason = serializers.CharField(max_length=500, required=False, allow_blank=True)
+
+    def validate_provider_reference(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("A verified external refund reference is required.")
+        return value
