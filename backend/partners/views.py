@@ -64,3 +64,56 @@ class PublicPartnerDetailView(APIView):
                 published_stories, many=True, context={"request": request}
             ).data,
         })
+
+
+from rest_framework.generics import RetrieveAPIView
+from .models import DestinationPage, ExperienceCollection
+from .serializers import PublicDestinationSerializer, PublicExperienceCollectionSerializer
+
+
+class PublicDestinationListView(ListAPIView):
+    permission_classes = [AllowAny]
+    serializer_class = PublicDestinationSerializer
+
+    def get_queryset(self):
+        return DestinationPage.objects.filter(is_published=True).prefetch_related(
+            "partners", "collections"
+        ).order_by("display_order", "name")
+
+
+class PublicDestinationDetailView(RetrieveAPIView):
+    permission_classes = [AllowAny]
+    serializer_class = PublicDestinationSerializer
+    lookup_field = "slug"
+    lookup_url_kwarg = "slug"
+
+    def get_queryset(self):
+        return DestinationPage.objects.filter(is_published=True).prefetch_related(
+            "partners", "collections"
+        )
+
+
+class PublicExperienceCollectionListView(ListAPIView):
+    permission_classes = [AllowAny]
+    serializer_class = PublicExperienceCollectionSerializer
+
+    def get_queryset(self):
+        queryset = ExperienceCollection.objects.filter(is_published=True).select_related(
+            "destination"
+        ).prefetch_related("partners")
+        destination = self.request.query_params.get("destination", "").strip()[:180]
+        if destination:
+            queryset = queryset.filter(destination__slug=destination, destination__is_published=True)
+        return queryset.order_by("display_order", "title")
+
+
+class PublicExperienceCollectionDetailView(RetrieveAPIView):
+    permission_classes = [AllowAny]
+    serializer_class = PublicExperienceCollectionSerializer
+    lookup_field = "slug"
+    lookup_url_kwarg = "slug"
+
+    def get_queryset(self):
+        return ExperienceCollection.objects.filter(is_published=True).select_related(
+            "destination"
+        ).prefetch_related("partners")
