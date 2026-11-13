@@ -618,3 +618,27 @@ Implemented on `feat/application-foundation`:
 - Added a regression test ensuring a balance payment uses the original reservation price snapshot even after daily partner prices change.
 - **Not yet verified:** Django checks/tests, migration application/drift, frontend typecheck/build, browser workflow, CI, merge or deployment. No real payment provider is connected.
 
+
+
+## Development 16 — Refund reconciliation and payment-provider event foundation
+
+Implemented on `feat/application-foundation`:
+
+- Added `ReservationRefund` records linked to captured payments, with amount, currency, provider, external refund reference, reason, status, reconciling staff member and timestamp.
+- Added `PartnerCommissionAdjustment` as an immutable refund-linked snapshot of gross refund, commission reversal and partner-net reversal.
+- Added `PaymentProviderEvent` as a minimal provider/event-ID inbox record with payload SHA-256, signature-verification flag and processing timestamp. A unique provider + event ID constraint provides duplicate-event protection.
+- Added staff-only `GET/POST /api/v1/partners/payments/{id}/refunds/`. POST records an externally completed refund only; it does not initiate a provider refund or accept a customer assertion as proof.
+- Refund reconciliation requires a captured payment and an existing captured-payment provider reference. A provider refund reference cannot be reused for a different refund.
+- Cumulative reconciled refunds cannot exceed the original captured amount. A fully refunded payment changes to `refunded`; partial refunds leave the payment captured while net collected amounts are reduced.
+- Commission reversals are calculated proportionally against the original immutable commission snapshot and capped at the remaining commission amount. Partner financial summaries deduct refunds and commission/net reversals.
+- Reservation payment balance calculations now subtract reconciled partial refunds from captured amounts.
+- Added Django admin visibility for refund, commission adjustment and provider event audit records; fields are read-only.
+- Added migration `0007_refunds_and_provider_event_inbox.py` and tests for staff-only access, partial/full refunds, commission reversals, over-refund prevention, duplicate refund references and provider event uniqueness.
+
+### Development 16 boundaries
+
+- No live payment gateway was selected or connected. Provider credentials, hosted checkout, tokenisation, signed webhook verification, webhook endpoint, automatic event processing, bank settlement, payouts and customer receipts remain unimplemented.
+- The event inbox model is a persistence foundation only. The application must not create trusted event records until a provider-specific adapter verifies the signature and timestamp/replay controls.
+- Refund reconciliation records an externally completed refund; it does not call a payment provider. Staff must verify the provider-side refund before submitting it.
+- No raw card data or full provider payload is stored.
+- Backend tests, Django checks, migration application/drift checks, frontend build, CI and deployment have not been run or confirmed by this implementation.
