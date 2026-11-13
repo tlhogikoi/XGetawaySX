@@ -505,6 +505,12 @@ class PartnerFinancialSettingsView(APIView):
         partner = get_object_or_404(Partner, pk=partner_id, owner=request.user, booking_status=Partner.ApprovalStatus.APPROVED)
         with transaction.atomic():
             settings_obj, _created = PartnerFinancialSettings.objects.select_for_update().get_or_create(partner=partner)
+            requested_currency = str(data.get("currency", settings_obj.currency)).upper()
+            if requested_currency != settings_obj.currency and (
+                ReservationPayment.objects.filter(partner=partner).exists()
+                or PartnerAvailability.objects.filter(partner=partner).exists()
+            ):
+                raise ValidationError("Currency cannot be changed after availability or payment records have been created.")
             serializer = PartnerFinancialSettingsSerializer(settings_obj, data=data, partial=True)
             serializer.is_valid(raise_exception=True)
             saved = serializer.save()
