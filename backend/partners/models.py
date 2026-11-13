@@ -107,3 +107,76 @@ class ExperienceCollection(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class TripPlan(models.Model):
+    """Private customer itinerary draft."""
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="trip_plans"
+    )
+    title = models.CharField(max_length=160, default="My getaway")
+    notes = models.TextField(blank=True)
+    start_date = models.DateField(null=True, blank=True)
+    end_date = models.DateField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-updated_at",)
+
+    def __str__(self):
+        return self.title
+
+
+class TripPlanItem(models.Model):
+    plan = models.ForeignKey(TripPlan, on_delete=models.CASCADE, related_name="items")
+    partner = models.ForeignKey(Partner, on_delete=models.PROTECT, related_name="trip_plan_items")
+    note = models.CharField(max_length=500, blank=True)
+    display_order = models.PositiveIntegerField(default=0)
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("display_order", "added_at")
+        constraints = [
+            models.UniqueConstraint(fields=("plan", "partner"), name="unique_partner_per_trip_plan")
+        ]
+
+    def __str__(self):
+        return f"{self.partner.name} in {self.plan.title}"
+
+
+class PartnerEnquiry(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        RESPONDED = "responded", "Responded"
+        ACCEPTED = "accepted", "Accepted"
+        DECLINED = "declined", "Declined"
+        CLOSED = "closed", "Closed"
+
+    customer = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="partner_enquiries"
+    )
+    partner = models.ForeignKey(
+        Partner, on_delete=models.PROTECT, related_name="customer_enquiries"
+    )
+    trip_plan = models.ForeignKey(
+        TripPlan, on_delete=models.SET_NULL, null=True, blank=True, related_name="enquiries"
+    )
+    message = models.TextField()
+    requested_start_date = models.DateField(null=True, blank=True)
+    requested_end_date = models.DateField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    partner_response = models.TextField(blank=True)
+    responded_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(fields=("partner", "status", "created_at"), name="partner_enquiry_status_idx"),
+            models.Index(fields=("customer", "created_at"), name="customer_enquiry_date_idx"),
+        ]
+
+    def __str__(self):
+        return f"Enquiry {self.pk} — {self.partner.name}"
