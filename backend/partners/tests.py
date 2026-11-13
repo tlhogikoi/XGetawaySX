@@ -186,3 +186,104 @@ class PublicDestinationAndCollectionTests(TestCase):
         )
         self.assertEqual(self.client.get("/api/v1/partners/collections/").data, [])
         self.assertEqual(self.client.get("/api/v1/partners/collections/internal-draft/").status_code, 404)
+
+
+class TripPlanningAndEnquiryTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.customer = User.objects.create_user(email="trip-customer@example.com", password="test-password")
+        self.partner_owner = User.objects.create_user(
+            email="trip-partner@example.com", password="test-password", role=User.Role.PARTNER
+        )
+        self.partner = Partner.objects.create(
+            owner=self.partner_owner, name="Approved Adventure Lodge",
+            category=Partner.Category.ACCOMMODATION,
+            gallery_status=Partner.ApprovalStatus.APPROVED,
+            enquiry_status=Partner.ApprovalStatus.APPROVED,
+        )
+
+    def test_trip_plans_are_private_to_their_owner(self):
+        from .models import TripPlan
+        plan = TripPlan.objects.create(owner=self.customer, title="Long weekend")
+        other = User.objects.create_user(email="another-customer@example.com", password="test-password")
+        self.client.force_authenticate(user=other)
+        self.assertEqual(self.client.get("/api/v1/partners/trips/").data, [])
+        self.assertEqual(self.client.get(f"/api/v1/partners/trips/{plan.pk}/").status_code, 404)
+
+    def test_customer_can_create_plan_and_add_approved_partner(self):
+        self.client.force_authenticate(user=self.customer)
+        created = self.client.post("/api/v1/partners/trips/", {
+            "title": "Gauteng getaway", "notes": "A relaxed weekend.",
+            "start_date": "2027-02-12", "end_date": "2027-02-14",
+        }, format="json")
+        self.assertEqual(created.status_code, 201)
+        plan_id = created.data["id"]
+        added = self.client.post(
+            f"/api/v1/partners/trips/{plan_id}/items/",
+            {"partner_id": self.partner.pk, "note": "Ask about family rooms."},
+            format="json",
+        )
+        self.assertEqual(added.status_code, 201)
+        self.assertEqual(added.data["items"][0]["partner"]["slug"], self.partner.slug)
+
+    def test_trip_plan_rejects_unapproved_or_non_enquiry_partner(self):
+        pending = Partner.objects.create(
+            owner=self.partner_owner, name="Pending Stay",
+            category=Partner.Category.ACCOMMODATION,
+            gallery_status=Partner.ApprovalStatus.PENDING,
+            enquiry_status=Partner.ApprovalStatus.APPROVED,
+        )
+        from .models import TripPlan
+        plan = TripPlan.objects.create(owner=self.customer)
+        self.client.force_authenticate(user=self.customer)
+        response = self.client.post(
+            f"/api/v1/partners/trips/{plan.pk}/items/", {"partner_id": pending.pk}, format="json"
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_customer_enquiry_requires_partner_in_owned_plan(self):
+        from .models import TripPlan, TripPlanItem
+        plan = TripPlan.objects.create(owner=self.customer)
+        TripPlanItem.objects.create(plan=plan, partner=self.partner)
+        self.client.force_authenticate(user=self.customer)
+        response = self.client.post("/api/v1/partners/enquiries/", {
+            "partner_id": self.partner.pk, "trip_plan_id": plan.pk,
+            "message": "Please share availability and indicative pricing for our weekend.",
+            "requested_start_date": "2027-02-12", "requested_end_date": "2027-02-14",
+        }, format="json")
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["status"], "pending")
+        self.assertEqual(response.data["partner"]["name"], self.partner.name)
+
+    def test_partner_can_respond_only_to_its_own_pending_enquiry(self):
+        from .models import PartnerEnquiry
+        enquiry = PartnerEnquiry.objects.create(
+            customer=self.customer, partner=self.partner,
+            message="Please share details for a weekend stay.",
+        )
+        self.client.force_authenticate(user=self.partner_owner)
+        response = self.client.post(
+            f"/api/v1/partners/partner/enquiries/{enquiry.pk}/respond/",
+            {"status": "accepted", "partner_response": "We can discuss your requested dates."},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["status"], "accepted")
+        self.assertTrue(response.data["responded_at"])
+
+    def test_other_partner_cannot_view_or_respond_to_enquiry(self):
+        from .models import PartnerEnquiry
+        enquiry = PartnerEnquiry.objects.create(
+            customer=self.customer, partner=self.partner,
+            message="Please share details for a weekend stay.",
+        )
+        other_owner = User.objects.create_user(
+            email="other-partner@example.com", password="test-password", role=User.Role.PARTNER
+        )
+        self.client.force_authenticate(user=other_owner)
+        self.assertEqual(self.client.get("/api/v1/partners/partner/enquiries/").data, [])
+        self.assertEqual(self.client.post(
+            f"/api/v1/partners/partner/enquiries/{enquiry.pk}/respond/",
+            {"status": "declined", "partner_response": "Not available for these dates."},
+            format="json",
+        ).status_code, 404)
