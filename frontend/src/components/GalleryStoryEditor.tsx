@@ -40,7 +40,7 @@ export default function GalleryStoryEditor() {
   const [error, setError] = useState("");
 
   const selected = useMemo(() => drafts.find(item => item.id === selectedId) ?? null, [drafts, selectedId]);
-  const wordCount = summary.trim() ? summary.trim().split(/\\s+/).length : 0;
+  const wordCount = summary.trim() ? summary.trim().split(/\s+/).length : 0;
 
   async function request(path: string, method = "GET", body?: unknown) {
     const response = await fetch(`${API_BASE}${path}`, {
@@ -59,7 +59,7 @@ export default function GalleryStoryEditor() {
   function loadDraft(item: StoryDraft) {
     setSelectedId(item.id);
     setHistory(item.owner_original_history || "");
-    setFactsText((item.ai_source_facts || []).join("\\n"));
+    setFactsText((item.ai_source_facts || []).join("\n"));
     setSummary(item.summary || "");
     setPrivateHistory(item.owner_history_private);
     setPublicPermission(item.original_history_public_permission);
@@ -84,7 +84,7 @@ export default function GalleryStoryEditor() {
     try {
       const data = await request(`/api/v1/gallery/stories/${selected.id}/draft/`, "PATCH", {
         owner_original_history: history,
-        ai_source_facts: factsText.split("\\n").map(value => value.trim()).filter(Boolean),
+        ai_source_facts: factsText.split("\n").map(value => value.trim()).filter(Boolean),
         summary,
       });
       setDrafts(items => items.map(item => item.id === selected.id ? { ...item, ...data } : item));
