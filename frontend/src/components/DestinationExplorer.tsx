@@ -19,10 +19,10 @@ function PartnerLinks({ partners }: { partners: Partner[] }) {
 }
 
 export default function DestinationExplorer() {
-  const slug = window.location.pathname.match(/^\/destinations\/([^/]+)\/?$/)?.[1];
+  const slug = window.location.pathname.match(/^\/destinations\/([^/]+)\/?$/)?.[1];\n  const collectionSlug = window.location.pathname.match(/^\/collections\/([^/]+)\/?$/)?.[1];
   const [destinations, setDestinations] = useState<Destination[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
-  const [destination, setDestination] = useState<Destination | null>(null);
+  const [destination, setDestination] = useState<Destination | null>(null);\n  const [collection, setCollection] = useState<Collection | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -44,13 +44,13 @@ export default function DestinationExplorer() {
     }).catch(reason => { if (reason instanceof Error && reason.name !== "AbortError") setError(reason.message); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [slug]);
+  }, [slug, collectionSlug]);
 
   return <main className="destination-shell">
     <header className="destination-topbar"><a className="destination-brand" href="/">XGETAWAYS<span>X</span></a><a href="/#partner-discovery">Discover partners <ArrowUpRight size={15}/></a></header>
     {loading ? <p className="destination-state" role="status">Preparing destinations and experiences…</p>
       : error ? <p className="destination-state" role="alert">{error}</p>
-      : slug && destination ? <>
+      : collectionSlug && collection ? <><section className="destination-hero"><p className="eyebrow"><Compass size={15}/> CURATED EXPERIENCE COLLECTION</p><h1>{collection.title}</h1><h2>{collection.summary}</h2>{collection.description && <p>{collection.description}</p>}</section><section className="destination-content"><div className="destination-section-heading"><p className="eyebrow">APPROVED PARTNERS</p><h2>Explore the collection</h2></div><PartnerLinks partners={collection.partners || []}/></section></>\n      : slug && destination ? <>
         <section className="destination-hero"><p className="eyebrow"><Compass size={15}/> DESTINATION GUIDE</p><h1>{destination.name}</h1>
           <p className="destination-location"><MapPin size={15}/>{[destination.city, destination.province, destination.country].filter(Boolean).join(", ")}</p>
           {destination.introduction && <h2>{destination.introduction}</h2>}
