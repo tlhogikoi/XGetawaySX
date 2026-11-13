@@ -413,6 +413,8 @@ class CustomerReservationCancelView(APIView):
                 raise NotFound("Reservation request not found.")
             if item.status not in (ReservationRequest.Status.PENDING, ReservationRequest.Status.CONFIRMED):
                 raise ValidationError("This reservation can no longer be cancelled.")
+            if item.payments.filter(status=ReservationPayment.Status.CAPTURED).exists():
+                raise ValidationError("This reservation has a captured payment. A refund workflow is required before cancellation.")
             if item.status == ReservationRequest.Status.CONFIRMED:
                 dates = [item.start_date + timedelta(days=offset) for offset in range((item.end_date - item.start_date).days)]
                 days = list(PartnerAvailability.objects.select_for_update().filter(
@@ -513,6 +515,8 @@ class ReservationPaymentListCreateView(APIView):
         key = serializer.validated_data["idempotency_key"]
         with transaction.atomic():
             reservation = ReservationRequest.objects.select_for_update().get(pk=reservation.pk, customer=request.user)
+            if reservation.status != ReservationRequest.Status.CONFIRMED:
+                raise ValidationError("Only confirmed reservations can be paid.")
             existing = ReservationPayment.objects.filter(customer=request.user, idempotency_key=key).first()
             if existing:
                 if existing.reservation_id != reservation.pk:
@@ -553,6 +557,8 @@ class AdminPaymentReconciliationView(APIView):
                 if payment.status == data["status"] and payment.provider_reference == (data.get("provider_reference") or None):
                     return Response(ReservationPaymentSerializer(payment).data)
                 raise ValidationError("Only pending payment records can be reconciled.")
+            if data["status"] == ReservationPayment.Status.CAPTURED and payment.reservation.status != ReservationRequest.Status.CONFIRMED:
+                raise ValidationError("A payment cannot be captured for a cancelled or unconfirmed reservation.")
             payment.provider = data["provider"]
             payment.provider_reference = data.get("provider_reference") or None
             payment.failure_reason = data.get("failure_reason", "")
