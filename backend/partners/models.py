@@ -284,6 +284,8 @@ class ReservationPayment(models.Model):
     currency = models.CharField(max_length=3, default="ZAR")
     idempotency_key = models.CharField(max_length=100)
     provider = models.CharField(max_length=40, default="manual_reconciliation")
+    checkout_session_id = models.CharField(max_length=180, blank=True)
+    checkout_url = models.URLField(blank=True)
     provider_reference = models.CharField(max_length=160, null=True, blank=True, unique=True)
     failure_reason = models.CharField(max_length=500, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
