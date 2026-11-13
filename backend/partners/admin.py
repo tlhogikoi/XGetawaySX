@@ -55,3 +55,44 @@ class PartnerEnquiryAdmin(admin.ModelAdmin):
     list_filter = ("status", "created_at")
     search_fields = ("partner__name", "customer__email", "message")
     readonly_fields = ("created_at", "updated_at", "responded_at")
+
+from .models import PartnerAvailability, ReservationRequest, PartnerFinancialSettings, ReservationPayment, PartnerCommissionLedger
+
+
+@admin.register(PartnerAvailability)
+class PartnerAvailabilityAdmin(admin.ModelAdmin):
+    list_display = ("partner", "date", "capacity", "booked_count", "is_open", "price_per_guest", "currency")
+    list_filter = ("is_open", "currency", "date")
+    search_fields = ("partner__name",)
+
+
+@admin.register(ReservationRequest)
+class ReservationRequestAdmin(admin.ModelAdmin):
+    list_display = ("id", "booking_reference", "partner", "customer", "start_date", "end_date", "status", "guests")
+    list_filter = ("status", "start_date", "created_at")
+    search_fields = ("booking_reference", "partner__name", "customer__email")
+    readonly_fields = ("booking_reference", "created_at", "updated_at", "responded_at")
+
+
+@admin.register(PartnerFinancialSettings)
+class PartnerFinancialSettingsAdmin(admin.ModelAdmin):
+    list_display = ("partner", "deposit_type", "deposit_value", "commission_rate", "currency", "updated_at")
+    list_filter = ("deposit_type", "currency")
+    search_fields = ("partner__name",)
+
+
+@admin.register(ReservationPayment)
+class ReservationPaymentAdmin(admin.ModelAdmin):
+    list_display = ("id", "reservation", "partner", "customer", "kind", "status", "amount", "currency", "provider")
+    list_filter = ("status", "kind", "provider", "currency")
+    search_fields = ("provider_reference", "reservation__booking_reference", "partner__name", "customer__email")
+    readonly_fields = ("created_at", "updated_at", "captured_at")
+
+
+@admin.register(PartnerCommissionLedger)
+class PartnerCommissionLedgerAdmin(admin.ModelAdmin):
+    list_display = ("payment", "partner", "gross_amount", "commission_rate", "commission_amount", "partner_net_amount", "status")
+    list_filter = ("status", "created_at")
+    search_fields = ("partner__name", "payment__provider_reference")
+    readonly_fields = ("created_at",)
+
