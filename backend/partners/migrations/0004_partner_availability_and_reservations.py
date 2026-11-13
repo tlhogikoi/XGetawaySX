@@ -28,11 +28,11 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name="partneravailability",
-            constraint=models.UniqueConstraint(fields=("partner", "date"), name="unique_partner_availability_day"),
+            constraint=models.UniqueConstraint(fields=("partner", "date"), name="uniq_partner_avail_day"),
         ),
         migrations.AddConstraint(
             model_name="partneravailability",
-            constraint=models.CheckConstraint(condition=models.Q(("booked_count__lte", models.F("capacity"))), name="availability_booked_lte_capacity"),
+            constraint=models.CheckConstraint(condition=models.Q(("booked_count__lte", models.F("capacity"))), name="avail_booked_lte_cap"),
         ),
         migrations.AddIndex(
             model_name="partneravailability",
@@ -60,7 +60,7 @@ class Migration(migrations.Migration):
         ),
         migrations.AddIndex(
             model_name="reservationrequest",
-            index=models.Index(fields=["partner", "status", "start_date"], name="partner_reservation_status_idx"),
+            index=models.Index(fields=["partner", "status", "start_date"], name="partner_res_status_idx"),
         ),
         migrations.AddIndex(
             model_name="reservationrequest",
