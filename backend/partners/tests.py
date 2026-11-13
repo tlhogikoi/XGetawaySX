@@ -32,6 +32,31 @@ class PublicPartnerListTests(TestCase):
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]["name"], "Approved Lodge")
 
+    def test_discovery_filters_by_category_and_location(self):
+        matched = self.create_partner("Cape Adventure", Partner.ApprovalStatus.APPROVED)
+        matched.category = Partner.Category.ACTIVITY
+        matched.city = "Cape Town"
+        matched.province = "Western Cape"
+        matched.save()
+        self.create_partner("Johannesburg Lodge", Partner.ApprovalStatus.APPROVED)
+        response = self.client.get("/api/v1/partners/?category=activity&city=cape&province=western")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item["name"] for item in response.data], ["Cape Adventure"])
+
+    def test_search_never_returns_unapproved_partners(self):
+        self.create_partner("Approved Garden Lodge", Partner.ApprovalStatus.APPROVED)
+        self.create_partner("Pending Garden Lodge", Partner.ApprovalStatus.PENDING)
+        response = self.client.get("/api/v1/partners/?q=garden")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item["name"] for item in response.data], ["Approved Garden Lodge"])
+
+    def test_unknown_category_does_not_bypass_public_approval_filter(self):
+        self.create_partner("Visible Lodge", Partner.ApprovalStatus.APPROVED)
+        self.create_partner("Hidden Lodge", Partner.ApprovalStatus.SUSPENDED)
+        response = self.client.get("/api/v1/partners/?category=not-a-category")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item["name"] for item in response.data], ["Visible Lodge"])
+
     def test_public_serializer_does_not_expose_owner_or_private_approval_fields(self):
         self.create_partner("Public Lodge", Partner.ApprovalStatus.APPROVED)
 
