@@ -209,7 +209,6 @@ class GalleryPublicationTests(TestCase):
             format="multipart",
         )
         self.assertEqual(response.status_code, 403)
-\n\n
 
     def test_pending_media_rights_review_blocks_publication(self):
         self.permission.review_status = GalleryMediaPermissionGrant.ReviewStatus.PENDING
@@ -243,7 +242,6 @@ class GalleryPublicationTests(TestCase):
         grant.refresh_from_db()
         self.assertEqual(grant.review_status, GalleryMediaPermissionGrant.ReviewStatus.APPROVED)
         self.assertEqual(grant.reviewed_by, self.editor)
-\n\n
 
     def test_new_permission_grant_resets_existing_publication_approvals(self):
         story = GalleryStory.objects.create(
@@ -275,7 +273,6 @@ class GalleryPublicationTests(TestCase):
         self.assertEqual(story.status, GalleryStory.Status.OWNER_REVIEW)
         self.assertIsNone(story.owner_approved_version)
         self.assertIsNone(story.editorial_approved_version)
-\n\n
 
 
     def test_partner_image_upload_uses_private_storage_and_returns_no_file_url(self):
