@@ -378,7 +378,7 @@ class ReservationFoundationTests(TestCase):
         import uuid
         item = ReservationRequest.objects.create(
             customer=self.customer, partner=self.partner, start_date=self.start,
-            end_date=self.start + timezone.timedelta(days=2), guests=2,
+            end_date=self.start + __import__("datetime").timedelta(days=2), guests=2,
             status=ReservationRequest.Status.CONFIRMED, booking_reference=uuid.uuid4(),
         )
         PartnerAvailability.objects.filter(partner=self.partner, date__lt=item.end_date).update(booked_count=2)
