@@ -62,3 +62,48 @@ class Partner(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class DestinationPage(models.Model):
+    """Editorially curated public destination landing page."""
+    name = models.CharField(max_length=160)
+    slug = models.SlugField(max_length=180, unique=True)
+    introduction = models.CharField(max_length=280, blank=True)
+    description = models.TextField(blank=True)
+    city = models.CharField(max_length=100, blank=True)
+    province = models.CharField(max_length=100, blank=True)
+    country = models.CharField(max_length=100, default="South Africa")
+    partners = models.ManyToManyField(Partner, blank=True, related_name="destination_pages")
+    is_published = models.BooleanField(default=False)
+    display_order = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("display_order", "name")
+
+    def __str__(self):
+        return self.name
+
+
+class ExperienceCollection(models.Model):
+    """A manually curated set of approved partner experiences."""
+    title = models.CharField(max_length=160)
+    slug = models.SlugField(max_length=180, unique=True)
+    summary = models.CharField(max_length=280)
+    description = models.TextField(blank=True)
+    destination = models.ForeignKey(
+        DestinationPage, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="collections",
+    )
+    partners = models.ManyToManyField(Partner, blank=True, related_name="experience_collections")
+    is_published = models.BooleanField(default=False)
+    display_order = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("display_order", "title")
+
+    def __str__(self):
+        return self.title
