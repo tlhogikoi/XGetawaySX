@@ -195,8 +195,8 @@ class PartnerAvailability(models.Model):
     class Meta:
         ordering = ("date",)
         constraints = [
-            models.UniqueConstraint(fields=("partner", "date"), name="unique_partner_availability_day"),
-            models.CheckConstraint(condition=models.Q(booked_count__lte=models.F("capacity")), name="availability_booked_lte_capacity"),
+            models.UniqueConstraint(fields=("partner", "date"), name="uniq_partner_avail_day"),
+            models.CheckConstraint(condition=models.Q(booked_count__lte=models.F("capacity")), name="avail_booked_lte_cap"),
         ]
         indexes = [models.Index(fields=("partner", "date", "is_open"), name="partner_availability_day_idx")]
 
@@ -234,7 +234,7 @@ class ReservationRequest(models.Model):
     class Meta:
         ordering = ("-created_at",)
         indexes = [
-            models.Index(fields=("partner", "status", "start_date"), name="partner_reservation_status_idx"),
+            models.Index(fields=("partner", "status", "start_date"), name="partner_res_status_idx"),
             models.Index(fields=("customer", "created_at"), name="customer_reservation_date_idx"),
         ]
 
