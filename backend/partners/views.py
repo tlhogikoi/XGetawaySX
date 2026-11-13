@@ -98,7 +98,7 @@ class PublicExperienceCollectionListView(ListAPIView):
     serializer_class = PublicExperienceCollectionSerializer
 
     def get_queryset(self):
-        queryset = ExperienceCollection.objects.filter(is_published=True).select_related(
+        queryset = ExperienceCollection.objects.filter(is_published=True).filter(\n            Q(destination__isnull=True) | Q(destination__is_published=True)\n        ).select_related(
             "destination"
         ).prefetch_related("partners")
         destination = self.request.query_params.get("destination", "").strip()[:180]
@@ -114,6 +114,6 @@ class PublicExperienceCollectionDetailView(RetrieveAPIView):
     lookup_url_kwarg = "slug"
 
     def get_queryset(self):
-        return ExperienceCollection.objects.filter(is_published=True).select_related(
+        return ExperienceCollection.objects.filter(is_published=True).filter(\n            Q(destination__isnull=True) | Q(destination__is_published=True)\n        ).select_related(
             "destination"
         ).prefetch_related("partners")
