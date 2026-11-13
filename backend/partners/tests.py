@@ -651,3 +651,140 @@ class RefundReconciliationTests(TestCase):
                     provider="sample_gateway", event_id="event-001", payload_sha256="b" * 64,
                     signature_verified=True,
                 )
+
+
+class DualGatewayIntegrationTests(TestCase):
+    def setUp(self):
+        import uuid
+        from datetime import date, timedelta
+        from .models import ReservationRequest, ReservationPayment, PartnerFinancialSettings
+        self.client = APIClient()
+        self.customer = User.objects.create_user(email="gateway-customer@example.com", password="test-password")
+        self.owner = User.objects.create_user(email="gateway-owner@example.com", password="test-password", role=User.Role.PARTNER)
+        self.partner = Partner.objects.create(
+            owner=self.owner, name="Gateway Lodge", category=Partner.Category.ACCOMMODATION,
+            gallery_status=Partner.ApprovalStatus.APPROVED, booking_status=Partner.ApprovalStatus.APPROVED,
+        )
+        self.reservation = ReservationRequest.objects.create(
+            customer=self.customer, partner=self.partner, start_date=date(2027, 8, 1),
+            end_date=date(2027, 8, 2), guests=1, status=ReservationRequest.Status.CONFIRMED,
+            booking_reference=uuid.uuid4(), quoted_total="250.00", quoted_deposit="50.00",
+            quoted_currency="ZAR",
+        )
+        PartnerFinancialSettings.objects.create(partner=self.partner, commission_rate="10.00", currency="ZAR")
+        self.payment = ReservationPayment.objects.create(
+            reservation=self.reservation, customer=self.customer, partner=self.partner,
+            kind=ReservationPayment.Kind.DEPOSIT, status=ReservationPayment.Status.PENDING,
+            amount="50.00", currency="ZAR", idempotency_key="gateway-idempotency-001",
+            provider="yoco", checkout_session_id="ch_yoco_checkout_001",
+        )
+
+    def yoco_webhook(self, webhook_id="wh_evt_001", signature_valid=True):
+        import base64
+        import hashlib
+        import hmac
+        import json
+        import time
+        from django.test import override_settings
+        secret_bytes = b"test-yoco-webhook-secret"
+        secret = "whsec_" + base64.b64encode(secret_bytes).decode("ascii")
+        raw = json.dumps({
+            "createdDate": "2027-07-01T10:00:00Z",
+            "id": "evt_yoco_001",
+            "type": "payment.succeeded",
+            "payload": {
+                "amount": 5000, "currency": "ZAR", "id": "pay_yoco_001",
+                "status": "succeeded", "metadata": {"checkoutId": "ch_yoco_checkout_001"},
+            },
+        }, separators=(",", ":")).encode()
+        timestamp = str(int(time.time()))
+        signed = webhook_id.encode() + b"." + timestamp.encode() + b"." + raw
+        signature = base64.b64encode(hmac.new(secret_bytes, signed, hashlib.sha256).digest()).decode()
+        if not signature_valid:
+            signature = "invalid"
+        with override_settings(YOCO_WEBHOOK_SECRET=secret):
+            return self.client.generic(
+                "POST", "/api/v1/partners/webhooks/yoco/", raw,
+                content_type="application/json",
+                HTTP_WEBHOOK_ID=webhook_id,
+                HTTP_WEBHOOK_TIMESTAMP=timestamp,
+                HTTP_WEBHOOK_SIGNATURE=f"v1,{signature}",
+            )
+
+    def test_yoco_signed_webhook_captures_only_matching_amount_and_creates_commission(self):
+        from .models import ReservationPayment, PartnerCommissionLedger
+        response = self.yoco_webhook()
+        self.assertEqual(response.status_code, 200)
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, ReservationPayment.Status.CAPTURED)
+        self.assertEqual(self.payment.provider_reference, "ch_yoco_checkout_001")
+        self.assertEqual(PartnerCommissionLedger.objects.get(payment=self.payment).commission_amount, Decimal("5.00"))
+
+    def test_yoco_webhook_rejects_invalid_signature(self):
+        response = self.yoco_webhook(signature_valid=False)
+        self.assertEqual(response.status_code, 400)
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, "pending")
+
+    def test_yoco_duplicate_webhook_is_idempotent(self):
+        from .models import PaymentProviderEvent, PartnerCommissionLedger
+        first = self.yoco_webhook(webhook_id="wh_evt_duplicate")
+        second = self.yoco_webhook(webhook_id="wh_evt_duplicate")
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertTrue(second.data["duplicate"])
+        self.assertEqual(PaymentProviderEvent.objects.filter(provider="yoco").count(), 1)
+        self.assertEqual(PartnerCommissionLedger.objects.filter(payment=self.payment).count(), 1)
+
+    def test_payfast_itn_requires_valid_signature_source_and_server_validation(self):
+        from unittest.mock import patch
+        from urllib.parse import urlencode
+        from django.test import override_settings
+        from .gateways import _payfast_signature
+        from .models import ReservationPayment, PartnerCommissionLedger
+        payload = {
+            "m_payment_id": str(self.payment.pk),
+            "pf_payment_id": "pf_txn_12345",
+            "payment_status": "COMPLETE",
+            "amount_gross": "50.00",
+            "merchant_id": "10000100",
+        }
+        payload["signature"] = _payfast_signature(payload)
+        raw = urlencode(payload).encode()
+        self.client.force_authenticate(user=None)
+        with override_settings(PAYFAST_MERCHANT_ID="10000100", PAYFAST_PASSPHRASE=""):
+            with patch("partners.views.verify_payfast_source_ip", return_value=True), patch(
+                "partners.views.validate_payfast_itn", return_value=True
+            ):
+                response = self.client.generic(
+                    "POST", "/api/v1/partners/webhooks/payfast/", raw,
+                    content_type="application/x-www-form-urlencoded",
+                    REMOTE_ADDR="127.0.0.1",
+                )
+        self.assertEqual(response.status_code, 200)
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, ReservationPayment.Status.CAPTURED)
+        self.assertEqual(self.payment.provider_reference, "pf_txn_12345")
+        self.assertEqual(PartnerCommissionLedger.objects.get(payment=self.payment).commission_amount, Decimal("5.00"))
+
+    def test_payfast_checkout_returns_signed_sandbox_form(self):
+        from django.test import override_settings
+        self.client.force_authenticate(user=self.customer)
+        with override_settings(
+            PAYFAST_MERCHANT_ID="10000100", PAYFAST_MERCHANT_KEY="test-key",
+            PAYFAST_PASSPHRASE="", PAYFAST_SANDBOX=True,
+            PAYFAST_NOTIFY_URL="https://example.test/api/v1/partners/webhooks/payfast/",
+            PAYMENT_RETURN_URL="https://example.test/payment/success",
+            PAYMENT_CANCEL_URL="https://example.test/payment/cancelled",
+        ):
+            response = self.client.post(
+                f"/api/v1/partners/payments/{self.payment.pk}/checkout/",
+                {"provider": "payfast"}, format="json",
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["checkout_url"], "https://sandbox.payfast.co.za/eng/process")
+        self.assertEqual(response.data["form_fields"]["amount"], "50.00")
+        self.assertIn("signature", response.data["form_fields"])
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.provider, "payfast")
+        self.assertEqual(self.payment.checkout_session_id, str(self.payment.pk))
