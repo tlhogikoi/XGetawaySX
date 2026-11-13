@@ -628,3 +628,86 @@ class PartnerFinancialSummaryView(APIView):
             "payouts_enabled": False,
         })
 
+
+
+class AdminPaymentRefundView(APIView):
+    """Staff reconcile an externally completed refund; this endpoint does not call a gateway."""
+    permission_classes = [IsAdminUser]
+
+    def get(self, request, pk):
+        from .models import ReservationRefund
+        from .serializers import ReservationRefundSerializer
+        payment = get_object_or_404(ReservationPayment, pk=pk)
+        refunds = ReservationRefund.objects.filter(payment=payment)
+        return Response(ReservationRefundSerializer(refunds, many=True).data)
+
+    def post(self, request, pk):
+        from decimal import ROUND_HALF_UP
+        from .models import ReservationRefund, PartnerCommissionAdjustment
+        from .serializers import RefundReconciliationSerializer, ReservationRefundSerializer
+
+        serializer = RefundReconciliationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        with transaction.atomic():
+            try:
+                reservation_id = ReservationPayment.objects.only("reservation_id").get(pk=pk).reservation_id
+                reservation = ReservationRequest.objects.select_for_update().get(pk=reservation_id)
+                payment = ReservationPayment.objects.select_for_update().select_related("partner").get(pk=pk)
+            except (ReservationPayment.DoesNotExist, ReservationRequest.DoesNotExist):
+                from rest_framework.exceptions import NotFound
+                raise NotFound("Payment record not found.")
+
+            if payment.status not in (ReservationPayment.Status.CAPTURED, ReservationPayment.Status.REFUNDED):
+                raise ValidationError("Only captured payments can be refunded.")
+            if not payment.provider_reference:
+                raise ValidationError("The captured payment must have a verified provider reference.")
+
+            duplicate = ReservationRefund.objects.filter(provider_reference=data["provider_reference"]).first()
+            if duplicate:
+                if duplicate.payment_id == payment.pk and duplicate.amount == data["amount"] and duplicate.status == ReservationRefund.Status.REFUNDED:
+                    return Response(ReservationRefundSerializer(duplicate).data)
+                raise ValidationError("This provider refund reference has already been used.")
+
+            refunded_total = ReservationRefund.objects.filter(
+                payment=payment, status=ReservationRefund.Status.REFUNDED
+            ).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+            remaining = payment.amount - refunded_total
+            amount = data["amount"]
+            if amount > remaining:
+                raise ValidationError({"amount": f"Refund exceeds the remaining refundable amount of {remaining} {payment.currency}."})
+
+            refund = ReservationRefund.objects.create(
+                payment=payment, amount=amount, currency=payment.currency,
+                status=ReservationRefund.Status.REFUNDED, provider=data["provider"],
+                provider_reference=data["provider_reference"], reason=data.get("reason", ""),
+                reconciled_by=request.user, reconciled_at=timezone.now(),
+            )
+
+            try:
+                commission_entry = payment.commission_entry
+            except PartnerCommissionLedger.DoesNotExist:
+                raise ValidationError("The captured payment has no commission ledger entry; refund reconciliation was not completed.")
+
+            prior_reversal = PartnerCommissionAdjustment.objects.filter(
+                refund__payment=payment
+            ).aggregate(total=Sum("commission_reversal"))["total"] or Decimal("0.00")
+            target_reversal = (
+                commission_entry.commission_amount * (refunded_total + amount) / payment.amount
+            ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            commission_reversal = min(
+                commission_entry.commission_amount - prior_reversal,
+                max(Decimal("0.00"), target_reversal - prior_reversal),
+            )
+            PartnerCommissionAdjustment.objects.create(
+                refund=refund, partner=payment.partner, gross_refund=amount,
+                commission_reversal=commission_reversal,
+                partner_net_reversal=amount - commission_reversal,
+            )
+
+            if refunded_total + amount == payment.amount:
+                payment.status = ReservationPayment.Status.REFUNDED
+                payment.save(update_fields=["status", "updated_at"])
+
+        return Response(ReservationRefundSerializer(refund).data, status=status.HTTP_201_CREATED)
