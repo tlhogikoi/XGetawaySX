@@ -28,7 +28,7 @@ export default function TripPlanner({ accessToken }: { accessToken: string }) {
   const selectedPartner = partners.find(partner => partner.id === selectedPartnerId) ?? null;
 
   async function request(path: string, init: RequestInit = {}) {
-    const response = await fetch(`${API_BASE}/api/v1/partners/${path}`, { ...init, headers: { ...headers, ...(init.headers || {}) } });
+    const response = await fetch(`${API_BASE}/api/v1/partners/${path}`, { ...init, headers: { ...headers } });
     if (!response.ok) {
       const body = await response.json().catch(() => ({}));
       throw new Error(body.detail || body.message || "The request could not be completed.");
@@ -107,7 +107,7 @@ export default function TripPlanner({ accessToken }: { accessToken: string }) {
         <div className="trip-create-row"><input value={title} onChange={e => setTitle(e.target.value)} aria-label="New getaway plan title" placeholder="Name your getaway"/><button disabled={busy} onClick={createPlan}><Plus size={15}/> New plan</button></div>
         <label className="trip-field"><span>Selected plan</span><select value={selectedPlanId ?? ""} onChange={e => setSelectedPlanId(Number(e.target.value) || null)}><option value="">Choose a plan</option>{plans.map(plan => <option key={plan.id} value={plan.id}>{plan.title}</option>)}</select></label>
         {selectedPlan && <><div className="trip-date-grid"><label><span>Start date</span><input type="date" value={startDate || selectedPlan.start_date || ""} onChange={e => setStartDate(e.target.value)}/></label><label><span>End date</span><input type="date" value={endDate || selectedPlan.end_date || ""} onChange={e => setEndDate(e.target.value)}/></label></div>
-          <button className="trip-save-dates" disabled={busy} onClick={async()=>{setBusy(true);try{const updated=await request(`trips/${selectedPlan.id}/`,{method:"PATCH",body:JSON.stringify({start_date:startDate||null,end_date:endDate||null})}) as TripPlan;setPlans(current=>current.map(p=>p.id===updated.id?updated:p));setNotice("Trip dates saved.");}catch(e){setError(e instanceof Error?e.message:"Could not save dates.");}finally{setBusy(false);}}}><CalendarDays size={15}/> Save dates</button>
+          <button className="trip-save-dates" disabled={busy} onClick={async()=>{setBusy(true);try{const updated=await request(`trips/${selectedPlan.id}/`,{method:"PATCH",body:JSON.stringify({start_date:startDate||selectedPlan.start_date,end_date:endDate||selectedPlan.end_date})}) as TripPlan;setPlans(current=>current.map(p=>p.id===updated.id?updated:p));setNotice("Trip dates saved.");}catch(e){setError(e instanceof Error?e.message:"Could not save dates.");}finally{setBusy(false);}}}><CalendarDays size={15}/> Save dates</button>
           <div className="trip-itinerary"><h4>Saved places <span>{selectedPlan.items.length}</span></h4>{selectedPlan.items.length ? selectedPlan.items.map(item=><div className="trip-itinerary-item" key={item.id}><div><strong>{item.partner.name}</strong><small>{[item.partner.city,item.partner.province].filter(Boolean).join(", ")}</small></div><button aria-label={`Remove ${item.partner.name}`} disabled={busy} onClick={()=>removeItem(item.id)}><Trash2 size={15}/></button></div>):<p className="trip-muted">Your itinerary is empty. Add an approved partner below.</p>}</div>
         </>}
       </div>
