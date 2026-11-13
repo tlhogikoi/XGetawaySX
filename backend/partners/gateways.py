@@ -2,6 +2,7 @@
 
 Secrets are read from Django settings/environment and are never returned to clients.
 """
+import base64
 import hashlib
 import hmac
 import json
@@ -9,7 +10,7 @@ import socket
 import time
 from decimal import Decimal
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import quote_plus, urlparse
 from urllib.request import Request, urlopen
 
 from django.conf import settings
@@ -43,10 +44,9 @@ def build_payfast_checkout(payment):
         "item_name": f"XGetawaySX reservation {payment.reservation_id}"[:100],
     }
     fields = {key: str(value).strip() for key, value in fields.items() if value not in (None, "")}
-    signature_source = "&".join(f"{key}={__import__('urllib.parse', fromlist=['quote_plus']).quote_plus(value)}" for key, value in fields.items())
+    signature_source = "&".join(f"{key}={quote_plus(value)}" for key, value in fields.items())
     passphrase = _setting("PAYFAST_PASSPHRASE")
     if passphrase:
-        from urllib.parse import quote_plus
         signature_source += "&passphrase=" + quote_plus(str(passphrase).strip())
     fields["signature"] = hashlib.md5(signature_source.encode("utf-8")).hexdigest()
     action = "https://sandbox.payfast.co.za/eng/process" if sandbox else "https://www.payfast.co.za/eng/process"
@@ -92,8 +92,14 @@ def create_yoco_checkout(payment):
         raise GatewayError("Yoco checkout could not be created. Retry using the same payment record.") from exc
     redirect_url = result.get("redirectUrl")
     checkout_id = result.get("id")
-    if not redirect_url or not checkout_id or result.get("amount") != amount_cents or result.get("currency") != payment.currency:
-        raise GatewayError("Yoco returned an incomplete or mismatched checkout response.")
+    parsed_redirect = urlparse(redirect_url or "")
+    if (
+        not redirect_url or parsed_redirect.scheme != "https"
+        or not (parsed_redirect.hostname == "yoco.com" or (parsed_redirect.hostname or "").endswith(".yoco.com"))
+        or not checkout_id or result.get("amount") != amount_cents
+        or result.get("currency") != payment.currency
+    ):
+        raise GatewayError("Yoco returned an incomplete, unexpected or mismatched checkout response.")
     return {"checkout_url": redirect_url, "form_fields": None, "checkout_session_id": checkout_id}
 
 
@@ -113,9 +119,12 @@ def verify_yoco_webhook(raw_body, headers, now=None, tolerance_seconds=180):
     current = int(time.time() if now is None else now)
     if abs(current - signed_at) > tolerance_seconds:
         return False, "Yoco webhook timestamp is outside the allowed replay window."
-    secret_bytes = __import__("base64").b64decode(secret.split("_", 1)[1])
+    try:
+        secret_bytes = base64.b64decode(secret.split("_", 1)[1], validate=True)
+    except (ValueError, TypeError):
+        return False, "Yoco webhook signing secret is malformed."
     signed_content = webhook_id.encode() + b"." + timestamp.encode() + b"." + raw_body
-    expected = __import__("base64").b64encode(
+    expected = base64.b64encode(
         hmac.new(secret_bytes, signed_content, hashlib.sha256).digest()
     ).decode("ascii")
     for candidate in signatures.split():
@@ -125,7 +134,6 @@ def verify_yoco_webhook(raw_body, headers, now=None, tolerance_seconds=180):
 
 
 def _payfast_signature(data):
-    from urllib.parse import quote_plus
     parts = []
     for key, value in data.items():
         if key == "signature" or value is None or str(value) == "":
