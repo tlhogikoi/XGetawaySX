@@ -126,3 +126,63 @@ class PublicPartnerDetailTests(TestCase):
         )
         response = self.client.get(f"/api/v1/partners/{partner.slug}/")
         self.assertEqual(response.status_code, 404)
+
+
+class PublicDestinationAndCollectionTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.owner = User.objects.create_user(email="destination-owner@example.com", password="test-password")
+
+    def make_partner(self, name, status):
+        return Partner.objects.create(
+            owner=self.owner, name=name, category=Partner.Category.ACTIVITY,
+            gallery_status=status, city="Johannesburg", province="Gauteng",
+        )
+
+    def test_destination_pages_are_published_only_and_hide_unapproved_partners(self):
+        from .models import DestinationPage
+        approved = self.make_partner("Approved Adventure", Partner.ApprovalStatus.APPROVED)
+        pending = self.make_partner("Pending Adventure", Partner.ApprovalStatus.PENDING)
+        destination = DestinationPage.objects.create(
+            name="Gauteng Escapes", slug="gauteng-escapes",
+            introduction="Urban energy and nearby nature.", is_published=True,
+        )
+        destination.partners.add(approved, pending)
+        DestinationPage.objects.create(name="Draft Destination", slug="draft-destination")
+        response = self.client.get("/api/v1/partners/destinations/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual([p["name"] for p in response.data[0]["partners"]], ["Approved Adventure"])
+        hidden = self.client.get("/api/v1/partners/destinations/draft-destination/")
+        self.assertEqual(hidden.status_code, 404)
+
+    def test_collection_filters_unapproved_partners_and_respects_destination_publication(self):
+        from .models import DestinationPage, ExperienceCollection
+        approved = self.make_partner("Approved Tour", Partner.ApprovalStatus.APPROVED)
+        rejected = self.make_partner("Rejected Tour", Partner.ApprovalStatus.REJECTED)
+        destination = DestinationPage.objects.create(
+            name="Magalies Gateway", slug="magalies-gateway", is_published=True,
+        )
+        collection = ExperienceCollection.objects.create(
+            title="Outdoor Weekends", slug="outdoor-weekends",
+            summary="Curated outdoor escapes around the region.",
+            destination=destination, is_published=True,
+        )
+        collection.partners.add(approved, rejected)
+        response = self.client.get("/api/v1/partners/collections/?destination=magalies-gateway")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual([p["name"] for p in response.data[0]["partners"]], ["Approved Tour"])
+        destination.is_published = False
+        destination.save()
+        response = self.client.get("/api/v1/partners/collections/?destination=magalies-gateway")
+        self.assertEqual(response.data, [])
+
+    def test_unpublished_collection_is_not_public(self):
+        from .models import ExperienceCollection
+        ExperienceCollection.objects.create(
+            title="Internal Draft", slug="internal-draft",
+            summary="Not for public display.", is_published=False,
+        )
+        self.assertEqual(self.client.get("/api/v1/partners/collections/").data, [])
+        self.assertEqual(self.client.get("/api/v1/partners/collections/internal-draft/").status_code, 404)
