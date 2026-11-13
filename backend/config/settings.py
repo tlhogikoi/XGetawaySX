@@ -78,6 +78,19 @@ FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
 DATA_UPLOAD_MAX_MEMORY_SIZE = 20 * 1024 * 1024
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# Payment gateway configuration. Keep all live secrets in environment variables.
+PAYFAST_MERCHANT_ID = os.getenv("PAYFAST_MERCHANT_ID", "")
+PAYFAST_MERCHANT_KEY = os.getenv("PAYFAST_MERCHANT_KEY", "")
+PAYFAST_PASSPHRASE = os.getenv("PAYFAST_PASSPHRASE", "")
+PAYFAST_SANDBOX = os.getenv("PAYFAST_SANDBOX", "True").lower() in {"1", "true", "yes"}
+PAYFAST_NOTIFY_URL = os.getenv("PAYFAST_NOTIFY_URL", "")
+YOCO_SECRET_KEY = os.getenv("YOCO_SECRET_KEY", "")
+YOCO_WEBHOOK_SECRET = os.getenv("YOCO_WEBHOOK_SECRET", "")
+PAYMENT_RETURN_URL = os.getenv("PAYMENT_RETURN_URL", "")
+PAYMENT_CANCEL_URL = os.getenv("PAYMENT_CANCEL_URL", "")
+PAYMENT_FAILURE_URL = os.getenv("PAYMENT_FAILURE_URL", "")
+
+
 CORS_ALLOWED_ORIGINS = [
     origin.strip() for origin in os.getenv(
         "DJANGO_CORS_ALLOWED_ORIGINS", "http://localhost:5173"
