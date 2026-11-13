@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.utils import timezone
 
 from .models import Partner
 
@@ -186,6 +187,11 @@ class PartnerAvailabilitySerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Price cannot be negative.")
         return value
 
+    def validate_date(self, value):
+        if value < timezone.localdate():
+            raise serializers.ValidationError("Availability cannot be published for a past date.")
+        return value
+
 
 class ReservationRequestCreateSerializer(serializers.Serializer):
     partner_id = serializers.IntegerField()
@@ -197,6 +203,8 @@ class ReservationRequestCreateSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         start, end = attrs["start_date"], attrs["end_date"]
+        if start < timezone.localdate():
+            raise serializers.ValidationError({"start_date": "Reservation requests cannot start in the past."})
         if end <= start:
             raise serializers.ValidationError({"end_date": "Checkout must be after check-in."})
         if (end - start).days > 90:
