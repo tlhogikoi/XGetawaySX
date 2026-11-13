@@ -471,3 +471,22 @@ The following code has been committed to `feat/application-foundation`; it has n
 - Public Gallery and partner-profile APIs remain the source of truth: only eligible approved/published content is rendered. The placeholder does not reveal unpublished records or internal workflow status.
 
 **Not yet verified:** frontend typecheck/build, component/browser tests, backend tests, CI, merge, deployment and production visual QA.
+
+
+## Development 11 — Partner discovery, search and filtering
+
+**Implemented on `feat/application-foundation`; not merged or deployed.**
+
+- Extended `GET /api/v1/partners/` with optional `q`, `category`, `city`, `province` and `country` filters.
+- Search matches approved partner name, description, city and province. Category values are restricted to the model's declared category choices; text inputs are trimmed and bounded.
+- The approved-partner queryset remains the base queryset before every filter. Pending, rejected and suspended partners are never returned by public discovery.
+- Added a responsive public discovery interface with keyword search, category and destination filters, result count, loading/error/empty states and direct links to public partner profiles.
+- Partner cards show only fields already permitted by `PublicPartnerSerializer`; profile pages continue to obtain stories from the publication-gated Gallery queryset.
+- Updated the main navigation to point to the discovery section.
+
+**API examples**
+- `/api/v1/partners/?q=mountain`
+- `/api/v1/partners/?category=accommodation&city=Johannesburg`
+- `/api/v1/partners/?province=Gauteng&country=South%20Africa`
+
+**Not yet verified:** Django test suite, frontend typecheck/build, browser and accessibility tests, CI, pagination/performance under production data, merge and deployment.
