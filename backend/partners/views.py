@@ -871,6 +871,7 @@ class PaymentProviderWebhookView(APIView):
             if locked_payment.status == ReservationPayment.Status.PENDING:
                 if success:
                     if reservation.status != ReservationRequest.Status.CONFIRMED:
+                        event_record.delete()
                         return Response({"detail": "Cannot capture a payment for an unconfirmed reservation."}, status=status.HTTP_409_CONFLICT)
                     locked_payment.status = ReservationPayment.Status.CAPTURED
                     locked_payment.provider_reference = provider_reference
@@ -895,6 +896,7 @@ class PaymentProviderWebhookView(APIView):
             elif success and locked_payment.status == ReservationPayment.Status.CAPTURED and locked_payment.provider_reference == provider_reference:
                 pass
             else:
+                event_record.delete()
                 return Response({"detail": "Payment state conflicts with this provider event."}, status=status.HTTP_409_CONFLICT)
             event_record.processed_at = timezone.now()
             event_record.save(update_fields=["processed_at"])
