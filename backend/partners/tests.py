@@ -578,6 +578,7 @@ class RefundReconciliationTests(TestCase):
         )
 
     def _reservation(self):
+        import uuid
         from datetime import date
         from .models import ReservationRequest
         return ReservationRequest.objects.create(
