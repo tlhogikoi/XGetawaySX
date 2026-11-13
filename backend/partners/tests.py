@@ -553,3 +553,94 @@ class PaymentAndPartnerFinanceTests(TestCase):
         self.assertEqual(balance.data["kind"], "balance")
         self.assertEqual(balance.data["amount"], "320.00")
 
+
+
+class RefundReconciliationTests(TestCase):
+    def setUp(self):
+        import uuid
+        from .models import ReservationPayment, PartnerCommissionLedger
+        self.client = APIClient()
+        self.customer = User.objects.create_user(email="refund-customer@example.com", password="test-password")
+        self.admin = User.objects.create_superuser(email="refund-admin@example.com", password="test-password")
+        self.partner = Partner.objects.create(
+            owner=self.admin, name="Refund Lodge", category=Partner.Category.ACCOMMODATION,
+            gallery_status=Partner.ApprovalStatus.APPROVED,
+        )
+        self.payment = ReservationPayment.objects.create(
+            reservation=self._reservation(), customer=self.customer, partner=self.partner,
+            kind=ReservationPayment.Kind.FULL, status=ReservationPayment.Status.CAPTURED,
+            amount="100.00", currency="ZAR", idempotency_key="refund-payment-key-001",
+            provider="sample_gateway", provider_reference="capture-refund-test-001",
+        )
+        PartnerCommissionLedger.objects.create(
+            payment=self.payment, partner=self.partner, gross_amount="100.00",
+            commission_rate="10.00", commission_amount="10.00", partner_net_amount="90.00",
+        )
+
+    def _reservation(self):
+        from datetime import date
+        from .models import ReservationRequest
+        return ReservationRequest.objects.create(
+            customer=self.customer, partner=self.partner, start_date=date(2027, 6, 1),
+            end_date=date(2027, 6, 2), guests=1, status=ReservationRequest.Status.CONFIRMED,
+            booking_reference=uuid.uuid4(),
+        )
+
+    def refund(self, amount, reference):
+        return self.client.post(
+            f"/api/v1/partners/payments/{self.payment.pk}/refunds/",
+            {"amount": amount, "provider": "sample_gateway", "provider_reference": reference, "reason": "Customer refund"},
+            format="json",
+        )
+
+    def test_only_staff_can_reconcile_refund(self):
+        self.client.force_authenticate(user=self.customer)
+        response = self.refund("25.00", "refund-ref-unauthorised")
+        self.assertEqual(response.status_code, 403)
+
+    def test_partial_refunds_reverse_commission_and_full_refund_closes_payment(self):
+        from .models import ReservationRefund, PartnerCommissionAdjustment, ReservationPayment
+        self.client.force_authenticate(user=self.admin)
+        first = self.refund("30.00", "refund-part-001")
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(first.data["status"], "refunded")
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, ReservationPayment.Status.CAPTURED)
+        second = self.refund("70.00", "refund-part-002")
+        self.assertEqual(second.status_code, 201)
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, ReservationPayment.Status.REFUNDED)
+        adjustments = PartnerCommissionAdjustment.objects.filter(refund__payment=self.payment)
+        self.assertEqual(sum((item.commission_reversal for item in adjustments), Decimal("0.00")), Decimal("10.00"))
+        self.assertEqual(sum((item.partner_net_reversal for item in adjustments), Decimal("0.00")), Decimal("90.00"))
+        self.assertEqual(ReservationRefund.objects.filter(payment=self.payment).count(), 2)
+
+    def test_refunds_cannot_exceed_captured_amount(self):
+        from .models import ReservationRefund
+        self.client.force_authenticate(user=self.admin)
+        response = self.refund("100.01", "refund-over-limit")
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(ReservationRefund.objects.filter(payment=self.payment).exists())
+
+    def test_duplicate_provider_refund_reference_is_idempotent_for_same_refund(self):
+        from .models import ReservationRefund
+        self.client.force_authenticate(user=self.admin)
+        first = self.refund("20.00", "refund-idempotent-001")
+        second = self.refund("20.00", "refund-idempotent-001")
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(ReservationRefund.objects.filter(payment=self.payment).count(), 1)
+
+    def test_provider_event_ids_are_unique_per_provider(self):
+        from django.db import IntegrityError, transaction
+        from .models import PaymentProviderEvent
+        PaymentProviderEvent.objects.create(
+            provider="sample_gateway", event_id="event-001", payload_sha256="a" * 64,
+            signature_verified=True,
+        )
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                PaymentProviderEvent.objects.create(
+                    provider="sample_gateway", event_id="event-001", payload_sha256="b" * 64,
+                    signature_verified=True,
+                )
