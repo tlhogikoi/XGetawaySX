@@ -533,7 +533,6 @@ class PaymentAndPartnerFinanceTests(TestCase):
         self.assertEqual(response.status_code, 400)
 
     def test_balance_uses_original_price_snapshot_after_partner_changes_daily_prices(self):
-        from .models import ReservationAvailability, ReservationPayment
         self.client.force_authenticate(user=self.customer)
         first = self.create_payment("payment-deposit-snapshot-001")
         self.assertEqual(first.status_code, 201)
