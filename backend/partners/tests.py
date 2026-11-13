@@ -505,3 +505,30 @@ class PaymentAndPartnerFinanceTests(TestCase):
         self.policy.refresh_from_db()
         self.assertEqual(self.policy.commission_rate, Decimal("10.00"))
 
+    def test_captured_payment_prevents_cancellation_without_refund_workflow(self):
+        from .models import ReservationPayment
+        payment = ReservationPayment.objects.create(
+            reservation=self.reservation, customer=self.customer, partner=self.partner,
+            kind=ReservationPayment.Kind.DEPOSIT, status=ReservationPayment.Status.CAPTURED,
+            amount="80.00", currency="ZAR", idempotency_key="captured-payment-0001",
+            provider="test_gateway", provider_reference="captured-cancel-test-001",
+        )
+        self.client.force_authenticate(user=self.customer)
+        response = self.client.post(f"/api/v1/partners/reservations/{self.reservation.pk}/cancel/")
+        self.assertEqual(response.status_code, 400)
+        self.reservation.refresh_from_db()
+        self.assertEqual(self.reservation.status, "confirmed")
+
+    def test_admin_cannot_capture_payment_after_reservation_cancelled(self):
+        self.client.force_authenticate(user=self.customer)
+        payment = self.create_payment()
+        self.reservation.status = "cancelled"
+        self.reservation.save(update_fields=["status"])
+        self.client.force_authenticate(user=self.admin)
+        response = self.client.post(
+            f"/api/v1/partners/payments/{payment.data['id']}/reconcile/",
+            {"status": "captured", "provider": "test_gateway", "provider_reference": "late-capture-001"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+
