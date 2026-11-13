@@ -433,4 +433,173 @@ class PartnerBookingProfileListView(APIView):
             owner=request.user, booking_status=Partner.ApprovalStatus.APPROVED
         ).order_by("name")
         return Response(PublicPartnerSerializer(profiles, many=True).data)
+from decimal import Decimal, ROUND_HALF_UP
+from django.db.models import Sum
+from rest_framework.permissions import IsAdminUser
+from .models import PartnerFinancialSettings, ReservationPayment, PartnerCommissionLedger
+from .serializers import (
+    PartnerFinancialSettingsSerializer, ReservationPaymentCreateSerializer,
+    ReservationPaymentSerializer, PaymentReconciliationSerializer,
+    PartnerCommissionLedgerSerializer,
+)
+
+
+def _reservation_financial_totals(reservation):
+    dates = [
+        reservation.start_date + timedelta(days=offset)
+        for offset in range((reservation.end_date - reservation.start_date).days)
+    ]
+    days = list(PartnerAvailability.objects.filter(
+        partner=reservation.partner, date__in=dates, is_open=True
+    ).order_by("date"))
+    if len(days) != len(dates) or any(day.price_per_guest is None for day in days):
+        raise ValidationError("The partner has not published a complete price for every reserved night.")
+    currencies = {day.currency for day in days}
+    if len(currencies) != 1:
+        raise ValidationError("The reservation contains inconsistent pricing currencies.")
+    currency = currencies.pop()
+    total = sum((day.price_per_guest * reservation.guests for day in days), Decimal("0.00"))
+    policy, _created = PartnerFinancialSettings.objects.get_or_create(partner=reservation.partner)
+    if policy.currency != currency:
+        raise ValidationError("The partner financial currency does not match the published availability currency.")
+    if policy.deposit_type == PartnerFinancialSettings.DepositType.PERCENTAGE:
+        deposit = (total * policy.deposit_value / Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    elif policy.deposit_type == PartnerFinancialSettings.DepositType.FIXED:
+        deposit = min(total, policy.deposit_value)
+    else:
+        deposit = Decimal("0.00")
+    paid = reservation.payments.filter(status=ReservationPayment.Status.CAPTURED).aggregate(
+        total=Sum("amount")
+    )["total"] or Decimal("0.00")
+    pending = reservation.payments.filter(status=ReservationPayment.Status.PENDING).aggregate(
+        total=Sum("amount")
+    )["total"] or Decimal("0.00")
+    return total, currency, deposit, paid, pending
+
+
+class PartnerFinancialSettingsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        partner_id = request.query_params.get("partner_id")
+        queryset = PartnerFinancialSettings.objects.filter(partner__owner=request.user)
+        if partner_id:
+            queryset = queryset.filter(partner_id=partner_id)
+        return Response(PartnerFinancialSettingsSerializer(queryset, many=True).data)
+
+    def post(self, request):
+        data = request.data.copy()
+        partner_id = data.pop("partner_id", None)
+        partner = get_object_or_404(Partner, pk=partner_id, owner=request.user, booking_status=Partner.ApprovalStatus.APPROVED)
+        with transaction.atomic():
+            settings_obj, _created = PartnerFinancialSettings.objects.select_for_update().get_or_create(partner=partner)
+            serializer = PartnerFinancialSettingsSerializer(settings_obj, data=data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            saved = serializer.save()
+        return Response(PartnerFinancialSettingsSerializer(saved).data)
+
+
+class ReservationPaymentListCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        payments = ReservationPayment.objects.filter(customer=request.user).select_related("partner", "reservation")
+        return Response(ReservationPaymentSerializer(payments, many=True).data)
+
+    def post(self, request):
+        serializer = ReservationPaymentCreateSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        reservation = serializer.validated_data["reservation"]
+        key = serializer.validated_data["idempotency_key"]
+        with transaction.atomic():
+            reservation = ReservationRequest.objects.select_for_update().get(pk=reservation.pk, customer=request.user)
+            existing = ReservationPayment.objects.filter(customer=request.user, idempotency_key=key).first()
+            if existing:
+                if existing.reservation_id != reservation.pk:
+                    raise ValidationError("This idempotency key has already been used for another reservation.")
+                return Response(ReservationPaymentSerializer(existing).data)
+            total, currency, deposit, paid, pending = _reservation_financial_totals(reservation)
+            remaining = max(Decimal("0.00"), total - paid)
+            if remaining <= 0:
+                raise ValidationError("This reservation has already been paid in full.")
+            if pending > 0:
+                raise ValidationError("A payment is already awaiting reconciliation for this reservation.")
+            deposit_due = max(Decimal("0.00"), deposit - paid)
+            if deposit_due > 0:
+                amount, kind = min(deposit_due, remaining), ReservationPayment.Kind.DEPOSIT
+            else:
+                amount, kind = remaining, ReservationPayment.Kind.BALANCE
+            payment = ReservationPayment.objects.create(
+                reservation=reservation, customer=request.user, partner=reservation.partner,
+                kind=kind, amount=amount, currency=currency, idempotency_key=key,
+            )
+        return Response(ReservationPaymentSerializer(payment).data, status=status.HTTP_201_CREATED)
+
+
+class AdminPaymentReconciliationView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def post(self, request, pk):
+        serializer = PaymentReconciliationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        with transaction.atomic():
+            try:
+                payment = ReservationPayment.objects.select_for_update().select_related("partner", "reservation").get(pk=pk)
+            except ReservationPayment.DoesNotExist:
+                from rest_framework.exceptions import NotFound
+                raise NotFound("Payment record not found.")
+            if payment.status != ReservationPayment.Status.PENDING:
+                if payment.status == data["status"] and payment.provider_reference == (data.get("provider_reference") or None):
+                    return Response(ReservationPaymentSerializer(payment).data)
+                raise ValidationError("Only pending payment records can be reconciled.")
+            payment.provider = data["provider"]
+            payment.provider_reference = data.get("provider_reference") or None
+            payment.failure_reason = data.get("failure_reason", "")
+            payment.status = data["status"]
+            if payment.status == ReservationPayment.Status.CAPTURED:
+                payment.captured_at = timezone.now()
+            payment.save(update_fields=["provider", "provider_reference", "failure_reason", "status", "captured_at", "updated_at"])
+            if payment.status == ReservationPayment.Status.CAPTURED:
+                policy, _created = PartnerFinancialSettings.objects.get_or_create(partner=payment.partner)
+                rate = policy.commission_rate
+                commission = (payment.amount * rate / Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                PartnerCommissionLedger.objects.get_or_create(
+                    payment=payment,
+                    defaults={
+                        "partner": payment.partner,
+                        "gross_amount": payment.amount,
+                        "commission_rate": rate,
+                        "commission_amount": commission,
+                        "partner_net_amount": payment.amount - commission,
+                    },
+                )
+        return Response(ReservationPaymentSerializer(payment).data)
+
+
+class PartnerFinancialSummaryView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        partner_id = request.query_params.get("partner_id")
+        partner = get_object_or_404(Partner, pk=partner_id, owner=request.user)
+        captured = ReservationPayment.objects.filter(
+            partner=partner, status=ReservationPayment.Status.CAPTURED
+        ).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+        entries = PartnerCommissionLedger.objects.filter(partner=partner).select_related("payment")
+        accrued = entries.filter(status=PartnerCommissionLedger.Status.ACCRUED).aggregate(
+            total=Sum("commission_amount")
+        )["total"] or Decimal("0.00")
+        net = entries.exclude(status=PartnerCommissionLedger.Status.VOID).aggregate(
+            total=Sum("partner_net_amount")
+        )["total"] or Decimal("0.00")
+        return Response({
+            "partner_id": partner.pk,
+            "currency": partner.financial_settings.currency if hasattr(partner, "financial_settings") else "ZAR",
+            "captured_payments_total": captured,
+            "accrued_commission_total": accrued,
+            "partner_net_total": net,
+            "commission_entries": PartnerCommissionLedgerSerializer(entries, many=True).data,
+            "payouts_enabled": False,
+        })
 
