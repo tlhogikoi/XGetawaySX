@@ -96,3 +96,28 @@ class PartnerCommissionLedgerAdmin(admin.ModelAdmin):
     search_fields = ("partner__name", "payment__provider_reference")
     readonly_fields = ("payment", "partner", "gross_amount", "commission_rate", "commission_amount", "partner_net_amount", "status", "created_at")
 
+
+
+from .models import ReservationRefund, PartnerCommissionAdjustment, PaymentProviderEvent
+
+
+@admin.register(ReservationRefund)
+class ReservationRefundAdmin(admin.ModelAdmin):
+    list_display = ("id", "payment", "amount", "currency", "status", "provider", "provider_reference", "reconciled_at")
+    list_filter = ("status", "provider", "currency")
+    search_fields = ("provider_reference", "payment__provider_reference", "payment__reservation__booking_reference")
+    readonly_fields = ("payment", "amount", "currency", "status", "provider", "provider_reference", "reason", "reconciled_by", "reconciled_at", "created_at")
+
+
+@admin.register(PartnerCommissionAdjustment)
+class PartnerCommissionAdjustmentAdmin(admin.ModelAdmin):
+    list_display = ("refund", "partner", "gross_refund", "commission_reversal", "partner_net_reversal", "created_at")
+    readonly_fields = ("refund", "partner", "gross_refund", "commission_reversal", "partner_net_reversal", "created_at")
+
+
+@admin.register(PaymentProviderEvent)
+class PaymentProviderEventAdmin(admin.ModelAdmin):
+    list_display = ("provider", "event_id", "signature_verified", "received_at", "processed_at")
+    list_filter = ("provider", "signature_verified")
+    search_fields = ("event_id", "payload_sha256")
+    readonly_fields = ("provider", "event_id", "payload_sha256", "signature_verified", "received_at", "processed_at")
