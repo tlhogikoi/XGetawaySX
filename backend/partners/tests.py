@@ -2,6 +2,7 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
+from decimal import Decimal
 
 from gallery.models import GalleryMedia, GalleryMediaPermissionGrant, GalleryStory
 
