@@ -447,29 +447,39 @@ from .serializers import (
 
 
 def _reservation_financial_totals(reservation):
-    dates = [
-        reservation.start_date + timedelta(days=offset)
-        for offset in range((reservation.end_date - reservation.start_date).days)
-    ]
-    days = list(PartnerAvailability.objects.filter(
-        partner=reservation.partner, date__in=dates, is_open=True
-    ).order_by("date"))
-    if len(days) != len(dates) or any(day.price_per_guest is None for day in days):
-        raise ValidationError("The partner has not published a complete price for every reserved night.")
-    currencies = {day.currency for day in days}
-    if len(currencies) != 1:
-        raise ValidationError("The reservation contains inconsistent pricing currencies.")
-    currency = currencies.pop()
-    total = sum((day.price_per_guest * reservation.guests for day in days), Decimal("0.00"))
-    policy, _created = PartnerFinancialSettings.objects.get_or_create(partner=reservation.partner)
-    if policy.currency != currency:
-        raise ValidationError("The partner financial currency does not match the published availability currency.")
-    if policy.deposit_type == PartnerFinancialSettings.DepositType.PERCENTAGE:
-        deposit = (total * policy.deposit_value / Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    elif policy.deposit_type == PartnerFinancialSettings.DepositType.FIXED:
-        deposit = min(total, policy.deposit_value)
+    if reservation.quoted_total is not None:
+        total = reservation.quoted_total
+        currency = reservation.quoted_currency
+        deposit = reservation.quoted_deposit or Decimal("0.00")
     else:
-        deposit = Decimal("0.00")
+        dates = [
+            reservation.start_date + timedelta(days=offset)
+            for offset in range((reservation.end_date - reservation.start_date).days)
+        ]
+        days = list(PartnerAvailability.objects.filter(
+            partner=reservation.partner, date__in=dates
+        ).order_by("date"))
+        if len(days) != len(dates) or any(day.price_per_guest is None for day in days):
+            raise ValidationError("The partner has not published a complete price for every reserved night.")
+        currencies = {day.currency for day in days}
+        if len(currencies) != 1:
+            raise ValidationError("The reservation contains inconsistent pricing currencies.")
+        currency = currencies.pop()
+        total = sum((day.price_per_guest * reservation.guests for day in days), Decimal("0.00"))
+        policy, _created = PartnerFinancialSettings.objects.get_or_create(partner=reservation.partner)
+        if policy.currency != currency:
+            raise ValidationError("The partner financial currency does not match the published availability currency.")
+        if policy.deposit_type == PartnerFinancialSettings.DepositType.PERCENTAGE:
+            deposit = (total * policy.deposit_value / Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        elif policy.deposit_type == PartnerFinancialSettings.DepositType.FIXED:
+            deposit = min(total, policy.deposit_value)
+        else:
+            deposit = Decimal("0.00")
+        reservation.quoted_total = total
+        reservation.quoted_deposit = deposit
+        reservation.quoted_currency = currency
+        reservation.quoted_at = timezone.now()
+        reservation.save(update_fields=["quoted_total", "quoted_deposit", "quoted_currency", "quoted_at", "updated_at"])
     paid = reservation.payments.filter(status=ReservationPayment.Status.CAPTURED).aggregate(
         total=Sum("amount")
     )["total"] or Decimal("0.00")
