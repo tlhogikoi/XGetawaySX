@@ -46,7 +46,7 @@ export default function TripPlanner({ accessToken }: { accessToken: string }) {
   useEffect(() => {
     const controller = new AbortController();
     Promise.all([
-      fetch(`${API_BASE}/api/v1/partners/`, { headers, signal: controller.signal }).then(async r => { if (!r.ok) throw new Error("Could not load approved partners."); return r.json(); }),
+      fetch(`${API_BASE}/api/v1/partners/?enquiry_ready=true`, { headers, signal: controller.signal }).then(async r => { if (!r.ok) throw new Error("Could not load approved partners."); return r.json(); }),
       fetch(`${API_BASE}/api/v1/partners/trips/`, { headers, signal: controller.signal }).then(async r => { if (!r.ok) throw new Error("Could not load your trip plans."); return r.json(); }),
       fetch(`${API_BASE}/api/v1/partners/enquiries/`, { headers, signal: controller.signal }).then(async r => { if (!r.ok) throw new Error("Could not load your enquiries."); return r.json(); }),
     ]).then(([p, t, e]) => {
