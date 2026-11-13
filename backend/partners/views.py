@@ -438,7 +438,7 @@ class PartnerBookingProfileListView(APIView):
 from decimal import Decimal, ROUND_HALF_UP
 from django.db.models import Sum
 from rest_framework.permissions import IsAdminUser
-from .models import PartnerFinancialSettings, ReservationPayment, PartnerCommissionLedger, ReservationRefund
+from .models import PartnerFinancialSettings, ReservationPayment, PartnerCommissionLedger, ReservationRefund, PartnerCommissionAdjustment
 from .serializers import (
     PartnerFinancialSettingsSerializer, ReservationPaymentCreateSerializer,
     ReservationPaymentSerializer, PaymentReconciliationSerializer,
@@ -611,16 +611,26 @@ class PartnerFinancialSummaryView(APIView):
     def get(self, request):
         partner_id = request.query_params.get("partner_id")
         partner = get_object_or_404(Partner, pk=partner_id, owner=request.user)
-        captured = ReservationPayment.objects.filter(
+        captured_payments = ReservationPayment.objects.filter(
             partner=partner, status=ReservationPayment.Status.CAPTURED
+        )
+        captured_gross = captured_payments.aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+        refunded = ReservationRefund.objects.filter(
+            payment__partner=partner, status=ReservationRefund.Status.REFUNDED
         ).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+        captured = captured_gross - refunded
         entries = PartnerCommissionLedger.objects.filter(partner=partner).select_related("payment")
-        accrued = entries.filter(status=PartnerCommissionLedger.Status.ACCRUED).aggregate(
+        accrued_gross = entries.filter(status=PartnerCommissionLedger.Status.ACCRUED).aggregate(
             total=Sum("commission_amount")
         )["total"] or Decimal("0.00")
-        net = entries.exclude(status=PartnerCommissionLedger.Status.VOID).aggregate(
+        net_gross = entries.exclude(status=PartnerCommissionLedger.Status.VOID).aggregate(
             total=Sum("partner_net_amount")
         )["total"] or Decimal("0.00")
+        adjustments = PartnerCommissionAdjustment.objects.filter(partner=partner)
+        commission_reversed = adjustments.aggregate(total=Sum("commission_reversal"))["total"] or Decimal("0.00")
+        partner_net_reversed = adjustments.aggregate(total=Sum("partner_net_reversal"))["total"] or Decimal("0.00")
+        accrued = accrued_gross - commission_reversed
+        net = net_gross - partner_net_reversed
         return Response({
             "partner_id": partner.pk,
             "currency": partner.financial_settings.currency if hasattr(partner, "financial_settings") else "ZAR",
