@@ -565,8 +565,11 @@ class AdminPaymentReconciliationView(APIView):
         data = serializer.validated_data
         with transaction.atomic():
             try:
-                payment = ReservationPayment.objects.select_for_update().select_related("partner", "reservation").get(pk=pk)
-            except ReservationPayment.DoesNotExist:
+                reservation_id = ReservationPayment.objects.only("reservation_id").get(pk=pk).reservation_id
+                locked_reservation = ReservationRequest.objects.select_for_update().get(pk=reservation_id)
+                payment = ReservationPayment.objects.select_for_update().select_related("partner").get(pk=pk)
+                payment.reservation = locked_reservation
+            except (ReservationPayment.DoesNotExist, ReservationRequest.DoesNotExist):
                 from rest_framework.exceptions import NotFound
                 raise NotFound("Payment record not found.")
             if payment.status != ReservationPayment.Status.PENDING:
