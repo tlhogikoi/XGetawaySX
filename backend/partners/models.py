@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
 from django.utils.text import slugify
 
@@ -249,8 +250,8 @@ class PartnerFinancialSettings(models.Model):
 
     partner = models.OneToOneField(Partner, on_delete=models.CASCADE, related_name="financial_settings")
     deposit_type = models.CharField(max_length=12, choices=DepositType.choices, default=DepositType.NONE)
-    deposit_value = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    commission_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    deposit_value = models.DecimalField(max_digits=10, decimal_places=2, default=0, validators=[MinValueValidator(0)])
+    commission_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0, validators=[MinValueValidator(0), MaxValueValidator(100)])
     currency = models.CharField(max_length=3, default="ZAR")
     updated_at = models.DateTimeField(auto_now=True)
 
