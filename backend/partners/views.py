@@ -264,3 +264,162 @@ class PartnerEnquiryRespondView(APIView):
         enquiry.responded_at = timezone.now()
         enquiry.save(update_fields=["status", "partner_response", "responded_at", "updated_at"])
         return Response(PartnerEnquirySerializer(enquiry).data)
+
+import uuid
+from datetime import timedelta
+from django.db import transaction
+from .models import PartnerAvailability, ReservationRequest
+from .serializers import (
+    PartnerAvailabilitySerializer, ReservationDecisionSerializer,
+    ReservationRequestCreateSerializer, ReservationRequestSerializer,
+)
+
+
+class PublicPartnerAvailabilityView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        partner_id = request.query_params.get("partner_id")
+        start = request.query_params.get("start_date")
+        end = request.query_params.get("end_date")
+        if not partner_id or not start or not end:
+            raise ValidationError("partner_id, start_date and end_date are required.")
+        partner = get_object_or_404(
+            Partner, pk=partner_id,
+            gallery_status=Partner.ApprovalStatus.APPROVED,
+            booking_status=Partner.ApprovalStatus.APPROVED,
+        )
+        from django.utils.dateparse import parse_date
+        start_date, end_date = parse_date(start), parse_date(end)
+        if not start_date or not end_date or end_date <= start_date or (end_date - start_date).days > 90:
+            raise ValidationError("Provide a valid date range of up to 90 nights.")
+        days = PartnerAvailability.objects.filter(
+            partner=partner, date__gte=start_date, date__lt=end_date, is_open=True
+        ).order_by("date")
+        return Response([{
+            "date": day.date,
+            "available_guests": max(0, day.capacity - day.booked_count),
+            "price_per_guest": day.price_per_guest,
+            "currency": day.currency,
+        } for day in days])
+
+
+class PartnerAvailabilityManagementView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        queryset = PartnerAvailability.objects.filter(partner__owner=request.user).select_related("partner")
+        partner_id = request.query_params.get("partner_id")
+        if partner_id:
+            queryset = queryset.filter(partner_id=partner_id)
+        return Response(PartnerAvailabilitySerializer(queryset, many=True).data)
+
+    def post(self, request):
+        data = request.data.copy()
+        partner_id = data.pop("partner_id", None)
+        if not partner_id:
+            raise ValidationError({"partner_id": "A partner profile is required."})
+        partner = get_object_or_404(
+            Partner, pk=partner_id, owner=request.user,
+            booking_status=Partner.ApprovalStatus.APPROVED,
+        )
+        from django.utils.dateparse import parse_date
+        day_date = parse_date(str(data.get("date", "")))
+        if not day_date:
+            raise ValidationError({"date": "Provide a valid date."})
+        with transaction.atomic():
+            day = PartnerAvailability.objects.select_for_update().filter(partner=partner, date=day_date).first()
+            serializer = PartnerAvailabilitySerializer(day, data=data)
+            serializer.is_valid(raise_exception=True)
+            saved = serializer.save(partner=partner)
+        return Response(PartnerAvailabilitySerializer(saved).data, status=status.HTTP_200_OK if day else status.HTTP_201_CREATED)
+
+
+class CustomerReservationListCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        items = ReservationRequest.objects.filter(customer=request.user).select_related("partner")
+        return Response(ReservationRequestSerializer(items, many=True).data)
+
+    def post(self, request):
+        serializer = ReservationRequestCreateSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        item = ReservationRequest.objects.create(
+            customer=request.user, partner=data["partner"], trip_plan=data.get("trip_plan"),
+            start_date=data["start_date"], end_date=data["end_date"],
+            guests=data["guests"], message=data.get("message", ""),
+        )
+        return Response(ReservationRequestSerializer(item).data, status=status.HTTP_201_CREATED)
+
+
+class PartnerReservationInboxView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        items = ReservationRequest.objects.filter(partner__owner=request.user).select_related("partner", "customer")
+        return Response(ReservationRequestSerializer(items, many=True).data)
+
+
+class PartnerReservationDecisionView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        serializer = ReservationDecisionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        with transaction.atomic():
+            try:
+                item = ReservationRequest.objects.select_for_update().select_related("partner", "customer").get(
+                    pk=pk, partner__owner=request.user
+                )
+            except ReservationRequest.DoesNotExist:
+                from rest_framework.exceptions import NotFound
+                raise NotFound("Reservation request not found.")
+            if item.status != ReservationRequest.Status.PENDING:
+                raise ValidationError("Only pending reservation requests can be decided.")
+            decision = serializer.validated_data["status"]
+            if decision == ReservationRequest.Status.CONFIRMED:
+                if item.partner.booking_status != Partner.ApprovalStatus.APPROVED:
+                    raise ValidationError("This partner is not currently approved to confirm bookings.")
+                dates = [item.start_date + timedelta(days=offset) for offset in range((item.end_date - item.start_date).days)]
+                days = list(PartnerAvailability.objects.select_for_update().filter(
+                    partner=item.partner, date__in=dates
+                ).order_by("date"))
+                if len(days) != len(dates) or any(not day.is_open or day.capacity - day.booked_count < item.guests for day in days):
+                    raise ValidationError("Availability or capacity has changed. The request cannot be confirmed.")
+                for day in days:
+                    day.booked_count += item.guests
+                    day.save(update_fields=["booked_count", "updated_at"])
+                item.booking_reference = uuid.uuid4()
+            item.status = decision
+            item.partner_response = serializer.validated_data["partner_response"]
+            item.responded_at = timezone.now()
+            item.save(update_fields=["status", "booking_reference", "partner_response", "responded_at", "updated_at"])
+        return Response(ReservationRequestSerializer(item).data)
+
+
+class CustomerReservationCancelView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        with transaction.atomic():
+            try:
+                item = ReservationRequest.objects.select_for_update().get(pk=pk, customer=request.user)
+            except ReservationRequest.DoesNotExist:
+                from rest_framework.exceptions import NotFound
+                raise NotFound("Reservation request not found.")
+            if item.status not in (ReservationRequest.Status.PENDING, ReservationRequest.Status.CONFIRMED):
+                raise ValidationError("This reservation can no longer be cancelled.")
+            if item.status == ReservationRequest.Status.CONFIRMED:
+                dates = [item.start_date + timedelta(days=offset) for offset in range((item.end_date - item.start_date).days)]
+                days = list(PartnerAvailability.objects.select_for_update().filter(
+                    partner=item.partner, date__in=dates
+                ).order_by("date"))
+                for day in days:
+                    day.booked_count = max(0, day.booked_count - item.guests)
+                    day.save(update_fields=["booked_count", "updated_at"])
+            item.status = ReservationRequest.Status.CANCELLED
+            item.save(update_fields=["status", "updated_at"])
+        return Response(ReservationRequestSerializer(item).data)
+
