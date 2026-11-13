@@ -325,3 +325,58 @@ class PartnerCommissionLedger(models.Model):
     def __str__(self):
         return f"Commission for payment {self.payment_id}"
 
+
+
+class ReservationRefund(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        REFUNDED = "refunded", "Refunded"
+        FAILED = "failed", "Failed"
+
+    payment = models.ForeignKey(ReservationPayment, on_delete=models.PROTECT, related_name="refunds")
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    currency = models.CharField(max_length=3)
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.PENDING)
+    provider = models.CharField(max_length=40)
+    provider_reference = models.CharField(max_length=160, null=True, blank=True, unique=True)
+    reason = models.CharField(max_length=500, blank=True)
+    reconciled_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="reconciled_reservation_refunds")
+    reconciled_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=("payment", "status"), name="refund_payment_status_idx")]
+
+    def __str__(self):
+        return f"Refund {self.pk} — payment {self.payment_id}"
+
+
+class PartnerCommissionAdjustment(models.Model):
+    """Immutable commission reversal snapshot associated with a reconciled refund."""
+    refund = models.OneToOneField(ReservationRefund, on_delete=models.PROTECT, related_name="commission_adjustment")
+    partner = models.ForeignKey(Partner, on_delete=models.PROTECT, related_name="commission_adjustments")
+    gross_refund = models.DecimalField(max_digits=12, decimal_places=2)
+    commission_reversal = models.DecimalField(max_digits=12, decimal_places=2)
+    partner_net_reversal = models.DecimalField(max_digits=12, decimal_places=2)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Commission adjustment for refund {self.refund_id}"
+
+
+class PaymentProviderEvent(models.Model):
+    """Provider event inbox. Events are persisted only after adapter signature verification."""
+    provider = models.CharField(max_length=40)
+    event_id = models.CharField(max_length=180)
+    payload_sha256 = models.CharField(max_length=64)
+    signature_verified = models.BooleanField(default=False)
+    processed_at = models.DateTimeField(null=True, blank=True)
+    received_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=("provider", "event_id"), name="uniq_provider_event_id")]
+        indexes = [models.Index(fields=("provider", "received_at"), name="provider_event_received_idx")]
+
+    def __str__(self):
+        return f"{self.provider} event {self.event_id}"
