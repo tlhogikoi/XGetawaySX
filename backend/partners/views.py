@@ -733,3 +733,168 @@ class AdminPaymentRefundView(APIView):
                 payment.save(update_fields=["status", "updated_at"])
 
         return Response(ReservationRefundSerializer(refund).data, status=status.HTTP_201_CREATED)
+
+
+class ReservationCheckoutStartView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        provider = str(request.data.get("provider", "")).strip().lower()
+        if provider not in {"payfast", "yoco"}:
+            raise ValidationError({"provider": "Choose payfast or yoco."})
+        with transaction.atomic():
+            payment = get_object_or_404(
+                ReservationPayment.objects.select_for_update().select_related("reservation"),
+                pk=pk, customer=request.user,
+            )
+            if payment.status != ReservationPayment.Status.PENDING:
+                raise ValidationError("Only pending payments can start checkout.")
+            if payment.reservation.status != ReservationRequest.Status.CONFIRMED:
+                raise ValidationError("Checkout is available only for confirmed reservations.")
+            if payment.provider not in {"manual_reconciliation", provider}:
+                raise ValidationError("This payment has already been assigned to another provider.")
+            if payment.checkout_url and payment.checkout_session_id:
+                if payment.provider == "payfast":
+                    result = build_payfast_checkout(payment)
+                else:
+                    result = {
+                        "checkout_url": payment.checkout_url,
+                        "checkout_session_id": payment.checkout_session_id,
+                        "form_fields": None,
+                    }
+            else:
+                try:
+                    result = (
+                        build_payfast_checkout(payment)
+                        if provider == "payfast" else create_yoco_checkout(payment)
+                    )
+                except (GatewayError, ImproperlyConfigured) as exc:
+                    raise ValidationError(str(exc))
+                payment.provider = provider
+                payment.checkout_url = result["checkout_url"]
+                payment.checkout_session_id = result["checkout_session_id"]
+                payment.save(update_fields=["provider", "checkout_url", "checkout_session_id", "updated_at"])
+        return Response({
+            "payment": ReservationPaymentSerializer(payment).data,
+            "provider": provider,
+            "checkout_url": result["checkout_url"],
+            "form_fields": result.get("form_fields"),
+        })
+
+
+class PaymentProviderWebhookView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    parser_classes = []
+
+    def post(self, request, provider):
+        provider = provider.lower()
+        raw_body = request.body
+        if provider == "yoco":
+            verified, verification_result = verify_yoco_webhook(raw_body, request.headers)
+            if not verified:
+                return Response({"detail": verification_result}, status=status.HTTP_400_BAD_REQUEST)
+            event_id = verification_result
+            try:
+                event = json.loads(raw_body.decode("utf-8"))
+            except (UnicodeDecodeError, ValueError):
+                return Response({"detail": "Invalid JSON webhook body."}, status=status.HTTP_400_BAD_REQUEST)
+            if not isinstance(event, dict) or not isinstance(event.get("payload"), dict):
+                return Response({"detail": "Invalid Yoco event structure."}, status=status.HTTP_400_BAD_REQUEST)
+            event_type = event.get("type")
+            payload = event["payload"]
+            checkout_id = (payload.get("metadata") or {}).get("checkoutId")
+            if event_type != "payment.succeeded":
+                return Response({"received": True}, status=status.HTTP_200_OK)
+            if not checkout_id:
+                return Response({"detail": "Yoco payment event has no checkout reference."}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                payment = ReservationPayment.objects.select_related("reservation", "partner").get(
+                    provider="yoco", checkout_session_id=str(checkout_id)
+                )
+            except ReservationPayment.DoesNotExist:
+                return Response({"detail": "Checkout session is not recognised."}, status=status.HTTP_404_NOT_FOUND)
+            expected_cents = int((payment.amount * Decimal("100")).quantize(Decimal("1")))
+            if payload.get("amount") != expected_cents or payload.get("currency") != payment.currency:
+                return Response({"detail": "Yoco amount or currency does not match the reservation payment."}, status=status.HTTP_400_BAD_REQUEST)
+            provider_reference = str(checkout_id)
+            success = payload.get("status") == "succeeded"
+            payload_hash = hashlib.sha256(raw_body).hexdigest()
+        elif provider == "payfast":
+            form_data = dict(parse_qsl(raw_body.decode("utf-8"), keep_blank_values=True))
+            if not verify_payfast_signature(form_data):
+                return Response({"detail": "Invalid PayFast ITN signature."}, status=status.HTTP_400_BAD_REQUEST)
+            if not verify_payfast_source_ip(request.META.get("REMOTE_ADDR")):
+                return Response({"detail": "PayFast source IP could not be verified."}, status=status.HTTP_403_FORBIDDEN)
+            configured_merchant = str(getattr(settings, "PAYFAST_MERCHANT_ID", ""))
+            if not configured_merchant or form_data.get("merchant_id") != configured_merchant:
+                return Response({"detail": "PayFast merchant ID does not match."}, status=status.HTTP_400_BAD_REQUEST)
+            if not validate_payfast_itn(raw_body):
+                return Response({"detail": "PayFast server-side ITN validation failed."}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                payment = ReservationPayment.objects.select_related("reservation", "partner").get(
+                    pk=int(form_data.get("m_payment_id", "0")), provider="payfast"
+                )
+            except (ReservationPayment.DoesNotExist, TypeError, ValueError):
+                return Response({"detail": "PayFast payment reference is not recognised."}, status=status.HTTP_404_NOT_FOUND)
+            try:
+                gross = Decimal(str(form_data.get("amount_gross", ""))).quantize(Decimal("0.01"))
+            except Exception:
+                return Response({"detail": "PayFast gross amount is invalid."}, status=status.HTTP_400_BAD_REQUEST)
+            if gross != payment.amount or payment.currency != "ZAR":
+                return Response({"detail": "PayFast amount or currency does not match the reservation payment."}, status=status.HTTP_400_BAD_REQUEST)
+            event_status = str(form_data.get("payment_status", "")).upper()
+            if event_status not in {"COMPLETE", "FAILED"}:
+                return Response({"received": True}, status=status.HTTP_200_OK)
+            provider_reference = str(form_data.get("pf_payment_id", "")).strip()
+            if not provider_reference:
+                return Response({"detail": "PayFast transaction reference is missing."}, status=status.HTTP_400_BAD_REQUEST)
+            event_id = f"{provider_reference}:{event_status}"
+            success = event_status == "COMPLETE"
+            payload_hash = hashlib.sha256(raw_body).hexdigest()
+        else:
+            return Response({"detail": "Unsupported payment provider."}, status=status.HTTP_404_NOT_FOUND)
+
+        with transaction.atomic():
+            try:
+                reservation = ReservationRequest.objects.select_for_update().get(pk=payment.reservation_id)
+                locked_payment = ReservationPayment.objects.select_for_update().get(pk=payment.pk)
+            except (ReservationRequest.DoesNotExist, ReservationPayment.DoesNotExist):
+                return Response({"detail": "Payment record no longer exists."}, status=status.HTTP_404_NOT_FOUND)
+            event_record, created = PaymentProviderEvent.objects.get_or_create(
+                provider=provider, event_id=event_id,
+                defaults={"payload_sha256": payload_hash, "signature_verified": True},
+            )
+            if not created:
+                return Response({"received": True, "duplicate": True}, status=status.HTTP_200_OK)
+            if locked_payment.status == ReservationPayment.Status.PENDING:
+                if success:
+                    if reservation.status != ReservationRequest.Status.CONFIRMED:
+                        return Response({"detail": "Cannot capture a payment for an unconfirmed reservation."}, status=status.HTTP_409_CONFLICT)
+                    locked_payment.status = ReservationPayment.Status.CAPTURED
+                    locked_payment.provider_reference = provider_reference
+                    locked_payment.captured_at = timezone.now()
+                    locked_payment.save(update_fields=["status", "provider_reference", "captured_at", "updated_at"])
+                    policy, _created = PartnerFinancialSettings.objects.get_or_create(partner=locked_payment.partner)
+                    commission = (locked_payment.amount * policy.commission_rate / Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                    PartnerCommissionLedger.objects.get_or_create(
+                        payment=locked_payment,
+                        defaults={
+                            "partner": locked_payment.partner,
+                            "gross_amount": locked_payment.amount,
+                            "commission_rate": policy.commission_rate,
+                            "commission_amount": commission,
+                            "partner_net_amount": locked_payment.amount - commission,
+                        },
+                    )
+                else:
+                    locked_payment.status = ReservationPayment.Status.FAILED
+                    locked_payment.failure_reason = f"{provider.title()} reported payment failure."
+                    locked_payment.save(update_fields=["status", "failure_reason", "updated_at"])
+            elif success and locked_payment.status == ReservationPayment.Status.CAPTURED and locked_payment.provider_reference == provider_reference:
+                pass
+            else:
+                return Response({"detail": "Payment state conflicts with this provider event."}, status=status.HTTP_409_CONFLICT)
+            event_record.processed_at = timezone.now()
+            event_record.save(update_fields=["processed_at"])
+        return Response({"received": True}, status=status.HTTP_200_OK)
