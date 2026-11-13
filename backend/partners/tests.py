@@ -532,3 +532,25 @@ class PaymentAndPartnerFinanceTests(TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
+    def test_balance_uses_original_price_snapshot_after_partner_changes_daily_prices(self):
+        from .models import ReservationAvailability, ReservationPayment
+        self.client.force_authenticate(user=self.customer)
+        first = self.create_payment("payment-deposit-snapshot-001")
+        self.assertEqual(first.status_code, 201)
+        self.reservation.refresh_from_db()
+        self.assertEqual(self.reservation.quoted_total, Decimal("400.00"))
+        self.client.force_authenticate(user=self.admin)
+        reconciled = self.client.post(
+            f"/api/v1/partners/payments/{first.data['id']}/reconcile/",
+            {"status": "captured", "provider": "test_gateway", "provider_reference": "snapshot-deposit-001"},
+            format="json",
+        )
+        self.assertEqual(reconciled.status_code, 200)
+        from .models import PartnerAvailability
+        PartnerAvailability.objects.filter(partner=self.partner).update(price_per_guest="150.00")
+        self.client.force_authenticate(user=self.customer)
+        balance = self.create_payment("payment-balance-snapshot-002")
+        self.assertEqual(balance.status_code, 201)
+        self.assertEqual(balance.data["kind"], "balance")
+        self.assertEqual(balance.data["amount"], "320.00")
+
