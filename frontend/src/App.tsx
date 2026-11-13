@@ -1,7 +1,7 @@
 import GalleryPartnerGrid from "./components/GalleryPartnerGrid";
 import PublicPartnerProfile from "./components/PublicPartnerProfile";
 import GalleryStoryEditor from "./components/GalleryStoryEditor";
-import PartnerDiscovery from "./components/PartnerDiscovery";
+import PartnerDiscovery from "./components/PartnerDiscovery";\nimport DestinationExplorer from "./components/DestinationExplorer";
 import { ArrowRight, Compass, Globe2, Heart, MapPin } from "lucide-react";
 
 const categories = [
@@ -21,7 +21,7 @@ export default function App() {
     <main className="site-shell">
       <header className="topbar">
         <a className="wordmark" href="/" aria-label="XGetawaySX home"><span className="wordmark-x">X</span>GETAWAYS<span className="wordmark-x">X</span></a>
-        <nav aria-label="Main navigation"><a href="#about">About</a><a href="#trips">Trips</a><a href="#partner-discovery">Partners</a><a href="#gallery">Gallery</a></nav>
+        <nav aria-label="Main navigation"><a href="#about">About</a><a href="#trips">Trips</a><a href="#partner-discovery">Partners</a><a href="#destinations">Destinations</a><a href="#gallery">Gallery</a></nav>
         <a className="nav-cta" href="#discover">Explore getaways <ArrowRight size={16} /></a>
       </header>
       <section className="hero" id="discover">
@@ -49,7 +49,7 @@ export default function App() {
         <div className="partner-discovery-intro"><p className="eyebrow">FIND YOUR NEXT EXPERIENCE</p><h2>Discover approved partners.</h2><p>Search places and experiences by name, category or destination.</p></div>
         <PartnerDiscovery />
       </section>
-      <section className="gallery-teaser" id="gallery">
+      <section className="destination-home-section" id="destinations"><div><p className="eyebrow">EXPLORE SOUTH AFRICA</p><h2>Discover destinations and curated escapes.</h2><p>Find destination guides and handpicked experiences from approved local partners.</p></div><a className="primary-button" href="/destinations/">Explore destinations <ArrowRight size={17}/></a></section>\n      <section className="gallery-teaser" id="gallery">
         <div><p className="eyebrow">THE PEOPLE & PLACES BEHIND THE PICTURE</p><h2>Every picture tells a story.</h2><p>Discover the history and character behind our approved partner places and experiences.</p></div>
         <div className="gallery-mark"><Heart size={28} /><span>STORIES THAT<br />TAKE YOU PLACES</span><MapPin size={18} /></div>
       </section>
