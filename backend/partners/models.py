@@ -297,7 +297,7 @@ class ReservationPayment(models.Model):
         ]
         indexes = [
             models.Index(fields=("partner", "status", "created_at"), name="partner_payment_status_idx"),
-            models.Index(fields=("reservation", "status"), name="reservation_payment_status_idx"),
+            models.Index(fields=("reservation", "status"), name="res_payment_status_idx"),
         ]
 
     def __str__(self):
