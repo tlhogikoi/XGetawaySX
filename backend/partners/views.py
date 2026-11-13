@@ -804,7 +804,8 @@ class PaymentProviderWebhookView(APIView):
                 return Response({"detail": "Invalid Yoco event structure."}, status=status.HTTP_400_BAD_REQUEST)
             event_type = event.get("type")
             payload = event["payload"]
-            checkout_id = (payload.get("metadata") or {}).get("checkoutId")
+            metadata = payload.get("metadata")
+            checkout_id = metadata.get("checkoutId") if isinstance(metadata, dict) else None
             if event_type != "payment.succeeded":
                 return Response({"received": True}, status=status.HTTP_200_OK)
             if not checkout_id:
@@ -845,7 +846,7 @@ class PaymentProviderWebhookView(APIView):
             if gross != payment.amount or payment.currency != "ZAR":
                 return Response({"detail": "PayFast amount or currency does not match the reservation payment."}, status=status.HTTP_400_BAD_REQUEST)
             event_status = str(form_data.get("payment_status", "")).upper()
-            if event_status not in {"COMPLETE", "FAILED"}:
+            if event_status not in {"COMPLETE", "CANCELLED"}:
                 return Response({"received": True}, status=status.HTTP_200_OK)
             provider_reference = str(form_data.get("pf_payment_id", "")).strip()
             if not provider_reference:
