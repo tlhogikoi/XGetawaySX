@@ -161,3 +161,72 @@ class PartnerEnquirySerializer(serializers.ModelSerializer):
 class PartnerEnquiryResponseSerializer(serializers.Serializer):
     status = serializers.ChoiceField(choices=(PartnerEnquiry.Status.ACCEPTED, PartnerEnquiry.Status.DECLINED))
     partner_response = serializers.CharField(min_length=5, max_length=5000)
+
+from datetime import timedelta
+from .models import PartnerAvailability, ReservationRequest
+
+
+class PartnerAvailabilitySerializer(serializers.ModelSerializer):
+    partner_id = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = PartnerAvailability
+        fields = ("id", "partner_id", "date", "capacity", "booked_count", "is_open", "price_per_guest", "currency", "updated_at")
+        read_only_fields = ("id", "partner_id", "booked_count", "updated_at")
+
+    def validate_capacity(self, value):
+        if value < 1:
+            raise serializers.ValidationError("Capacity must be at least one.")
+        if self.instance and value < self.instance.booked_count:
+            raise serializers.ValidationError("Capacity cannot be lower than already reserved guests.")
+        return value
+
+
+class ReservationRequestCreateSerializer(serializers.Serializer):
+    partner_id = serializers.IntegerField()
+    trip_plan_id = serializers.IntegerField(required=False, allow_null=True)
+    start_date = serializers.DateField()
+    end_date = serializers.DateField()
+    guests = serializers.IntegerField(min_value=1, max_value=100)
+    message = serializers.CharField(required=False, allow_blank=True, max_length=2000)
+
+    def validate(self, attrs):
+        start, end = attrs["start_date"], attrs["end_date"]
+        if end <= start:
+            raise serializers.ValidationError({"end_date": "Checkout must be after check-in."})
+        if (end - start).days > 90:
+            raise serializers.ValidationError({"end_date": "Reservations cannot exceed 90 nights."})
+        try:
+            partner = Partner.objects.get(pk=attrs["partner_id"], gallery_status=Partner.ApprovalStatus.APPROVED, booking_status=Partner.ApprovalStatus.APPROVED)
+        except Partner.DoesNotExist:
+            raise serializers.ValidationError({"partner_id": "This partner is not currently accepting reservation requests."})
+        attrs["partner"] = partner
+        plan_id = attrs.get("trip_plan_id")
+        if plan_id:
+            try:
+                attrs["trip_plan"] = TripPlan.objects.get(pk=plan_id, owner=self.context["request"].user)
+            except TripPlan.DoesNotExist:
+                raise serializers.ValidationError({"trip_plan_id": "Trip plan not found."})
+        dates = [start + timedelta(days=offset) for offset in range((end - start).days)]
+        days = list(PartnerAvailability.objects.filter(partner=partner, date__in=dates, is_open=True))
+        if len(days) != len(dates):
+            raise serializers.ValidationError({"start_date": "The partner has not published availability for every requested night."})
+        if any(day.capacity - day.booked_count < attrs["guests"] for day in days):
+            raise serializers.ValidationError({"guests": "The requested guest count exceeds currently available capacity on at least one night."})
+        return attrs
+
+
+class ReservationRequestSerializer(serializers.ModelSerializer):
+    partner = PublicPartnerSerializer(read_only=True)
+    customer_email = serializers.EmailField(source="customer.email", read_only=True)
+
+    class Meta:
+        model = ReservationRequest
+        fields = ("id", "partner", "customer_email", "trip_plan_id", "start_date", "end_date", "guests", "message", "status", "booking_reference", "partner_response", "responded_at", "created_at", "updated_at")
+        read_only_fields = fields
+
+
+class ReservationDecisionSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=(ReservationRequest.Status.CONFIRMED, ReservationRequest.Status.DECLINED))
+    partner_response = serializers.CharField(min_length=5, max_length=3000)
+
