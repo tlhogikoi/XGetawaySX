@@ -569,6 +569,7 @@ Implemented on `feat/application-foundation`:
 |---|---|---|
 | GET | `/api/v1/partners/availability/?partner_id=&start_date=&end_date=` | Public date-specific availability |
 | GET, POST | `/api/v1/partners/partner/availability/` | Partner-owned availability records |
+| GET | `/api/v1/partners/partner/profiles/` | Booking-approved profiles owned by the authenticated partner |
 | GET, POST | `/api/v1/partners/reservations/` | Customer reservation history and request creation |
 | POST | `/api/v1/partners/reservations/{id}/cancel/` | Customer cancellation |
 | GET | `/api/v1/partners/partner/reservations/` | Partner reservation inbox |
