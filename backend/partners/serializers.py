@@ -298,7 +298,7 @@ class ReservationPaymentSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ReservationPayment
-        fields = ("id", "reservation", "reservation_reference", "partner_name", "kind", "status", "amount", "currency", "provider", "provider_reference", "failure_reason", "created_at", "captured_at")
+        fields = ("id", "reservation", "reservation_reference", "partner_name", "kind", "status", "amount", "currency", "provider", "checkout_session_id", "checkout_url", "provider_reference", "failure_reason", "created_at", "captured_at")
         read_only_fields = fields
 
 
