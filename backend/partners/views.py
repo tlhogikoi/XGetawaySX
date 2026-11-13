@@ -616,7 +616,7 @@ class PartnerFinancialSummaryView(APIView):
         )
         captured_gross = captured_payments.aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
         refunded = ReservationRefund.objects.filter(
-            payment__partner=partner, status=ReservationRefund.Status.REFUNDED
+            payment__in=captured_payments, status=ReservationRefund.Status.REFUNDED
         ).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
         captured = captured_gross - refunded
         entries = PartnerCommissionLedger.objects.filter(partner=partner).select_related("payment")
