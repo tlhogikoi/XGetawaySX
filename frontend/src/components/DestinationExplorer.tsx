@@ -32,7 +32,9 @@ export default function DestinationExplorer() {
     const controller = new AbortController();
     const endpoint = slug
       ? `${API_BASE}/api/v1/partners/destinations/${encodeURIComponent(slug)}/`
-      : null;
+      : collectionSlug
+        ? `${API_BASE}/api/v1/partners/collections/${encodeURIComponent(collectionSlug)}/`
+        : null;
     const requests = endpoint
       ? [fetch(endpoint, { signal: controller.signal }).then(async r => { if (!r.ok) throw new Error("This destination is not currently available."); return r.json(); })]
       : [
@@ -41,7 +43,8 @@ export default function DestinationExplorer() {
         ];
     setLoading(true); setError("");
     Promise.all(requests).then(results => {
-      if (endpoint) setDestination(results[0] as Destination);
+      if (slug) setDestination(results[0] as Destination);
+      else if (collectionSlug) setCollection(results[0] as Collection);
       else { setDestinations(results[0] as Destination[]); setCollections(results[1] as Collection[]); }
     }).catch(reason => { if (reason instanceof Error && reason.name !== "AbortError") setError(reason.message); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
