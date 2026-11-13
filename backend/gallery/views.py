@@ -13,7 +13,7 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.views import APIView
 
 from partners.models import Partner
-from .models import GalleryAuditEvent, GalleryHistoryPublicationConsent, GalleryMedia, GalleryMediaPermissionGrant, GalleryPartnerNotification, GalleryStory, GalleryStoryRevision
+from .models import GalleryAuditEvent, GalleryHistoryPublicationConsent, GalleryMedia, GalleryMediaPermissionGrant, GalleryPartnerNotification, GalleryStory, GalleryStoryEditorialReview, GalleryStoryRevision
 from .validators import gallery_image_content_type
 from .story_drafting import draft_story_summary
 from .serializers import GalleryAuditEventSerializer, GalleryMediaDraftSerializer, GalleryPartnerNotificationSerializer, GalleryStoryDraftSerializer, GalleryStoryRevisionSerializer, PublicGalleryStorySerializer
