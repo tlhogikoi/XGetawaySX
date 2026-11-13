@@ -257,6 +257,12 @@ class PartnerFinancialSettingsSerializer(serializers.ModelSerializer):
         fields = ("partner_id", "deposit_type", "deposit_value", "commission_rate", "currency", "updated_at")
         read_only_fields = ("partner_id", "commission_rate", "updated_at")
 
+    def validate_currency(self, value):
+        value = value.upper()
+        if len(value) != 3 or not value.isalpha():
+            raise serializers.ValidationError("Currency must be a three-letter code.")
+        return value
+
     def validate(self, attrs):
         deposit_type = attrs.get("deposit_type", getattr(self.instance, "deposit_type", PartnerFinancialSettings.DepositType.NONE))
         deposit_value = attrs.get("deposit_value", getattr(self.instance, "deposit_value", Decimal("0")))
