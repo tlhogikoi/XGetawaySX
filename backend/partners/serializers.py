@@ -181,6 +181,11 @@ class PartnerAvailabilitySerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Capacity cannot be lower than already reserved guests.")
         return value
 
+    def validate_price_per_guest(self, value):
+        if value is not None and value < 0:
+            raise serializers.ValidationError("Price cannot be negative.")
+        return value
+
 
 class ReservationRequestCreateSerializer(serializers.Serializer):
     partner_id = serializers.IntegerField()
