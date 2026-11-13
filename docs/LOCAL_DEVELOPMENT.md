@@ -48,3 +48,15 @@ npm run build
 - Initial private filesystem uploads for Gallery images and rights evidence are present on the feature branch. Set `PRIVATE_GALLERY_STORAGE_ROOT` to a writable directory outside all static/web roots before local use. Production S3-compatible object storage, malware scanning, image re-encoding and retention/backup controls are not complete.
 - An initial authenticated `PartnerGalleryWorkspace` React component is present on the feature branch. The host partner portal must supply the bearer access token and partner context; no sign-in/session integration or route mounting is implemented yet. Editorial media review UI, AI drafting, timelines, analytics, payments and deployment are not complete.
 - The feature branch is not the production/default branch. Do not treat the Gallery as live or public until its tests, review and deployment gates pass.
+
+
+## Payment gateway sandbox setup
+
+The backend supports hosted checkout adapters for PayFast and Yoco. Copy the payment variables from `.env.example` into your local environment and use sandbox/test credentials only.
+
+- PayFast: configure merchant ID/key, passphrase, sandbox mode and a publicly reachable HTTPS `PAYFAST_NOTIFY_URL`.
+- Yoco: configure a test secret key and the webhook subscription signing secret. Register the webhook at `https://<public-host>/api/v1/partners/webhooks/yoco/`.
+- Set the customer return/cancel/failure URLs. A browser return is not payment confirmation; verified provider webhook/ITN processing updates payment status.
+- Local webhook testing requires a public HTTPS tunnel or deployed staging host. Never expose live secrets or store card details in XGetawaySX.
+
+Provider account setup, sandbox transactions, webhook delivery tests and live activation are separate release gates; the presence of configuration variables does not mean a gateway account is connected.
