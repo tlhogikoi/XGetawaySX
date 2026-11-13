@@ -490,3 +490,25 @@ The following code has been committed to `feat/application-foundation`; it has n
 - `/api/v1/partners/?province=Gauteng&country=South%20Africa`
 
 **Not yet verified:** Django test suite, frontend typecheck/build, browser and accessibility tests, CI, pagination/performance under production data, merge and deployment.
+
+
+## Development 12 — Destination pages and curated experience collections
+
+**Implemented on `feat/application-foundation`; not merged or deployed.**
+
+- Added editorially managed `DestinationPage` and `ExperienceCollection` records, with publication flags, stable slugs, display ordering and optional partner associations.
+- Added Django admin management for destination guides and curated collections. Editors can assign partner records and explicitly publish/unpublish each page or collection.
+- Added public APIs:
+  - `GET /api/v1/partners/destinations/`
+  - `GET /api/v1/partners/destinations/{slug}/`
+  - `GET /api/v1/partners/collections/`
+  - `GET /api/v1/partners/collections/{slug}/`
+  - Collections may be filtered by a published destination slug using `?destination={slug}`.
+- Public destination pages and collections return only explicitly published records. Associated partner lists are independently filtered to Gallery-approved partners; a pending, rejected or suspended partner cannot appear through a curated association.
+- Collections attached to an unpublished destination are excluded from public list and detail endpoints. Collections without a destination can still be published independently.
+- Added destination index/detail and curated collection detail views in the React app, linked from homepage navigation. Partner cards link to their existing approved public profiles.
+- Added backend tests for unpublished destination/collection hiding, approved-partner filtering and destination publication boundaries.
+
+**Editorial boundary:** destinations and collections are curated editorial content, not automatically generated destination facts or booking inventory. No map, pricing, availability, booking, ratings or partner endorsement claims are inferred. A destination/collection is not public until an editor explicitly publishes it.
+
+**Not yet verified:** migration application, Django checks/test suite, frontend typecheck/build, browser route fallback, CI, merge or deployment.
