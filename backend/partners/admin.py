@@ -86,7 +86,7 @@ class ReservationPaymentAdmin(admin.ModelAdmin):
     list_display = ("id", "reservation", "partner", "customer", "kind", "status", "amount", "currency", "provider")
     list_filter = ("status", "kind", "provider", "currency")
     search_fields = ("provider_reference", "reservation__booking_reference", "partner__name", "customer__email")
-    readonly_fields = ("reservation", "customer", "partner", "kind", "status", "amount", "currency", "idempotency_key", "provider", "provider_reference", "failure_reason", "created_at", "updated_at", "captured_at")
+    readonly_fields = ("reservation", "customer", "partner", "kind", "status", "amount", "currency", "idempotency_key", "provider", "checkout_session_id", "checkout_url", "provider_reference", "failure_reason", "created_at", "updated_at", "captured_at")
 
 
 @admin.register(PartnerCommissionLedger)
