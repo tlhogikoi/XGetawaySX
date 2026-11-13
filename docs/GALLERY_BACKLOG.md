@@ -579,3 +579,40 @@ Reservation date semantics: the start date is included and the end/checkout date
 
 Tests were added for pending requests, capacity reservation on confirmation, capacity rechecking, cancellation capacity release and partner ownership. They have **not** been executed. The migration has **not** been applied or checked against a live database; frontend typecheck/build and browser testing have **not** been run. No CI, merge or deployment is claimed.
 
+## Development 15 — Payments, Deposits & Booking Financial Management
+
+Implemented on `feat/application-foundation`:
+
+- Added `PartnerFinancialSettings` for partner deposit policy (none, percentage or fixed amount), currency and a platform-managed commission rate. Partner owners can update deposit policy; commission rate is read-only in the partner API and managed by platform administrators.
+- Added `ReservationPayment` records linked to confirmed reservations, customers and partners. Records carry a server-calculated amount, currency, payment kind (deposit/balance/full), status, idempotency key, provider name/reference and capture timestamp.
+- Added `PartnerCommissionLedger` entries created when an administrator reconciles a payment as captured. Each captured payment can create only one commission entry; gross, commission and partner-net amounts are stored as a financial snapshot.
+- Added a server-side payment preparation endpoint. It calculates the reservation total from each reserved night’s published per-guest price multiplied by the guest count, requires consistent currency and complete pricing, then applies the partner’s deposit policy. A pending payment record is created; no payment is collected by this endpoint.
+- Added admin-only payment reconciliation. A captured result requires an external provider reference; capture is blocked if the reservation is no longer confirmed. Reconciliation is idempotent for the same final status and provider reference.
+- Added partner-owned financial settings and summary endpoints, including captured totals and commission ledger entries.
+- Added Django admin views for partner availability, reservations, financial settings, payment records and commission ledger. Payment and commission ledger records are read-only in admin to keep financial state changes within reconciliation.
+- Added customer payment history/preparation and partner finance dashboard React components. These are reusable authenticated components and are not mounted into the app until the shared authentication/session integration is available.
+- Added safeguards: payment preparation only for confirmed reservations; captured payments block cancellation until a refund workflow exists; a cancelled reservation cannot subsequently be marked captured; customer idempotency keys prevent duplicate payment records; partner commission rate cannot be changed through partner endpoints.
+
+### API routes
+
+| Method | Route | Purpose |
+|---|---|---|
+| GET, POST | `/api/v1/partners/payments/` | Customer payment history and payment record preparation |
+| POST | `/api/v1/partners/payments/{id}/reconcile/` | Admin-only reconciliation of an external payment result |
+| GET, POST | `/api/v1/partners/partner/financial-settings/` | Partner-owned deposit policy |
+| GET | `/api/v1/partners/partner/financial-summary/?partner_id=` | Partner captured totals and commission ledger |
+
+### Financial and payment boundaries
+
+- This is a payment-record and reconciliation foundation, **not a payment gateway**. No card details are collected or stored; no checkout redirect, tokenisation, payment webhook, bank transfer or settlement is implemented.
+- The payment preparation endpoint creates a pending record with a server-computed amount. An administrator may reconcile it only after verifying the transaction in an external payment provider. Never mark a record captured solely because a customer submitted the request.
+- Prices are calculated as per-guest nightly prices multiplied by guests and nights. This does not yet model room/unit inventory, taxes, discounts, add-ons, variable occupancy pricing or multi-currency exchange.
+- Commission is calculated and accrued at capture time using the platform-managed rate. Payouts, bank account details, disbursements, statements, refunds and chargebacks are not implemented. Captured reservations cannot be cancelled through the current cancellation endpoint until a refund workflow is provided.
+- The payment status includes a refunded state for future lifecycle compatibility, but no refund endpoint is available in this development.
+
+### Verification
+
+- Added tests for server-calculated deposit amount, idempotent payment preparation, rejection of unconfirmed reservations, admin-only reconciliation, commission ledger calculation, partner commission-rate protection, and cancellation/capture safeguards.
+- Migration `0005_partner_finance_and_reservation_payments.py` created.
+- **Not yet verified:** Django checks/tests, migration application/drift, frontend typecheck/build, browser workflow, CI, merge or deployment. No real payment provider is connected.
+
