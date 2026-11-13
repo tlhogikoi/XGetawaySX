@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.shortcuts import get_object_or_404
 from django.db.models import Q
 from rest_framework.generics import ListAPIView
