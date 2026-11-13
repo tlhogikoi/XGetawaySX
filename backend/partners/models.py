@@ -241,3 +241,82 @@ class ReservationRequest(models.Model):
     def __str__(self):
         return f"Reservation request {self.pk} — {self.partner.name}"
 
+class PartnerFinancialSettings(models.Model):
+    class DepositType(models.TextChoices):
+        NONE = "none", "No deposit"
+        PERCENTAGE = "percentage", "Percentage"
+        FIXED = "fixed", "Fixed amount"
+
+    partner = models.OneToOneField(Partner, on_delete=models.CASCADE, related_name="financial_settings")
+    deposit_type = models.CharField(max_length=12, choices=DepositType.choices, default=DepositType.NONE)
+    deposit_value = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    commission_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    currency = models.CharField(max_length=3, default="ZAR")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Financial settings — {self.partner.name}"
+
+
+class ReservationPayment(models.Model):
+    class Kind(models.TextChoices):
+        DEPOSIT = "deposit", "Deposit"
+        BALANCE = "balance", "Balance"
+        FULL = "full", "Full payment"
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        CAPTURED = "captured", "Captured"
+        FAILED = "failed", "Failed"
+        REFUNDED = "refunded", "Refunded"
+
+    reservation = models.ForeignKey(ReservationRequest, on_delete=models.PROTECT, related_name="payments")
+    customer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="reservation_payments")
+    partner = models.ForeignKey(Partner, on_delete=models.PROTECT, related_name="reservation_payments")
+    kind = models.CharField(max_length=12, choices=Kind.choices)
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.PENDING)
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    currency = models.CharField(max_length=3, default="ZAR")
+    idempotency_key = models.CharField(max_length=100)
+    provider = models.CharField(max_length=40, default="manual_reconciliation")
+    provider_reference = models.CharField(max_length=160, null=True, blank=True, unique=True)
+    failure_reason = models.CharField(max_length=500, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    captured_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        constraints = [
+            models.UniqueConstraint(fields=("customer", "idempotency_key"), name="uniq_customer_payment_key"),
+        ]
+        indexes = [
+            models.Index(fields=("partner", "status", "created_at"), name="partner_payment_status_idx"),
+            models.Index(fields=("reservation", "status"), name="reservation_payment_status_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.kind} payment {self.pk} — {self.amount} {self.currency}"
+
+
+class PartnerCommissionLedger(models.Model):
+    class Status(models.TextChoices):
+        ACCRUED = "accrued", "Accrued"
+        PAID_OUT = "paid_out", "Paid out"
+        VOID = "void", "Void"
+
+    payment = models.OneToOneField(ReservationPayment, on_delete=models.PROTECT, related_name="commission_entry")
+    partner = models.ForeignKey(Partner, on_delete=models.PROTECT, related_name="commission_entries")
+    gross_amount = models.DecimalField(max_digits=12, decimal_places=2)
+    commission_rate = models.DecimalField(max_digits=5, decimal_places=2)
+    commission_amount = models.DecimalField(max_digits=12, decimal_places=2)
+    partner_net_amount = models.DecimalField(max_digits=12, decimal_places=2)
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.ACCRUED)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"Commission for payment {self.payment_id}"
+
