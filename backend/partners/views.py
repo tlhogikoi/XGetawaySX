@@ -425,3 +425,12 @@ class CustomerReservationCancelView(APIView):
             item.save(update_fields=["status", "updated_at"])
         return Response(ReservationRequestSerializer(item).data)
 
+class PartnerBookingProfileListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        profiles = Partner.objects.filter(
+            owner=request.user, booking_status=Partner.ApprovalStatus.APPROVED
+        ).order_by("name")
+        return Response(PublicPartnerSerializer(profiles, many=True).data)
+
