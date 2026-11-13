@@ -512,3 +512,40 @@ The following code has been committed to `feat/application-foundation`; it has n
 **Editorial boundary:** destinations and collections are curated editorial content, not automatically generated destination facts or booking inventory. No map, pricing, availability, booking, ratings or partner endorsement claims are inferred. A destination/collection is not public until an editor explicitly publishes it.
 
 **Not yet verified:** migration application, Django checks/test suite, frontend typecheck/build, browser route fallback, CI, merge or deployment.
+
+
+## Development 13 — Trip planning and partner enquiry management
+
+**Implemented on `feat/application-foundation`; not merged or deployed.**
+
+### Data and access controls
+- Added private `TripPlan` records owned by the authenticated customer, with title, notes and optional travel dates.
+- Added `TripPlanItem` associations to approved partners. A partner must also have enquiry approval before being added to a plan, and a partner can appear only once per plan.
+- Added `PartnerEnquiry` records linking the customer, one partner and optionally the customer's trip plan. Enquiries store the customer's message, requested dates, partner response and lifecycle status.
+- Trip plans and customer enquiry history are owner-scoped. Partner inbox and response actions are scoped to the owner of the receiving partner.
+- Public partner discovery accepts `?enquiry_ready=true` for the trip planner's partner picker without exposing the partner's internal enquiry approval status as a public field.
+
+### API
+- `GET/POST /api/v1/partners/trips/` — list the current user's plans or create a plan.
+- `GET/PATCH/DELETE /api/v1/partners/trips/{id}/` — retrieve, update or delete an owned plan.
+- `POST /api/v1/partners/trips/{id}/items/` — add an approved, enquiry-ready partner.
+- `DELETE /api/v1/partners/trips/{id}/items/{item_id}/` — remove an item from an owned plan.
+- `GET/POST /api/v1/partners/enquiries/` — list the customer's enquiries or submit a partner enquiry.
+- `GET /api/v1/partners/partner/enquiries/` — list enquiries for the authenticated partner owner.
+- `POST /api/v1/partners/partner/enquiries/{id}/respond/` — accept or decline a pending enquiry with a written response.
+
+### Frontend workspaces
+- Added reusable authenticated `TripPlanner` component for creating plans, saving approved partners, setting dates, sending individual partner enquiries and tracking enquiry status.
+- Added reusable `PartnerEnquiryDashboard` for partner owners to review requests and accept or decline with a response.
+- Both components receive a bearer access token from the host authentication/session provider. They are intentionally not mounted as public routes because this repository does not yet expose a confirmed customer/partner authentication shell to supply that token safely.
+
+### Product boundary
+- Enquiries are not bookings, reservations, confirmed availability or payments. A partner's acceptance records an enquiry response only; it does not confirm a reservation.
+- Each partner receives only its own enquiry. Customer contact email is visible only to the customer and the receiving partner owner through authenticated enquiry endpoints.
+- The current workflow is synchronous in-app API delivery. Email/SMS/push notifications, partner response SLAs, booking inventory, deposits and payments are not included.
+
+### Tests and verification
+- Added tests for private trip-plan ownership, adding approved partners, rejection of non-approved partners, enquiry submission tied to an owned plan, partner response and cross-partner access denial.
+- Added a test for the enquiry-ready discovery filter.
+- Migration `0003_trip_plans_and_partner_enquiries.py` created.
+- **Not yet verified:** Django checks/tests, migration application/drift, frontend typecheck/build, authenticated browser workflow, CI, merge or deployment.
