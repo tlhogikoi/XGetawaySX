@@ -121,3 +121,144 @@ class PublicExperienceCollectionDetailView(RetrieveAPIView):
         ).select_related(
             "destination"
         ).prefetch_related("partners")
+
+
+from django.utils import timezone
+from rest_framework import status
+from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.permissions import IsAuthenticated
+from .models import PartnerEnquiry, TripPlan, TripPlanItem
+from .serializers import (
+    PartnerEnquiryCreateSerializer, PartnerEnquiryResponseSerializer,
+    PartnerEnquirySerializer, TripPlanItemCreateSerializer, TripPlanSerializer,
+)
+
+
+class TripPlanListCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        plans = TripPlan.objects.filter(owner=request.user).prefetch_related(
+            "items__partner"
+        )
+        return Response(TripPlanSerializer(plans, many=True).data)
+
+    def post(self, request):
+        serializer = TripPlanSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        plan = serializer.save(owner=request.user)
+        return Response(TripPlanSerializer(plan).data, status=status.HTTP_201_CREATED)
+
+
+class TripPlanDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self, request, pk):
+        try:
+            return TripPlan.objects.prefetch_related("items__partner").get(pk=pk, owner=request.user)
+        except TripPlan.DoesNotExist:
+            from rest_framework.exceptions import NotFound
+            raise NotFound("Trip plan not found.")
+
+    def get(self, request, pk):
+        return Response(TripPlanSerializer(self.get_object(request, pk)).data)
+
+    def patch(self, request, pk):
+        plan = self.get_object(request, pk)
+        serializer = TripPlanSerializer(plan, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(TripPlanSerializer(plan).data)
+
+    def delete(self, request, pk):
+        self.get_object(request, pk).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class TripPlanItemCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            plan = TripPlan.objects.get(pk=pk, owner=request.user)
+        except TripPlan.DoesNotExist:
+            from rest_framework.exceptions import NotFound
+            raise NotFound("Trip plan not found.")
+        serializer = TripPlanItemCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        partner = Partner.objects.get(pk=serializer.validated_data["partner_id"])
+        item, created = TripPlanItem.objects.get_or_create(
+            plan=plan, partner=partner,
+            defaults={"note": serializer.validated_data.get("note", "")},
+        )
+        if not created:
+            raise ValidationError({"partner_id": "This partner is already in the trip plan."})
+        plan.save(update_fields=["updated_at"])
+        return Response(TripPlanSerializer(plan).data, status=status.HTTP_201_CREATED)
+
+
+class TripPlanItemDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, pk, item_id):
+        try:
+            item = TripPlanItem.objects.get(pk=item_id, plan__pk=pk, plan__owner=request.user)
+        except TripPlanItem.DoesNotExist:
+            from rest_framework.exceptions import NotFound
+            raise NotFound("Trip plan item not found.")
+        item.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class CustomerEnquiryListCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        enquiries = PartnerEnquiry.objects.filter(customer=request.user).select_related("partner")
+        return Response(PartnerEnquirySerializer(enquiries, many=True).data)
+
+    def post(self, request):
+        serializer = PartnerEnquiryCreateSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        enquiry = PartnerEnquiry.objects.create(
+            customer=request.user,
+            partner=data["partner"],
+            trip_plan=data.get("trip_plan"),
+            message=data["message"],
+            requested_start_date=data.get("requested_start_date"),
+            requested_end_date=data.get("requested_end_date"),
+        )
+        return Response(PartnerEnquirySerializer(enquiry).data, status=status.HTTP_201_CREATED)
+
+
+class PartnerIncomingEnquiryListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        enquiries = PartnerEnquiry.objects.filter(
+            partner__owner=request.user
+        ).select_related("partner", "customer", "trip_plan")
+        return Response(PartnerEnquirySerializer(enquiries, many=True).data)
+
+
+class PartnerEnquiryRespondView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            enquiry = PartnerEnquiry.objects.select_related("partner", "customer").get(
+                pk=pk, partner__owner=request.user
+            )
+        except PartnerEnquiry.DoesNotExist:
+            from rest_framework.exceptions import NotFound
+            raise NotFound("Enquiry not found.")
+        if enquiry.status != PartnerEnquiry.Status.PENDING:
+            raise ValidationError("Only pending enquiries can receive a partner response.")
+        serializer = PartnerEnquiryResponseSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        enquiry.status = serializer.validated_data["status"]
+        enquiry.partner_response = serializer.validated_data["partner_response"]
+        enquiry.responded_at = timezone.now()
+        enquiry.save(update_fields=["status", "partner_response", "responded_at", "updated_at"])
+        return Response(PartnerEnquirySerializer(enquiry).data)
