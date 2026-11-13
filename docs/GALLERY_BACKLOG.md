@@ -642,3 +642,49 @@ Implemented on `feat/application-foundation`:
 - Refund reconciliation records an externally completed refund; it does not call a payment provider. Staff must verify the provider-side refund before submitting it.
 - No raw card data or full provider payload is stored.
 - Backend tests, Django checks, migration application/drift checks, frontend build, CI and deployment have not been run or confirmed by this implementation.
+
+
+## Development 17 — PayFast + Yoco hosted checkout integration
+
+Implemented on `feat/application-foundation`:
+
+### Shared payment flow
+- Added `backend/partners/gateways.py` as the server-side gateway adapter layer.
+- Added payment checkout session fields `checkout_session_id` and `checkout_url` with migration `0008_payment_gateway_checkout_sessions.py`.
+- Added authenticated customer endpoint `POST /api/v1/partners/payments/{id}/checkout/`. It accepts only `payfast` or `yoco`, verifies payment ownership, pending status and confirmed reservation status, and binds the pending payment to one provider.
+- Added public provider callback endpoint `POST /api/v1/partners/webhooks/{provider}/`. Provider callbacks are unauthenticated at the application layer but must pass provider-specific cryptographic and transaction checks.
+- A verified callback captures a pending payment and creates the existing immutable partner commission ledger entry. The customer return URL is not treated as proof of payment.
+- Checkout records remain linked to the existing server-calculated reservation amount and currency. Yoco is restricted to ZAR because its Checkout API currently documents ZAR support.
+
+### PayFast
+- Creates a signed hosted checkout form and returns the PayFast sandbox or live form action plus fields to the customer frontend.
+- Uses environment-based merchant ID, merchant key, optional passphrase, sandbox mode and public ITN URL.
+- ITN handling checks the signature, merchant ID, PayFast source IP (resolved from PayFast's published hostnames), server-side ITN validation response, payment ID, gross amount and ZAR currency before capture.
+- Uses the PayFast transaction ID plus status as the event key for duplicate notification protection.
+
+### Yoco
+- Creates hosted Checkout API sessions from the backend using a server-only secret key and idempotency header.
+- Returns the Yoco-hosted redirect URL; the browser never receives the secret key.
+- Verifies the raw webhook body with Yoco's Standard Webhooks signing scheme, constant-time HMAC-SHA256 comparison, webhook ID and a three-minute timestamp window.
+- Processes signed `payment.succeeded` notifications only after matching checkout ID, amount and currency to the pending XGetawaySX payment.
+- Stores webhook ID and payload hash in the provider event inbox to suppress duplicate delivery.
+
+### Customer interface
+- Updated `CustomerPaymentsWorkspace.tsx` with PayFast/Yoco selection, checkout initiation, pending payment continuation and provider-hosted redirection/form submission.
+- PayFast form actions and Yoco redirect hosts are allowlisted in the frontend; Yoco checkout URL is also validated by the backend adapter.
+- Customer payment copy now explains that XGetawaySX confirms payment only after a verified provider notification.
+
+### Configuration
+Copy `.env.example` and configure the appropriate sandbox/test credentials:
+- `PAYFAST_MERCHANT_ID`, `PAYFAST_MERCHANT_KEY`, `PAYFAST_PASSPHRASE`, `PAYFAST_SANDBOX`, `PAYFAST_NOTIFY_URL`
+- `YOCO_SECRET_KEY`, `YOCO_WEBHOOK_SECRET`
+- `PAYMENT_RETURN_URL`, `PAYMENT_CANCEL_URL`, `PAYMENT_FAILURE_URL`
+
+Never commit live credentials. PayFast's ITN endpoint and Yoco's webhook endpoint must be publicly reachable over HTTPS in a deployed environment. Yoco live keys require an approved verified domain in the Yoco merchant account.
+
+### Development 17 boundaries and validation
+- The gateway adapters and webhook handlers are implemented, but no merchant credentials have been supplied and no real provider account has been connected.
+- PayFast sandbox/live and Yoco test/live transactions have not been run. The Yoco webhook subscription still needs to be registered in the merchant account and configured with the deployed endpoint and webhook signing secret.
+- No automatic provider refund API call is included. Development 16's staff refund reconciliation remains the current refund workflow.
+- Added tests for signed Yoco webhook capture, invalid signatures, duplicate events, PayFast ITN validation/capture, PayFast sandbox checkout form generation, Yoco checkout API request headers/idempotency and redirect host validation.
+- Backend tests, Django checks, migration application/drift checks, frontend typecheck/build, live webhook delivery, CI and deployment have not been run or confirmed.
