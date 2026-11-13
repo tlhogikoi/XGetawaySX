@@ -36,6 +36,8 @@ class PublicPartnerListView(ListAPIView):
             queryset = queryset.filter(province__icontains=province)
         if country:
             queryset = queryset.filter(country__icontains=country)
+        if params.get("enquiry_ready") == "true":
+            queryset = queryset.filter(enquiry_status=Partner.ApprovalStatus.APPROVED)
         if search:
             queryset = queryset.filter(
                 Q(name__icontains=search)
