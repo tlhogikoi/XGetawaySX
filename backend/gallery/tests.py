@@ -752,7 +752,7 @@ class GalleryPartnerActivityTests(TestCase):
 
     def test_anonymous_user_cannot_view_partner_activity(self):
         response = self.client.get(f"/api/v1/gallery/partners/{self.partner.id}/activity/")
-        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.status_code, 403)
 
 
 class GalleryStoryEditorialQualityReviewTests(TestCase):
