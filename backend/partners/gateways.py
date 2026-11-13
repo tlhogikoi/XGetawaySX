@@ -29,6 +29,8 @@ def build_payfast_checkout(payment):
     merchant_key = _setting("PAYFAST_MERCHANT_KEY")
     if not merchant_id or not merchant_key:
         raise ImproperlyConfigured("PayFast merchant credentials are not configured.")
+    if not _setting("PAYFAST_NOTIFY_URL"):
+        raise ImproperlyConfigured("PAYFAST_NOTIFY_URL must point to the public PayFast webhook endpoint.")
     sandbox = bool(_setting("PAYFAST_SANDBOX", True))
     fields = {
         "merchant_id": merchant_id,
