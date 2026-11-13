@@ -480,9 +480,12 @@ def _reservation_financial_totals(reservation):
         reservation.quoted_currency = currency
         reservation.quoted_at = timezone.now()
         reservation.save(update_fields=["quoted_total", "quoted_deposit", "quoted_currency", "quoted_at", "updated_at"])
-    paid = reservation.payments.filter(status=ReservationPayment.Status.CAPTURED).aggregate(
-        total=Sum("amount")
-    )["total"] or Decimal("0.00")
+    captured_payments = reservation.payments.filter(status=ReservationPayment.Status.CAPTURED)
+    captured_total = captured_payments.aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+    refunded_total = ReservationRefund.objects.filter(
+        payment__in=captured_payments, status=ReservationRefund.Status.REFUNDED
+    ).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+    paid = captured_total - refunded_total
     pending = reservation.payments.filter(status=ReservationPayment.Status.PENDING).aggregate(
         total=Sum("amount")
     )["total"] or Decimal("0.00")
