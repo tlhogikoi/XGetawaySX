@@ -417,3 +417,90 @@ class ReservationFoundationTests(TestCase):
         }, format="json")
         self.assertEqual(denied.status_code, 404)
 
+class PaymentAndPartnerFinanceTests(TestCase):
+    def setUp(self):
+        from datetime import date, timedelta
+        import uuid
+        from .models import PartnerAvailability, PartnerFinancialSettings, ReservationRequest
+        self.client = APIClient()
+        self.customer = User.objects.create_user(email="pay-customer@example.com", password="test-password")
+        self.owner = User.objects.create_user(email="pay-owner@example.com", password="test-password", role=User.Role.PARTNER)
+        self.admin = User.objects.create_superuser(email="pay-admin@example.com", password="test-password")
+        self.partner = Partner.objects.create(
+            owner=self.owner, name="Payment Lodge", category=Partner.Category.ACCOMMODATION,
+            gallery_status=Partner.ApprovalStatus.APPROVED,
+            booking_status=Partner.ApprovalStatus.APPROVED,
+        )
+        self.start = date(2027, 5, 10)
+        for offset in range(2):
+            PartnerAvailability.objects.create(
+                partner=self.partner, date=self.start + timedelta(days=offset),
+                capacity=4, booked_count=2, price_per_guest="100.00", currency="ZAR",
+            )
+        self.reservation = ReservationRequest.objects.create(
+            customer=self.customer, partner=self.partner, start_date=self.start,
+            end_date=self.start + timedelta(days=2), guests=2,
+            status=ReservationRequest.Status.CONFIRMED, booking_reference=uuid.uuid4(),
+        )
+        self.policy = PartnerFinancialSettings.objects.create(
+            partner=self.partner, deposit_type=PartnerFinancialSettings.DepositType.PERCENTAGE,
+            deposit_value="20.00", commission_rate="10.00", currency="ZAR",
+        )
+
+    def create_payment(self, key="payment-key-0001"):
+        return self.client.post("/api/v1/partners/payments/", {
+            "reservation_id": self.reservation.pk, "idempotency_key": key,
+        }, format="json")
+
+    def test_customer_payment_record_uses_server_calculated_deposit(self):
+        self.client.force_authenticate(user=self.customer)
+        response = self.create_payment()
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["kind"], "deposit")
+        self.assertEqual(response.data["amount"], "80.00")
+        self.assertEqual(response.data["status"], "pending")
+
+    def test_payment_creation_is_idempotent(self):
+        self.client.force_authenticate(user=self.customer)
+        first = self.create_payment()
+        second = self.create_payment()
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(first.data["id"], second.data["id"])
+
+    def test_unconfirmed_reservation_cannot_create_payment(self):
+        from .models import ReservationRequest
+        self.reservation.status = ReservationRequest.Status.PENDING
+        self.reservation.save(update_fields=["status"])
+        self.client.force_authenticate(user=self.customer)
+        response = self.create_payment()
+        self.assertEqual(response.status_code, 400)
+
+    def test_only_admin_can_reconcile_and_capture_creates_commission_ledger(self):
+        from .models import ReservationPayment, PartnerCommissionLedger
+        self.client.force_authenticate(user=self.customer)
+        payment = self.create_payment()
+        self.assertEqual(payment.status_code, 201)
+        url = f"/api/v1/partners/payments/{payment.data['id']}/reconcile/"
+        payload = {"status": "captured", "provider": "test_gateway", "provider_reference": "gateway-txn-001"}
+        denied = self.client.post(url, payload, format="json")
+        self.assertEqual(denied.status_code, 403)
+        self.client.force_authenticate(user=self.admin)
+        captured = self.client.post(url, payload, format="json")
+        self.assertEqual(captured.status_code, 200)
+        self.assertEqual(captured.data["status"], "captured")
+        entry = PartnerCommissionLedger.objects.get(payment_id=payment.data["id"])
+        self.assertEqual(entry.gross_amount, Decimal("80.00"))
+        self.assertEqual(entry.commission_amount, Decimal("8.00"))
+        self.assertEqual(entry.partner_net_amount, Decimal("72.00"))
+
+    def test_customer_cannot_change_partner_commission_rate(self):
+        self.client.force_authenticate(user=self.owner)
+        response = self.client.post("/api/v1/partners/partner/financial-settings/", {
+            "partner_id": self.partner.pk, "deposit_type": "fixed",
+            "deposit_value": "50.00", "currency": "ZAR", "commission_rate": "0.00",
+        }, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.policy.refresh_from_db()
+        self.assertEqual(self.policy.commission_rate, Decimal("10.00"))
+
