@@ -615,6 +615,12 @@ class RefundReconciliationTests(TestCase):
         self.assertEqual(sum((item.commission_reversal for item in adjustments), Decimal("0.00")), Decimal("10.00"))
         self.assertEqual(sum((item.partner_net_reversal for item in adjustments), Decimal("0.00")), Decimal("90.00"))
         self.assertEqual(ReservationRefund.objects.filter(payment=self.payment).count(), 2)
+        self.client.force_authenticate(user=self.admin)
+        summary = self.client.get(f"/api/v1/partners/partner/financial-summary/?partner_id={self.partner.pk}")
+        self.assertEqual(summary.status_code, 200)
+        self.assertEqual(summary.data["captured_payments_total"], Decimal("0.00"))
+        self.assertEqual(summary.data["accrued_commission_total"], Decimal("0.00"))
+        self.assertEqual(summary.data["partner_net_total"], Decimal("0.00"))
 
     def test_refunds_cannot_exceed_captured_amount(self):
         from .models import ReservationRefund
