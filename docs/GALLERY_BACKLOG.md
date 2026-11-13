@@ -614,6 +614,7 @@ Implemented on `feat/application-foundation`:
 ### Verification
 
 - Added tests for server-calculated deposit amount, idempotent payment preparation, rejection of unconfirmed reservations, admin-only reconciliation, commission ledger calculation, partner commission-rate protection, and cancellation/capture safeguards.
-- Migration `0005_partner_finance_and_reservation_payments.py` created.
+- Migrations `0005_partner_finance_and_reservation_payments.py` and `0006_reservation_financial_quote_snapshot.py` created.
+- Added a regression test ensuring a balance payment uses the original reservation price snapshot even after daily partner prices change.
 - **Not yet verified:** Django checks/tests, migration application/drift, frontend typecheck/build, browser workflow, CI, merge or deployment. No real payment provider is connected.
 
