@@ -742,6 +742,8 @@ class DualGatewayIntegrationTests(TestCase):
         from django.test import override_settings
         from .gateways import _payfast_signature
         from .models import ReservationPayment, PartnerCommissionLedger
+        self.payment.provider = "payfast"
+        self.payment.save(update_fields=["provider"])
         payload = {
             "m_payment_id": str(self.payment.pk),
             "pf_payment_id": "pf_txn_12345",
@@ -770,6 +772,8 @@ class DualGatewayIntegrationTests(TestCase):
     def test_payfast_checkout_returns_signed_sandbox_form(self):
         from django.test import override_settings
         self.client.force_authenticate(user=self.customer)
+        self.payment.provider = "manual_reconciliation"
+        self.payment.save(update_fields=["provider"])
         with override_settings(
             PAYFAST_MERCHANT_ID="10000100", PAYFAST_MERCHANT_KEY="test-key",
             PAYFAST_PASSPHRASE="", PAYFAST_SANDBOX=True,
