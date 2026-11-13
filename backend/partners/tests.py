@@ -287,3 +287,25 @@ class TripPlanningAndEnquiryTests(TestCase):
             {"status": "declined", "partner_response": "Not available for these dates."},
             format="json",
         ).status_code, 404)
+
+
+class EnquiryReadyPartnerDiscoveryTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.owner = User.objects.create_user(email="ready-owner@example.com", password="test-password")
+
+    def test_enquiry_ready_filter_excludes_partners_not_accepting_enquiries(self):
+        Partner.objects.create(
+            owner=self.owner, name="Ready Lodge", category=Partner.Category.ACCOMMODATION,
+            gallery_status=Partner.ApprovalStatus.APPROVED,
+            enquiry_status=Partner.ApprovalStatus.APPROVED,
+        )
+        Partner.objects.create(
+            owner=self.owner, name="Gallery Only Lodge", category=Partner.Category.ACCOMMODATION,
+            gallery_status=Partner.ApprovalStatus.APPROVED,
+            enquiry_status=Partner.ApprovalStatus.PENDING,
+        )
+        response = self.client.get("/api/v1/partners/?enquiry_ready=true")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item["name"] for item in response.data], ["Ready Lodge"])
+        self.assertIn("id", response.data[0])
