@@ -549,3 +549,32 @@ The following code has been committed to `feat/application-foundation`; it has n
 - Added a test for the enquiry-ready discovery filter.
 - Migration `0003_trip_plans_and_partner_enquiries.py` created.
 - **Not yet verified:** Django checks/tests, migration application/drift, frontend typecheck/build, authenticated browser workflow, CI, merge or deployment.
+
+## Development 14 — Booking & Reservation Management Foundation
+
+Implemented on `feat/application-foundation`:
+
+- Added `PartnerAvailability` daily inventory records with partner ownership, date, guest capacity, reserved guest count, open/closed state and optional per-guest price/currency.
+- Added unique partner/date and booked-capacity database constraints.
+- Added `ReservationRequest` with customer, partner, optional trip plan, check-in/start date, exclusive checkout/end date, guest count, status, partner response and a UUID booking reference.
+- Added public availability lookup, partner-owned availability management, customer reservation request/history, partner reservation inbox/decision and customer cancellation endpoints.
+- A request remains pending until the partner confirms it. Confirmation runs in a database transaction, locks the request and each daily availability row, rechecks capacity for every requested night, increments reserved capacity and issues a booking reference.
+- Declining a pending request does not consume capacity. Cancelling a confirmed reservation releases the reserved guest capacity.
+- Added booking-ready partner discovery filtering without exposing internal booking approval status in the public partner serializer.
+- Added reusable authenticated React customer reservation and partner reservation/availability workspaces. These are not mounted into the public app because the repository still has no confirmed shared authentication/session integration; each component accepts a host-provided bearer token.
+
+### API routes
+
+| Method | Route | Purpose |
+|---|---|---|
+| GET | `/api/v1/partners/availability/?partner_id=&start_date=&end_date=` | Public date-specific availability |
+| GET, POST | `/api/v1/partners/partner/availability/` | Partner-owned availability records |
+| GET, POST | `/api/v1/partners/reservations/` | Customer reservation history and request creation |
+| POST | `/api/v1/partners/reservations/{id}/cancel/` | Customer cancellation |
+| GET | `/api/v1/partners/partner/reservations/` | Partner reservation inbox |
+| POST | `/api/v1/partners/partner/reservations/{id}/decision/` | Partner confirmation or decline |
+
+Reservation date semantics: the start date is included and the end/checkout date is excluded. Capacity is counted as guests per date, not rooms or units. The partner must publish availability for every requested night. The confirmation transaction protects capacity using row locks on databases that support `SELECT FOR UPDATE`; production deployment should use PostgreSQL. No payment, deposit, automatic expiry, external calendar sync, email/SMS notifications, refund or channel-manager integration is implemented. Prices are informational only and no payment is collected.
+
+Tests were added for pending requests, capacity reservation on confirmation, capacity rechecking, cancellation capacity release and partner ownership. They have **not** been executed. The migration has **not** been applied or checked against a live database; frontend typecheck/build and browser testing have **not** been run. No CI, merge or deployment is claimed.
+
