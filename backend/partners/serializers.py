@@ -244,3 +244,76 @@ class ReservationDecisionSerializer(serializers.Serializer):
     status = serializers.ChoiceField(choices=(ReservationRequest.Status.CONFIRMED, ReservationRequest.Status.DECLINED))
     partner_response = serializers.CharField(min_length=5, max_length=3000)
 
+from decimal import Decimal
+from .models import PartnerFinancialSettings, ReservationPayment, PartnerCommissionLedger
+
+
+class PartnerFinancialSettingsSerializer(serializers.ModelSerializer):
+    partner_id = serializers.IntegerField(read_only=True)
+    commission_rate = serializers.DecimalField(max_digits=5, decimal_places=2, read_only=True)
+
+    class Meta:
+        model = PartnerFinancialSettings
+        fields = ("partner_id", "deposit_type", "deposit_value", "commission_rate", "currency", "updated_at")
+        read_only_fields = ("partner_id", "commission_rate", "updated_at")
+
+    def validate(self, attrs):
+        deposit_type = attrs.get("deposit_type", getattr(self.instance, "deposit_type", PartnerFinancialSettings.DepositType.NONE))
+        deposit_value = attrs.get("deposit_value", getattr(self.instance, "deposit_value", Decimal("0")))
+        if deposit_value < 0:
+            raise serializers.ValidationError({"deposit_value": "Deposit value cannot be negative."})
+        if deposit_type == PartnerFinancialSettings.DepositType.PERCENTAGE and deposit_value > 100:
+            raise serializers.ValidationError({"deposit_value": "Percentage deposits cannot exceed 100%."})
+        if deposit_type == PartnerFinancialSettings.DepositType.NONE and deposit_value != 0:
+            raise serializers.ValidationError({"deposit_value": "Set deposit value to zero when deposits are disabled."})
+        return attrs
+
+
+class ReservationPaymentCreateSerializer(serializers.Serializer):
+    reservation_id = serializers.IntegerField()
+    idempotency_key = serializers.CharField(min_length=8, max_length=100)
+
+    def validate(self, attrs):
+        try:
+            reservation = ReservationRequest.objects.select_related("partner").get(
+                pk=attrs["reservation_id"], customer=self.context["request"].user
+            )
+        except ReservationRequest.DoesNotExist:
+            raise serializers.ValidationError({"reservation_id": "Reservation not found."})
+        if reservation.status != ReservationRequest.Status.CONFIRMED:
+            raise serializers.ValidationError({"reservation_id": "Only confirmed reservations can be paid."})
+        attrs["reservation"] = reservation
+        return attrs
+
+
+class ReservationPaymentSerializer(serializers.ModelSerializer):
+    partner_name = serializers.CharField(source="partner.name", read_only=True)
+    reservation_reference = serializers.UUIDField(source="reservation.booking_reference", read_only=True)
+
+    class Meta:
+        model = ReservationPayment
+        fields = ("id", "reservation", "reservation_reference", "partner_name", "kind", "status", "amount", "currency", "provider", "provider_reference", "failure_reason", "created_at", "captured_at")
+        read_only_fields = fields
+
+
+class PaymentReconciliationSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=(ReservationPayment.Status.CAPTURED, ReservationPayment.Status.FAILED))
+    provider = serializers.CharField(max_length=40)
+    provider_reference = serializers.CharField(max_length=160, required=False, allow_blank=True)
+    failure_reason = serializers.CharField(max_length=500, required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        if attrs["status"] == ReservationPayment.Status.CAPTURED and not attrs.get("provider_reference", "").strip():
+            raise serializers.ValidationError({"provider_reference": "A verified provider transaction reference is required for captured payments."})
+        return attrs
+
+
+class PartnerCommissionLedgerSerializer(serializers.ModelSerializer):
+    payment_id = serializers.IntegerField(read_only=True)
+    reservation_reference = serializers.UUIDField(source="payment.reservation.booking_reference", read_only=True)
+
+    class Meta:
+        model = PartnerCommissionLedger
+        fields = ("id", "payment_id", "reservation_reference", "gross_amount", "commission_rate", "commission_amount", "partner_net_amount", "status", "created_at")
+        read_only_fields = fields
+
