@@ -438,7 +438,7 @@ class PartnerBookingProfileListView(APIView):
 from decimal import Decimal, ROUND_HALF_UP
 from django.db.models import Sum
 from rest_framework.permissions import IsAdminUser
-from .models import PartnerFinancialSettings, ReservationPayment, PartnerCommissionLedger
+from .models import PartnerFinancialSettings, ReservationPayment, PartnerCommissionLedger, ReservationRefund
 from .serializers import (
     PartnerFinancialSettingsSerializer, ReservationPaymentCreateSerializer,
     ReservationPaymentSerializer, PaymentReconciliationSerializer,
