@@ -1,7 +1,7 @@
 import GalleryPartnerGrid from "./components/GalleryPartnerGrid";
 import PublicPartnerProfile from "./components/PublicPartnerProfile";
 import GalleryStoryEditor from "./components/GalleryStoryEditor";
-import PartnerDiscovery from "./components/PartnerDiscovery";\nimport DestinationExplorer from "./components/DestinationExplorer";
+import PartnerDiscovery from "./components/PartnerDiscovery";\nimport DestinationExplorer from "./components/DestinationExplorer";\nimport "./components/destination-explorer.css";
 import { ArrowRight, Compass, Globe2, Heart, MapPin } from "lucide-react";
 
 const categories = [
@@ -14,7 +14,7 @@ const categories = [
 
 export default function App() {
   if (window.location.pathname === "/partner/gallery" || window.location.pathname === "/partner/gallery/") return <GalleryStoryEditor />;
-  const partnerMatch = window.location.pathname.match(/^\/partners\/([^/]+)\/?$/);
+  const destinationMatch = window.location.pathname.match(/^\/destinations\/([^/]+)\/?$/);\n  if (destinationMatch || window.location.pathname === "/destinations" || window.location.pathname === "/destinations/") return <DestinationExplorer />;\n  const collectionMatch = window.location.pathname.match(/^\/collections\/([^/]+)\/?$/);\n  if (collectionMatch) return <DestinationExplorer />;\n  const partnerMatch = window.location.pathname.match(/^\/partners\/([^/]+)\/?$/);
   if (partnerMatch) return <PublicPartnerProfile slug={decodeURIComponent(partnerMatch[1])} />;
 
   return (
@@ -49,7 +49,7 @@ export default function App() {
         <div className="partner-discovery-intro"><p className="eyebrow">FIND YOUR NEXT EXPERIENCE</p><h2>Discover approved partners.</h2><p>Search places and experiences by name, category or destination.</p></div>
         <PartnerDiscovery />
       </section>
-      <section className="destination-home-section" id="destinations"><div><p className="eyebrow">EXPLORE SOUTH AFRICA</p><h2>Discover destinations and curated escapes.</h2><p>Find destination guides and handpicked experiences from approved local partners.</p></div><a className="primary-button" href="/destinations/">Explore destinations <ArrowRight size={17}/></a></section>\n      <section className="gallery-teaser" id="gallery">
+      <section className="destination-home-section" id="destinations"><div><p className="eyebrow">EXPLORE SOUTH AFRICA</p><h2>Discover destinations and curated escapes.</h2><p>Find destination guides and handpicked experiences from approved local partners.</p></div><a className="primary-button" href="/destinations/">Explore destinations <ArrowRight size={17}/></a></section>\n      <section className="destination-home-section" id="destinations"><div><p className="eyebrow">EXPLORE SOUTH AFRICA</p><h2>Discover destinations and curated escapes.</h2><p>Find destination guides and handpicked experiences from approved local partners.</p></div><a className="primary-button" href="/destinations/">Explore destinations <ArrowRight size={17}/></a></section>\n      <section className="gallery-teaser" id="gallery">
         <div><p className="eyebrow">THE PEOPLE & PLACES BEHIND THE PICTURE</p><h2>Every picture tells a story.</h2><p>Discover the history and character behind our approved partner places and experiences.</p></div>
         <div className="gallery-mark"><Heart size={28} /><span>STORIES THAT<br />TAKE YOU PLACES</span><MapPin size={18} /></div>
       </section>
