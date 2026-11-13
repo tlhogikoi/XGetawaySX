@@ -1,4 +1,5 @@
 import django.db.models.deletion
+import django.core.validators
 from django.conf import settings
 from django.db import migrations, models
 
@@ -15,8 +16,8 @@ class Migration(migrations.Migration):
             fields=[
                 ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
                 ("deposit_type", models.CharField(choices=[("none", "No deposit"), ("percentage", "Percentage"), ("fixed", "Fixed amount")], default="none", max_length=12)),
-                ("deposit_value", models.DecimalField(decimal_places=2, default=0, max_digits=10)),
-                ("commission_rate", models.DecimalField(decimal_places=2, default=0, max_digits=5)),
+                ("deposit_value", models.DecimalField(decimal_places=2, default=0, max_digits=10, validators=[django.core.validators.MinValueValidator(0)])),
+                ("commission_rate", models.DecimalField(decimal_places=2, default=0, max_digits=5, validators=[django.core.validators.MinValueValidator(0), django.core.validators.MaxValueValidator(100)])),
                 ("currency", models.CharField(default="ZAR", max_length=3)),
                 ("updated_at", models.DateTimeField(auto_now=True)),
                 ("partner", models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, related_name="financial_settings", to="partners.partner")),
