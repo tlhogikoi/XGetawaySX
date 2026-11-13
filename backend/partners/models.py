@@ -180,3 +180,64 @@ class PartnerEnquiry(models.Model):
 
     def __str__(self):
         return f"Enquiry {self.pk} — {self.partner.name}"
+
+class PartnerAvailability(models.Model):
+    """Partner-managed daily capacity. Checkout dates are exclusive on reservations."""
+    partner = models.ForeignKey(Partner, on_delete=models.CASCADE, related_name="availability_days")
+    date = models.DateField()
+    capacity = models.PositiveIntegerField()
+    booked_count = models.PositiveIntegerField(default=0)
+    is_open = models.BooleanField(default=True)
+    price_per_guest = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    currency = models.CharField(max_length=3, default="ZAR")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("date",)
+        constraints = [
+            models.UniqueConstraint(fields=("partner", "date"), name="unique_partner_availability_day"),
+            models.CheckConstraint(condition=models.Q(booked_count__lte=models.F("capacity")), name="availability_booked_lte_capacity"),
+        ]
+        indexes = [models.Index(fields=("partner", "date", "is_open"), name="partner_availability_day_idx")]
+
+    def __str__(self):
+        return f"{self.partner.name} — {self.date}"
+
+
+class ReservationRequest(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        CONFIRMED = "confirmed", "Confirmed"
+        DECLINED = "declined", "Declined"
+        CANCELLED = "cancelled", "Cancelled"
+
+    customer = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="reservation_requests"
+    )
+    partner = models.ForeignKey(
+        Partner, on_delete=models.PROTECT, related_name="reservation_requests"
+    )
+    trip_plan = models.ForeignKey(
+        TripPlan, on_delete=models.SET_NULL, null=True, blank=True, related_name="reservation_requests"
+    )
+    start_date = models.DateField()
+    end_date = models.DateField(help_text="Checkout date; exclusive.")
+    guests = models.PositiveIntegerField()
+    message = models.TextField(blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    booking_reference = models.UUIDField(null=True, blank=True, unique=True)
+    partner_response = models.TextField(blank=True)
+    responded_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(fields=("partner", "status", "start_date"), name="partner_reservation_status_idx"),
+            models.Index(fields=("customer", "created_at"), name="customer_reservation_date_idx"),
+        ]
+
+    def __str__(self):
+        return f"Reservation request {self.pk} — {self.partner.name}"
+
