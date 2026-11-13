@@ -71,7 +71,7 @@ class ReservationRequestAdmin(admin.ModelAdmin):
     list_display = ("id", "booking_reference", "partner", "customer", "start_date", "end_date", "status", "guests")
     list_filter = ("status", "start_date", "created_at")
     search_fields = ("booking_reference", "partner__name", "customer__email")
-    readonly_fields = ("booking_reference", "created_at", "updated_at", "responded_at")
+    readonly_fields = ("booking_reference", "quoted_total", "quoted_deposit", "quoted_currency", "quoted_at", "created_at", "updated_at", "responded_at")
 
 
 @admin.register(PartnerFinancialSettings)
