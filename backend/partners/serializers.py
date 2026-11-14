@@ -332,7 +332,7 @@ class ReservationRefundSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ReservationRefund
-        fields = ("id", "payment_id", "amount", "currency", "status", "provider", "provider_reference", "reason", "reconciled_at", "created_at")
+        fields = ("id", "payment_id", "amount", "currency", "status", "provider", "provider_reference", "provider_status", "reason", "idempotency_key", "reconciled_at", "created_at")
         read_only_fields = fields
 
 
