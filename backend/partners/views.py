@@ -447,7 +447,8 @@ from .models import PartnerFinancialSettings, ReservationPayment, PartnerCommiss
 from .gateways import (
     GatewayError, build_payfast_checkout, create_yoco_checkout,
     verify_payfast_signature, verify_payfast_source_ip, validate_payfast_itn,
-    verify_yoco_webhook,
+    verify_yoco_webhook, create_payfast_refund, create_yoco_refund,
+    query_payfast_refund,
 )
 from .serializers import (
     PartnerFinancialSettingsSerializer, ReservationPaymentCreateSerializer,
@@ -653,6 +654,158 @@ class PartnerFinancialSummaryView(APIView):
 
 
 
+
+def _finalize_provider_refund(refund, provider_reference="", reconciled_by=None):
+    from .models import ReservationRefund, PartnerCommissionAdjustment
+    with transaction.atomic():
+        refund = ReservationRefund.objects.select_for_update().select_related("payment", "payment__partner").get(pk=refund.pk)
+        payment = ReservationPayment.objects.select_for_update().select_related("partner").get(pk=refund.payment_id)
+        if refund.status == ReservationRefund.Status.REFUNDED:
+            return refund
+        if refund.status != ReservationRefund.Status.PENDING:
+            return refund
+        refunded_total = ReservationRefund.objects.filter(
+            payment=payment, status=ReservationRefund.Status.REFUNDED
+        ).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+        if refund.amount > payment.amount - refunded_total:
+            raise ValidationError("Provider-confirmed refund would exceed the remaining captured amount.")
+        try:
+            commission_entry = payment.commission_entry
+        except PartnerCommissionLedger.DoesNotExist:
+            raise ValidationError("The captured payment has no commission ledger entry.")
+        prior_reversal = PartnerCommissionAdjustment.objects.filter(
+            refund__payment=payment
+        ).aggregate(total=Sum("commission_reversal"))["total"] or Decimal("0.00")
+        target_reversal = (
+            commission_entry.commission_amount * (refunded_total + refund.amount) / payment.amount
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        commission_reversal = min(
+            commission_entry.commission_amount - prior_reversal,
+            max(Decimal("0.00"), target_reversal - prior_reversal),
+        )
+        refund.status = ReservationRefund.Status.REFUNDED
+        refund.provider_reference = provider_reference or refund.provider_reference
+        refund.provider_status = "succeeded"
+        refund.reconciled_at = timezone.now()
+        if reconciled_by:
+            refund.reconciled_by = reconciled_by
+        refund.save(update_fields=["status", "provider_reference", "provider_status", "reconciled_at", "reconciled_by"])
+        PartnerCommissionAdjustment.objects.get_or_create(
+            refund=refund,
+            defaults={
+                "partner": payment.partner,
+                "gross_refund": refund.amount,
+                "commission_reversal": commission_reversal,
+                "partner_net_reversal": refund.amount - commission_reversal,
+            },
+        )
+        if refunded_total + refund.amount == payment.amount:
+            payment.status = ReservationPayment.Status.REFUNDED
+            payment.save(update_fields=["status", "updated_at"])
+        return refund
+
+
+class AdminPaymentRefundInitiateView(APIView):
+    """Staff-only gateway refund initiation; final status comes from provider evidence."""
+    permission_classes = [IsAdminUser]
+
+    def post(self, request, pk):
+        from .models import ReservationRefund
+        from .serializers import ReservationRefundSerializer
+        key = str(request.data.get("idempotency_key", "")).strip()
+        reason = str(request.data.get("reason", "")).strip()[:500]
+        if not key or len(key) < 8 or len(key) > 100:
+            raise ValidationError({"idempotency_key": "Provide an 8–100 character idempotency key."})
+        try:
+            amount = Decimal(str(request.data.get("amount"))).quantize(Decimal("0.01"))
+        except Exception:
+            raise ValidationError({"amount": "Provide a valid refund amount."})
+        if amount <= 0:
+            raise ValidationError({"amount": "Refund amount must be greater than zero."})
+        with transaction.atomic():
+            payment = get_object_or_404(
+                ReservationPayment.objects.select_for_update().select_related("partner"), pk=pk
+            )
+            existing = ReservationRefund.objects.filter(idempotency_key=key).first()
+            if existing:
+                if existing.payment_id == payment.pk and existing.amount == amount:
+                    return Response(ReservationRefundSerializer(existing).data)
+                raise ValidationError("This idempotency key has already been used.")
+            if payment.status != ReservationPayment.Status.CAPTURED or not payment.provider_reference:
+                raise ValidationError("Only captured payments with a verified provider reference can be refunded.")
+            if payment.provider not in {"payfast", "yoco"}:
+                raise ValidationError("Automated refunds are available only for PayFast and Yoco payments.")
+            if ReservationRefund.objects.filter(payment=payment, status=ReservationRefund.Status.PENDING).exists():
+                raise ValidationError("A refund is already pending for this payment. Resolve it before starting another.")
+            refunded = ReservationRefund.objects.filter(
+                payment=payment, status=ReservationRefund.Status.REFUNDED
+            ).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+            if amount > payment.amount - refunded:
+                raise ValidationError({"amount": "Refund exceeds the remaining captured amount."})
+            refund = ReservationRefund.objects.create(
+                payment=payment, amount=amount, currency=payment.currency,
+                status=ReservationRefund.Status.PENDING, provider=payment.provider,
+                idempotency_key=key, reason=reason, provider_status="request_created",
+            )
+        try:
+            result = create_payfast_refund(payment, refund) if payment.provider == "payfast" else create_yoco_refund(payment, refund)
+        except (GatewayError, ImproperlyConfigured) as exc:
+            refund.provider_status = "submission_uncertain"
+            refund.save(update_fields=["provider_status"])
+            return Response({
+                "refund": ReservationRefundSerializer(refund).data,
+                "detail": str(exc),
+                "manual_verification_required": True,
+            }, status=status.HTTP_202_ACCEPTED)
+        refund.provider_reference = result.get("provider_reference") or None
+        refund.provider_status = result.get("status", "pending")
+        refund.save(update_fields=["provider_reference", "provider_status"])
+        if payment.provider == "yoco" and result.get("status") == "succeeded":
+            refund = _finalize_provider_refund(refund, result.get("provider_reference", ""))
+        return Response(ReservationRefundSerializer(refund).data, status=status.HTTP_202_ACCEPTED)
+
+
+class AdminPayFastRefundVerifyView(APIView):
+    """Verify PayFast refundable balance before staff finalise pending refunds."""
+    permission_classes = [IsAdminUser]
+
+    def post(self, request, pk):
+        from .models import ReservationRefund
+        from .serializers import ReservationRefundSerializer
+        payment = get_object_or_404(ReservationPayment, pk=pk, provider="payfast")
+        try:
+            provider_state = query_payfast_refund(payment)
+        except (GatewayError, ImproperlyConfigured) as exc:
+            raise ValidationError(str(exc))
+        if provider_state.get("status") not in {"COMPLETED", "REFUNDABLE"}:
+            raise ValidationError("PayFast has not reported a verifiable refund state.")
+        pending = list(ReservationRefund.objects.filter(
+            payment=payment, status=ReservationRefund.Status.PENDING
+        ).order_by("created_at"))
+        if not pending:
+            return Response({"refunds": [], "provider_status": provider_state.get("status")})
+        available = provider_state.get("amount_available_for_refund")
+        original = provider_state.get("amount_original")
+        if available is None or original is None:
+            raise ValidationError("PayFast refund query did not return original and remaining amounts.")
+        refunded_by_provider = Decimal(str(int(original) - int(available))) / Decimal("100")
+        already_reconciled = ReservationRefund.objects.filter(
+            payment=payment, status=ReservationRefund.Status.REFUNDED
+        ).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+        capacity = refunded_by_provider - already_reconciled
+        results = []
+        for refund in pending:
+            if capacity < refund.amount:
+                break
+            results.append(_finalize_provider_refund(refund, refund.provider_reference or ""))
+            capacity -= refund.amount
+        return Response({
+            "refunds": ReservationRefundSerializer(results, many=True).data,
+            "provider_status": provider_state.get("status"),
+            "provider_refunded_total": refunded_by_provider,
+        })
+
+
 class AdminPaymentRefundView(APIView):
     """Staff reconcile an externally completed refund; this endpoint does not call a gateway."""
     permission_classes = [IsAdminUser]
@@ -704,7 +857,8 @@ class AdminPaymentRefundView(APIView):
             refund = ReservationRefund.objects.create(
                 payment=payment, amount=amount, currency=payment.currency,
                 status=ReservationRefund.Status.REFUNDED, provider=data["provider"],
-                provider_reference=data["provider_reference"], reason=data.get("reason", ""),
+                provider_reference=data["provider_reference"], idempotency_key="manual:" + data["provider_reference"],
+                provider_status="reconciled", reason=data.get("reason", ""),
                 reconciled_by=request.user, reconciled_at=timezone.now(),
             )
 
