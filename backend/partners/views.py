@@ -960,6 +960,48 @@ class PaymentProviderWebhookView(APIView):
             payload = event["payload"]
             metadata = payload.get("metadata")
             checkout_id = metadata.get("checkoutId") if isinstance(metadata, dict) else None
+            if event_type in {"refund.succeeded", "refund.failed"}:
+                if not checkout_id:
+                    return Response({"detail": "Yoco refund event has no checkout reference."}, status=status.HTTP_400_BAD_REQUEST)
+                try:
+                    payment = ReservationPayment.objects.get(provider="yoco", checkout_session_id=str(checkout_id))
+                except ReservationPayment.DoesNotExist:
+                    return Response({"detail": "Yoco refund checkout is not recognised."}, status=status.HTTP_404_NOT_FOUND)
+                if payload.get("currency") != payment.currency or not isinstance(payload.get("amount"), int):
+                    return Response({"detail": "Yoco refund amount or currency is invalid."}, status=status.HTTP_400_BAD_REQUEST)
+                refund_amount = (Decimal(payload["amount"]) / Decimal("100")).quantize(Decimal("0.01"))
+                with transaction.atomic():
+                    event_record, created = PaymentProviderEvent.objects.get_or_create(
+                        provider="yoco", event_id=event_id,
+                        defaults={"payload_sha256": hashlib.sha256(raw_body).hexdigest(), "signature_verified": True},
+                    )
+                    if not created:
+                        return Response({"received": True, "duplicate": True}, status=status.HTTP_200_OK)
+                    refund = ReservationRefund.objects.select_for_update().filter(
+                        payment=payment, amount=refund_amount,
+                        status=ReservationRefund.Status.PENDING,
+                    ).order_by("created_at").first()
+                    if not refund:
+                        # A synchronous success response may already have finalised this refund.
+                        refund = ReservationRefund.objects.filter(
+                            payment=payment, amount=refund_amount,
+                            status=ReservationRefund.Status.REFUNDED,
+                        ).order_by("-reconciled_at").first()
+                        if refund:
+                            event_record.processed_at = timezone.now()
+                            event_record.save(update_fields=["processed_at"])
+                            return Response({"received": True, "already_reconciled": True}, status=status.HTTP_200_OK)
+                        event_record.delete()
+                        return Response({"detail": "No matching pending Yoco refund exists."}, status=status.HTTP_404_NOT_FOUND)
+                    if event_type == "refund.succeeded":
+                        refund = _finalize_provider_refund(refund, str(payload.get("id") or event_id))
+                    else:
+                        refund.status = ReservationRefund.Status.FAILED
+                        refund.provider_status = str(payload.get("failureReason") or "failed")[:40]
+                        refund.save(update_fields=["status", "provider_status"])
+                    event_record.processed_at = timezone.now()
+                    event_record.save(update_fields=["processed_at"])
+                return Response({"received": True}, status=status.HTTP_200_OK)
             if event_type != "payment.succeeded":
                 return Response({"received": True}, status=status.HTTP_200_OK)
             if not checkout_id:
