@@ -163,8 +163,12 @@ def create_payfast_refund(payment, refund):
     amount_cents = int((refund.amount * Decimal("100")).quantize(Decimal("1")))
     if amount_cents > int(remaining):
         raise GatewayError("Refund exceeds the amount PayFast reports as refundable.")
-    methods = [available.get("refund_full", {}).get("method"), available.get("refund_partial", {}).get("method")]
-    if "PAYMENT_SOURCE" not in methods:
+    is_full_refund = amount_cents == int(remaining)
+    method = (
+        available.get("refund_full", {}).get("method")
+        if is_full_refund else available.get("refund_partial", {}).get("method")
+    )
+    if method != "PAYMENT_SOURCE":
         raise GatewayError("PayFast requires a bank payout for this refund; automated bank payouts are not enabled.")
     body = {
         "amount": str(amount_cents),
