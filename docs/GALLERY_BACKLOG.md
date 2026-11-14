@@ -688,3 +688,26 @@ Never commit live credentials. PayFast's ITN endpoint and Yoco's webhook endpoin
 - No automatic provider refund API call is included. Development 16's staff refund reconciliation remains the current refund workflow.
 - Added tests for signed Yoco webhook capture, invalid signatures, duplicate events, PayFast ITN validation/capture, PayFast sandbox checkout form generation, Yoco checkout API request headers/idempotency and redirect host validation.
 - Backend tests, Django checks, migration application/drift checks, frontend typecheck/build, live webhook delivery, CI and deployment have not been run or confirmed.
+
+## Development 18 — Automated PayFast + Yoco Refunds
+
+Implemented on `feat/application-foundation`:
+
+- Added refund request idempotency keys and provider lifecycle status to `ReservationRefund`, with migration `0009_provider_refund_automation.py`.
+- Added staff-only `POST /api/v1/partners/payments/{id}/refunds/initiate/`. It accepts a refund amount, reason and idempotency key; validates captured status, provider, currency and remaining refundable amount; permits only one unresolved refund per payment; and records the request before calling the provider.
+- Added Yoco Checkout refund requests using the server-side secret key, checkout session ID, amount in cents and refund idempotency key. A synchronous `succeeded` response is accepted as provider confirmation; a pending response remains pending.
+- Added signed Yoco `refund.succeeded` and `refund.failed` webhook handling. Successful events reconcile the pending refund; failed events preserve the failed state without reversing commission. Event IDs are deduplicated in the provider event inbox.
+- Added PayFast Refunds API query-before-refund checks and payment-source refund submission. Bank-payout-only refunds are deliberately rejected because XGetawaySX does not collect or store beneficiary banking details.
+- Added staff-only `POST /api/v1/partners/payments/{id}/refunds/verify-payfast/` to compare the provider's remaining refundable balance with pending XGetawaySX refund requests. PayFast API acceptance alone does not mark a refund complete; staff must verify the provider balance.
+- Confirmed refunds create one immutable commission adjustment, proportionally reverse commission and partner net, and change the payment to `refunded` only when the captured amount has been fully refunded.
+- Preserved the existing staff reconciliation endpoint for refunds completed outside XGetawaySX. Manual reconciliation now also records an idempotency key and provider status.
+- Added tests for Yoco refund request idempotency, pending-to-success and pending-to-failed webhook handling, commission reversal and over-refund protection.
+
+### Development 18 boundaries
+
+- Provider API credentials and webhook configuration remain environment-only. No merchant account was connected and no live or sandbox refund was submitted.
+- Yoco refund completion requires a registered, publicly reachable HTTPS webhook endpoint and its signing secret. The official Checkout API requires a successful original checkout; test checkouts are not eligible for refunds.
+- PayFast refund submission is kept pending until a staff member verifies the provider's refundable balance. If PayFast requires a bank payout rather than refunding to the payment source, the automated flow stops and requires an authorised external process.
+- Network errors during refund submission are treated as uncertain, not automatically failed, because a provider may have accepted a request before the connection failed. Staff must verify the provider state before retrying.
+- Refunds are staff-initiated only. Customer self-service refund requests, cancellation policy automation, refund notifications to customers, automated PayFast webhook refunds, chargebacks, payouts and accounting exports are not included.
+- **Not yet verified:** Django checks/tests, migration application/drift, frontend typecheck/build, CI, provider sandbox tests, merge or deployment.
