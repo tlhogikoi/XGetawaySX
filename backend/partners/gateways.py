@@ -10,7 +10,9 @@ import socket
 import time
 from decimal import Decimal
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote_plus, urlparse
+from urllib.parse import quote_plus, urlencode, urlparse
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from urllib.request import Request, urlopen
 
 from django.conf import settings
@@ -102,6 +104,119 @@ def create_yoco_checkout(payment):
     ):
         raise GatewayError("Yoco returned an incomplete, unexpected or mismatched checkout response.")
     return {"checkout_url": redirect_url, "form_fields": None, "checkout_session_id": checkout_id}
+
+
+
+def _payfast_api_headers(values):
+    merchant_id = _setting("PAYFAST_MERCHANT_ID")
+    passphrase = _setting("PAYFAST_PASSPHRASE")
+    if not merchant_id or not passphrase:
+        raise ImproperlyConfigured("PayFast Refunds API requires merchant ID and API passphrase.")
+    timestamp = datetime.now(ZoneInfo("Africa/Johannesburg")).isoformat(timespec="seconds")
+    signed = {"merchant-id": str(merchant_id), "version": "v1", "timestamp": timestamp, **values}
+    signature_values = {key: value for key, value in signed.items() if value not in (None, "")}
+    signature_values["passphrase"] = str(passphrase)
+    signature = hashlib.md5(urlencode(sorted(signature_values.items())).encode("utf-8")).hexdigest()
+    return {
+        "merchant-id": str(merchant_id), "version": "v1",
+        "timestamp": timestamp, "signature": signature,
+    }
+
+
+def _payfast_api_request(method, path, body=None):
+    if not _setting("PAYFAST_SANDBOX", True) and not _setting("PAYFAST_MERCHANT_ID"):
+        raise ImproperlyConfigured("PayFast merchant credentials are not configured.")
+    headers = _payfast_api_headers(body or {})
+    headers["Content-Type"] = "application/json"
+    url = "https://api.payfast.co.za" + path
+    if bool(_setting("PAYFAST_SANDBOX", True)):
+        url += "?testing=true"
+    request = Request(
+        url, data=json.dumps(body or {}).encode("utf-8") if method != "GET" else None,
+        headers=headers, method=method,
+    )
+    try:
+        with urlopen(request, timeout=20) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except (HTTPError, URLError, TimeoutError, ValueError) as exc:
+        raise GatewayError("PayFast refund API request failed. Check provider status before retrying.") from exc
+    if not isinstance(result, dict) or result.get("status") == "failed":
+        raise GatewayError("PayFast did not accept the refund request.")
+    return result
+
+
+def query_payfast_refund(payment):
+    if payment.provider != "payfast" or not payment.provider_reference:
+        raise GatewayError("A captured PayFast transaction reference is required.")
+    result = _payfast_api_request("GET", f"/refunds/query/{payment.provider_reference}")
+    data = result.get("data", result)
+    if isinstance(data, dict) and isinstance(data.get("response"), dict):
+        data = data["response"]
+    return data
+
+
+def create_payfast_refund(payment, refund):
+    available = query_payfast_refund(payment)
+    remaining = available.get("amount_available_for_refund")
+    if available.get("status") != "REFUNDABLE" or remaining is None:
+        raise GatewayError("PayFast reports that this transaction is not currently refundable.")
+    amount_cents = int((refund.amount * Decimal("100")).quantize(Decimal("1")))
+    if amount_cents > int(remaining):
+        raise GatewayError("Refund exceeds the amount PayFast reports as refundable.")
+    methods = [available.get("refund_full", {}).get("method"), available.get("refund_partial", {}).get("method")]
+    if "PAYMENT_SOURCE" not in methods:
+        raise GatewayError("PayFast requires a bank payout for this refund; automated bank payouts are not enabled.")
+    body = {
+        "amount": str(amount_cents),
+        "reason": (refund.reason or "XGetawaySX reservation refund")[:255],
+        "notify_buyer": True,
+        "notify_merchant": False,
+    }
+    result = _payfast_api_request("POST", f"/refunds/{payment.provider_reference}", body)
+    data = result.get("data", {})
+    if data.get("response") is not True:
+        raise GatewayError("PayFast did not confirm receipt of the refund request.")
+    return {"status": "pending", "provider_reference": f"payfast-refund-{refund.pk}", "provider_response": data}
+
+
+def create_yoco_refund(payment, refund):
+    secret = _setting("YOCO_SECRET_KEY")
+    if not secret:
+        raise ImproperlyConfigured("Yoco secret key is not configured.")
+    if payment.provider != "yoco" or not payment.checkout_session_id:
+        raise GatewayError("A captured Yoco checkout session is required.")
+    amount_cents = int((refund.amount * Decimal("100")).quantize(Decimal("1")))
+    payload = {
+        "amount": amount_cents,
+        "metadata": {"paymentId": str(payment.pk), "refundId": str(refund.pk)},
+    }
+    request = Request(
+        f"https://payments.yoco.com/api/checkouts/{payment.checkout_session_id}/refund",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {secret}",
+            "Content-Type": "application/json",
+            "Idempotency-Key": refund.idempotency_key[:128],
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=20) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        if exc.code == 202:
+            result = {"id": payment.checkout_session_id, "status": "pending"}
+        else:
+            raise GatewayError("Yoco refund request failed. Check provider status before retrying.") from exc
+    except (URLError, TimeoutError, ValueError) as exc:
+        raise GatewayError("Yoco refund request failed. Check provider status before retrying.") from exc
+    if result.get("id") != payment.checkout_session_id or result.get("status") not in {"pending", "succeeded"}:
+        raise GatewayError("Yoco returned an unexpected refund response.")
+    return {
+        "status": result["status"],
+        "provider_reference": result.get("refundId") or "",
+        "provider_response": result,
+    }
 
 
 def verify_yoco_webhook(raw_body, headers, now=None, tolerance_seconds=180):
