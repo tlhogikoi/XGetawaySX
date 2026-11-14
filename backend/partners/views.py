@@ -857,7 +857,7 @@ class AdminPaymentRefundView(APIView):
             refund = ReservationRefund.objects.create(
                 payment=payment, amount=amount, currency=payment.currency,
                 status=ReservationRefund.Status.REFUNDED, provider=data["provider"],
-                provider_reference=data["provider_reference"], idempotency_key="manual:" + data["provider_reference"],
+                provider_reference=data["provider_reference"], idempotency_key="manual:" + hashlib.sha256(data["provider_reference"].encode("utf-8")).hexdigest(),
                 provider_status="reconciled", reason=data.get("reason", ""),
                 reconciled_by=request.user, reconciled_at=timezone.now(),
             )
