@@ -62,7 +62,7 @@ def create_yoco_checkout(payment):
         raise ImproperlyConfigured("Yoco secret key is not configured.")
     if payment.currency != "ZAR":
         raise GatewayError("Yoco Checkout API currently supports ZAR only.")
-    amount_cents = int((payment.amount * Decimal("100")).quantize(Decimal("1")))
+    amount_cents = int((Decimal(str(payment.amount)) * Decimal("100")).quantize(Decimal("1")))
     payload = {
         "amount": amount_cents,
         "currency": payment.currency,
@@ -160,7 +160,7 @@ def create_payfast_refund(payment, refund):
     remaining = available.get("amount_available_for_refund")
     if available.get("status") != "REFUNDABLE" or remaining is None:
         raise GatewayError("PayFast reports that this transaction is not currently refundable.")
-    amount_cents = int((refund.amount * Decimal("100")).quantize(Decimal("1")))
+    amount_cents = int((Decimal(str(refund.amount)) * Decimal("100")).quantize(Decimal("1")))
     if amount_cents > int(remaining):
         raise GatewayError("Refund exceeds the amount PayFast reports as refundable.")
     is_full_refund = amount_cents == int(remaining)
