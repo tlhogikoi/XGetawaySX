@@ -341,6 +341,8 @@ class ReservationRefund(models.Model):
     status = models.CharField(max_length=12, choices=Status.choices, default=Status.PENDING)
     provider = models.CharField(max_length=40)
     provider_reference = models.CharField(max_length=160, null=True, blank=True, unique=True)
+    idempotency_key = models.CharField(max_length=100, unique=True)
+    provider_status = models.CharField(max_length=40, blank=True)
     reason = models.CharField(max_length=500, blank=True)
     reconciled_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="reconciled_reservation_refunds")
     reconciled_at = models.DateTimeField(null=True, blank=True)
