@@ -106,7 +106,7 @@ class ReservationRefundAdmin(admin.ModelAdmin):
     list_display = ("id", "payment", "amount", "currency", "status", "provider", "provider_reference", "reconciled_at")
     list_filter = ("status", "provider", "currency")
     search_fields = ("provider_reference", "payment__provider_reference", "payment__reservation__booking_reference")
-    readonly_fields = ("payment", "amount", "currency", "status", "provider", "provider_reference", "reason", "reconciled_by", "reconciled_at", "created_at")
+    readonly_fields = ("payment", "amount", "currency", "status", "provider", "provider_reference", "idempotency_key", "provider_status", "reason", "reconciled_by", "reconciled_at", "created_at")
 
 
 @admin.register(PartnerCommissionAdjustment)
