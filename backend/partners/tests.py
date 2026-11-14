@@ -373,8 +373,8 @@ class ReservationFoundationTests(TestCase):
         self.assertEqual(decision.status_code, 400)
         self.assertIn("availability or capacity has changed", str(decision.data).lower())
         from .models import ReservationRequest
-        request.refresh_from_db()
-        self.assertEqual(request.status, ReservationRequest.Status.PENDING)
+        request_record = ReservationRequest.objects.get(pk=request.data["id"])
+        self.assertEqual(request_record.status, ReservationRequest.Status.PENDING)
 
     def test_customer_cancellation_releases_confirmed_capacity(self):
         from .models import PartnerAvailability, ReservationRequest
