@@ -826,3 +826,117 @@ class DualGatewayIntegrationTests(TestCase):
             with patch("partners.gateways.urlopen", return_value=mock_response):
                 with self.assertRaises(GatewayError):
                     create_yoco_checkout(self.payment)
+
+    def yoco_refund_webhook(self, event_type="refund.succeeded", webhook_id="wh_refund_001", amount=2000):
+        import base64
+        import hashlib
+        import hmac
+        import json
+        import time
+        from django.test import override_settings
+        secret_bytes = b"test-yoco-webhook-secret"
+        secret = "whsec_" + base64.b64encode(secret_bytes).decode("ascii")
+        raw = json.dumps({
+            "createdDate": "2027-07-01T10:00:00Z",
+            "id": "evt_refund_" + webhook_id,
+            "type": event_type,
+            "payload": {
+                "amount": amount, "currency": "ZAR", "id": "rfd_" + webhook_id,
+                "status": "succeeded" if event_type == "refund.succeeded" else "failed",
+                "type": "refund", "metadata": {"checkoutId": "ch_yoco_checkout_001"},
+            },
+        }, separators=(",", ":")).encode()
+        timestamp = str(int(time.time()))
+        signed = webhook_id.encode() + b"." + timestamp.encode() + b"." + raw
+        signature = base64.b64encode(hmac.new(secret_bytes, signed, hashlib.sha256).digest()).decode()
+        with override_settings(YOCO_WEBHOOK_SECRET=secret):
+            return self.client.generic(
+                "POST", "/api/v1/partners/webhooks/yoco/", raw,
+                content_type="application/json", HTTP_WEBHOOK_ID=webhook_id,
+                HTTP_WEBHOOK_TIMESTAMP=timestamp, HTTP_WEBHOOK_SIGNATURE=f"v1,{signature}",
+            )
+
+    def test_yoco_refund_is_pending_until_signed_success_webhook(self):
+        from unittest.mock import patch
+        from .models import ReservationPayment, ReservationRefund, PartnerCommissionAdjustment
+        self.yoco_webhook()
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, ReservationPayment.Status.CAPTURED)
+        self.client.force_authenticate(user=self.admin)
+        with patch("partners.views.create_yoco_refund", return_value={
+            "status": "pending", "provider_reference": "rfd_refund_001",
+        }):
+            started = self.client.post(
+                f"/api/v1/partners/payments/{self.payment.pk}/refunds/initiate/",
+                {"amount": "20.00", "reason": "Customer request", "idempotency_key": "yoco-refund-key-001"},
+                format="json",
+            )
+        self.assertEqual(started.status_code, 202)
+        self.assertEqual(started.data["status"], "pending")
+        self.client.force_authenticate(user=None)
+        completed = self.yoco_refund_webhook()
+        self.assertEqual(completed.status_code, 200)
+        refund = ReservationRefund.objects.get(payment=self.payment)
+        self.assertEqual(refund.status, ReservationRefund.Status.REFUNDED)
+        self.assertEqual(refund.provider_reference, "rfd_wh_refund_001")
+        self.assertEqual(PartnerCommissionAdjustment.objects.get(refund=refund).commission_reversal, Decimal("2.00"))
+
+    def test_yoco_failed_refund_webhook_does_not_reverse_commission(self):
+        from unittest.mock import patch
+        from .models import ReservationRefund, PartnerCommissionAdjustment
+        self.yoco_webhook()
+        self.client.force_authenticate(user=self.admin)
+        with patch("partners.views.create_yoco_refund", return_value={
+            "status": "pending", "provider_reference": "rfd_refund_failed",
+        }):
+            started = self.client.post(
+                f"/api/v1/partners/payments/{self.payment.pk}/refunds/initiate/",
+                {"amount": "20.00", "reason": "Customer request", "idempotency_key": "yoco-refund-key-002"},
+                format="json",
+            )
+        self.assertEqual(started.status_code, 202)
+        self.client.force_authenticate(user=None)
+        failed = self.yoco_refund_webhook(event_type="refund.failed", webhook_id="wh_refund_failed")
+        self.assertEqual(failed.status_code, 200)
+        refund = ReservationRefund.objects.get(payment=self.payment)
+        self.assertEqual(refund.status, ReservationRefund.Status.FAILED)
+        self.assertFalse(PartnerCommissionAdjustment.objects.filter(refund=refund).exists())
+
+    def test_gateway_refund_initiation_rejects_over_refund_and_duplicate_pending(self):
+        from .models import ReservationRefund
+        self.yoco_webhook()
+        self.client.force_authenticate(user=self.admin)
+        too_much = self.client.post(
+            f"/api/v1/partners/payments/{self.payment.pk}/refunds/initiate/",
+            {"amount": "50.01", "idempotency_key": "yoco-refund-over-001"},
+            format="json",
+        )
+        self.assertEqual(too_much.status_code, 400)
+        self.assertFalse(ReservationRefund.objects.filter(payment=self.payment).exists())
+
+    def test_yoco_refund_adapter_uses_server_key_and_idempotency(self):
+        import json
+        from unittest.mock import MagicMock, patch
+        from django.test import override_settings
+        from .models import ReservationRefund
+        from .gateways import create_yoco_refund
+        self.payment.provider = "yoco"
+        self.payment.status = "captured"
+        self.payment.provider_reference = "ch_yoco_capture"
+        self.payment.save(update_fields=["provider", "status", "provider_reference"])
+        refund = ReservationRefund.objects.create(
+            payment=self.payment, amount="10.00", currency="ZAR", provider="yoco",
+            status="pending", idempotency_key="yoco-refund-adapter-001",
+        )
+        mock_response = MagicMock()
+        mock_response.__enter__.return_value.read.return_value = json.dumps({
+            "id": "ch_yoco_checkout_001", "refundId": "rfd_adapter_001", "status": "pending",
+        }).encode()
+        with override_settings(YOCO_SECRET_KEY="sk_test_example"):
+            with patch("partners.gateways.urlopen", return_value=mock_response) as send:
+                result = create_yoco_refund(self.payment, refund)
+        self.assertEqual(result["provider_reference"], "rfd_adapter_001")
+        outgoing = send.call_args.args[0]
+        self.assertEqual(outgoing.get_header("Authorization"), "Bearer sk_test_example")
+        self.assertEqual(outgoing.get_header("Idempotency-key"), "yoco-refund-adapter-001")
+        self.assertEqual(json.loads(outgoing.data)["amount"], 1000)
