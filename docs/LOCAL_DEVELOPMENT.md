@@ -60,3 +60,18 @@ The backend supports hosted checkout adapters for PayFast and Yoco. Copy the pay
 - Local webhook testing requires a public HTTPS tunnel or deployed staging host. Never expose live secrets or store card details in XGetawaySX.
 
 Provider account setup, sandbox transactions, webhook delivery tests and live activation are separate release gates; the presence of configuration variables does not mean a gateway account is connected.
+
+
+### Development 18 — Refund API configuration and verification
+
+No additional provider secret is introduced. Refund initiation reuses the existing `PAYFAST_MERCHANT_ID`, `PAYFAST_PASSPHRASE`, `PAYFAST_SANDBOX`, and `YOCO_SECRET_KEY` configuration. The Yoco refund webhook uses the existing `YOCO_WEBHOOK_SECRET`.
+
+Staff API operations:
+
+- `POST /api/v1/partners/payments/{id}/refunds/initiate/` with `amount`, `reason`, and a unique `idempotency_key`.
+- `POST /api/v1/partners/payments/{id}/refunds/verify-payfast/` after PayFast has accepted a refund request; this queries the PayFast Refunds API and reconciles only the amount evidenced by the provider's remaining refundable balance.
+- Existing `GET/POST /api/v1/partners/payments/{id}/refunds/` remains available for staff to inspect and manually reconcile refunds completed outside the gateway automation.
+
+Yoco webhook subscriptions must include `refund.succeeded` and `refund.failed` events at `/api/v1/partners/webhooks/yoco/`. Configure the endpoint as public HTTPS and store the subscription signing secret in `YOCO_WEBHOOK_SECRET`. A successful Yoco API submission may remain pending; the signed refund webhook is the final state confirmation.
+
+PayFast automated refund requests query the refundable balance first and support only refunds back to the original payment source. Bank-payout cases require a separate authorised process and are not automated. Never retry an uncertain provider request until the provider's refund state has been checked.
