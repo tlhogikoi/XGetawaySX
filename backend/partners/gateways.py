@@ -189,7 +189,7 @@ def create_yoco_refund(payment, refund):
         raise ImproperlyConfigured("Yoco secret key is not configured.")
     if payment.provider != "yoco" or not payment.checkout_session_id:
         raise GatewayError("A captured Yoco checkout session is required.")
-    amount_cents = int((refund.amount * Decimal("100")).quantize(Decimal("1")))
+    amount_cents = int((Decimal(str(refund.amount)) * Decimal("100")).quantize(Decimal("1")))
     payload = {
         "amount": amount_cents,
         "metadata": {"paymentId": str(payment.pk), "refundId": str(refund.pk)},
