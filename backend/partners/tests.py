@@ -371,7 +371,10 @@ class ReservationFoundationTests(TestCase):
             format="json",
         )
         self.assertEqual(decision.status_code, 400)
-        self.assertEqual(decision.data["status"], "pending")
+        self.assertIn("availability or capacity has changed", str(decision.data).lower())
+        from .models import ReservationRequest
+        request.refresh_from_db()
+        self.assertEqual(request.status, ReservationRequest.Status.PENDING)
 
     def test_customer_cancellation_releases_confirmed_capacity(self):
         from .models import PartnerAvailability, ReservationRequest
@@ -661,6 +664,7 @@ class DualGatewayIntegrationTests(TestCase):
         self.client = APIClient()
         self.customer = User.objects.create_user(email="gateway-customer@example.com", password="test-password")
         self.owner = User.objects.create_user(email="gateway-owner@example.com", password="test-password", role=User.Role.PARTNER)
+        self.admin = User.objects.create_superuser(email="gateway-admin@example.com", password="test-password")
         self.partner = Partner.objects.create(
             owner=self.owner, name="Gateway Lodge", category=Partner.Category.ACCOMMODATION,
             gallery_status=Partner.ApprovalStatus.APPROVED, booking_status=Partner.ApprovalStatus.APPROVED,
