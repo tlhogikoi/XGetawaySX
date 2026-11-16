@@ -777,3 +777,24 @@ Implemented on `feat/application-foundation` (migration `0012_reservation_email_
 - Failed deliveries are retried by the management command; scheduling that command, exponential backoff, provider webhooks, bounce handling, SMS, WhatsApp and push notifications are not included.
 - Email templates currently use plain text. Branded HTML templates, user notification preferences and localisation are future work.
 - **Not yet verified:** Django checks/tests, migration application/drift, frontend typecheck/build, CI, live email delivery, merge or deployment.
+
+
+## Development 22 — Branded Email Templates & Customer Marketing Preferences
+
+Implemented on `feat/application-foundation` (migration `0013_customer_email_preferences.py`):
+
+- Replaced plain-text-only reservation email delivery with multipart email: the existing plain-text booking message remains available and a branded HTML alternative is rendered through Django templates.
+- Added XGetawaySX email styling using the deep-blue brand header, “travel through us” strapline, clear event heading, readable message body and service-email footer.
+- Added `CustomerEmailPreference` with default marketing opt-out, unique unsubscribe token and update timestamp.
+- Added authenticated `GET/PATCH /api/v1/partners/email-preferences/` for a customer's marketing consent.
+- Added public one-click `POST /api/v1/partners/email-unsubscribe/{token}/` to revoke marketing consent without requiring login.
+- Added Django admin visibility and API tests for default consent, opt-in/opt-out, invalid consent values and token unsubscribe.
+- Essential reservation, cancellation and refund audit emails are intentionally independent of marketing preferences and continue to be sent.
+
+### Development 22 boundaries
+
+- No marketing campaign sender or bulk promotional mailer has been added; this stage only records consent and provides unsubscribe handling for future marketing messages.
+- The unsubscribe endpoint uses a per-account UUID token. Production deployments should use HTTPS and avoid logging full unsubscribe URLs.
+- Branded HTML templates use inline styles for email-client compatibility; visual rendering still needs checking in major email clients.
+- No production SMTP provider or sender domain has been configured.
+- **Not yet verified:** Django checks/tests, migration application/drift, frontend typecheck/build, CI, real inbox rendering/delivery, merge or deployment.
