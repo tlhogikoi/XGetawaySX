@@ -244,3 +244,14 @@ class ReservationQuoteAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+from .models import ReservationInstallment
+
+
+@admin.register(ReservationInstallment)
+class ReservationInstallmentAdmin(admin.ModelAdmin):
+    list_display = ("reservation", "sequence", "kind", "amount", "currency", "due_at")
+    list_filter = ("kind", "currency", "due_at")
+    search_fields = ("reservation__booking_reference", "reservation__partner__name", "reservation__customer__email")
+    readonly_fields = ("reservation", "sequence", "kind", "amount", "currency", "due_at", "created_at")
