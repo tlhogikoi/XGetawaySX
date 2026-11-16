@@ -711,3 +711,29 @@ Implemented on `feat/application-foundation`:
 - Network errors during refund submission are treated as uncertain, not automatically failed, because a provider may have accepted a request before the connection failed. Staff must verify the provider state before retrying.
 - Refunds are staff-initiated only. Customer self-service refund requests, cancellation policy automation, refund notifications to customers, automated PayFast webhook refunds, chargebacks, payouts and accounting exports are not included.
 - **Not yet verified:** Django checks/tests, migration application/drift, frontend typecheck/build, CI, provider sandbox tests, merge or deployment.
+
+## Development 19 — Reservation Cancellation, Refund Requests & Notifications
+
+Implemented on `feat/application-foundation`:
+
+- Added `ReservationCancellationRequest` with customer reason, pending/approved/declined/completed lifecycle, decision note, reviewer and timestamps. A conditional uniqueness constraint prevents multiple simultaneously active cancellation requests for one reservation while allowing a new request after a decline.
+- Updated `POST /api/v1/partners/reservations/{id}/cancel/`: customers may withdraw an unconfirmed request immediately; confirmed bookings create a cancellation request and require a reason of at least 10 characters.
+- Added customer cancellation history at `GET /api/v1/partners/reservations/cancellations/` and partner cancellation inbox at `GET /api/v1/partners/partner/cancellations/`.
+- Added `POST /api/v1/partners/cancellations/{id}/decision/`. Only the reservation's partner owner or an authorised staff user can approve or decline a pending cancellation.
+- Approved cancellations without captured payments complete immediately, fail any still-pending checkout records and release reserved daily capacity. Approved cancellations with captured payments remain in progress until every captured payment is fully refunded.
+- Connected provider-confirmed refund finalisation and staff manual refund reconciliation to cancellation completion. When the final captured payment is fully refunded, the reservation is cancelled, capacity is released and the cancellation is marked completed.
+- Prevented creation of new reservation payments while a cancellation request is pending or approved.
+- Added `ReservationNotification` in-app inbox records for customers and partner owners. Notifications cover cancellation submission, decisions, refund updates and completed cancellations.
+- Added `GET /api/v1/partners/notifications/`, optional `?unread=true`, and recipient-scoped `POST /api/v1/partners/notifications/{id}/read/`.
+- Updated customer ReservationWorkspace and PartnerReservationDashboard to submit/review cancellations, display cancellation status and read notifications.
+- Added Django admin visibility for cancellation requests and read-only notification audit records.
+- Added migration `0010_cancellation_workflow_notifications.py` and tests for cancellation approval, partner ownership, capacity release, captured-payment refund gating and notification privacy.
+
+### Development 19 boundaries
+
+- A partner approval is not a payment refund. Staff still initiate PayFast/Yoco refunds through Development 18's staff-only refund process, or reconcile a verified external refund.
+- A reservation with captured payments remains confirmed and capacity remains reserved until all captured payments are fully refunded. Partial refunds do not complete cancellation.
+- Customer cancellations for unconfirmed requests remain immediate withdrawals; confirmed reservation cancellations require partner/staff review.
+- Notifications are in-app only. Email, SMS, WhatsApp, push delivery, scheduled reminders, cancellation-policy fee calculations and customer self-service refund execution are not included.
+- No provider credentials or live/sandbox payment calls were used by this stage.
+- **Not yet verified:** Django checks/tests, migration application/drift, frontend typecheck/build, CI, merge or deployment.
