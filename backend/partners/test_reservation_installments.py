@@ -50,6 +50,19 @@ class ReservationInstallmentScheduleTests(TestCase):
         self.assertEqual(items[1].amount, Decimal("7000.00"))
 
 
+
+    def test_partner_deposit_policy_applies_when_quote_has_no_deposit(self):
+        self.quote.deposit_amount = Decimal("0.00")
+        self.quote.save(update_fields=["deposit_amount"])
+        PartnerFinancialSettings.objects.create(
+            partner=self.partner,
+            deposit_type=PartnerFinancialSettings.DepositType.PERCENTAGE,
+            deposit_value=Decimal("20.00"),
+        )
+        _create_reservation_installments(self.reservation, self.quote)
+        first = self.reservation.installments.order_by("sequence").first()
+        self.assertEqual(first.amount, Decimal("2000.00"))
+
     def test_partner_can_configure_deposit_and_balance_deadlines(self):
         policy = PartnerFinancialSettings.objects.create(
             partner=self.partner, deposit_due_hours=72, balance_due_days_before=14
