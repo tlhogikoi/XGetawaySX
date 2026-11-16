@@ -269,6 +269,78 @@ class PartnerEnquiryRespondView(APIView):
         enquiry.save(update_fields=["status", "partner_response", "responded_at", "updated_at"])
         return Response(PartnerEnquirySerializer(enquiry).data)
 
+
+
+class CustomerEnquiryConvertView(APIView):
+    """Create a separate reservation request from a partner-accepted enquiry."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from django.db import transaction
+        from rest_framework import status
+        from rest_framework.exceptions import ValidationError, NotFound
+        from .models import PartnerEnquiry, ReservationRequest
+        from .serializers import (
+            PartnerEnquirySerializer, ReservationRequestCreateSerializer,
+            ReservationRequestSerializer,
+        )
+
+        with transaction.atomic():
+            try:
+                enquiry = PartnerEnquiry.objects.select_for_update().select_related(
+                    "partner", "customer", "trip_plan"
+                ).get(pk=pk, customer=request.user)
+            except PartnerEnquiry.DoesNotExist:
+                raise NotFound("Enquiry not found.")
+
+            if enquiry.reservation_request_id:
+                return Response(
+                    {"detail": "This enquiry has already been converted.",
+                     "enquiry": PartnerEnquirySerializer(enquiry).data,
+                     "reservation": ReservationRequestSerializer(enquiry.reservation_request).data},
+                    status=status.HTTP_200_OK,
+                )
+            if enquiry.status != PartnerEnquiry.Status.ACCEPTED:
+                raise ValidationError("Only partner-accepted enquiries can be converted.")
+            if not enquiry.requested_start_date or not enquiry.requested_end_date:
+                raise ValidationError("The accepted enquiry must include both requested travel dates.")
+
+            payload = {
+                "partner_id": enquiry.partner_id,
+                "trip_plan_id": enquiry.trip_plan_id,
+                "start_date": enquiry.requested_start_date,
+                "end_date": enquiry.requested_end_date,
+                "guests": request.data.get("guests"),
+                "message": enquiry.message,
+            }
+            serializer = ReservationRequestCreateSerializer(
+                data=payload, context={"request": request}
+            )
+            serializer.is_valid(raise_exception=True)
+            data = serializer.validated_data
+            reservation = ReservationRequest.objects.create(
+                customer=request.user,
+                partner=data["partner"],
+                trip_plan=data.get("trip_plan"),
+                start_date=data["start_date"],
+                end_date=data["end_date"],
+                guests=data["guests"],
+                message=data.get("message", ""),
+            )
+            enquiry.reservation_request = reservation
+            enquiry.save(update_fields=["reservation_request", "updated_at"])
+
+        _queue_reservation_lifecycle_emails(
+            reservation, "reservation_requested", "Reservation request received",
+            "Your partner-accepted enquiry has been submitted as a reservation request. "
+            "The partner must still confirm the booking.",
+        )
+        return Response(
+            {"enquiry": PartnerEnquirySerializer(enquiry).data,
+             "reservation": ReservationRequestSerializer(reservation).data},
+            status=status.HTTP_201_CREATED,
+        )
+
 import uuid
 import hashlib
 import json
