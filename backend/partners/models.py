@@ -345,6 +345,7 @@ class ReservationNotification(models.Model):
         CANCELLATION_REQUESTED = "cancellation_requested", "Cancellation requested"
         CANCELLATION_DECISION = "cancellation_decision", "Cancellation decision"
         CANCELLATION_COMPLETED = "cancellation_completed", "Cancellation completed"
+        PAYMENT_REMINDER = "payment_reminder", "Payment reminder"
         REFUND_UPDATE = "refund_update", "Refund update"
 
     recipient = models.ForeignKey(
@@ -382,6 +383,8 @@ class PartnerFinancialSettings(models.Model):
     deposit_value = models.DecimalField(max_digits=10, decimal_places=2, default=0, validators=[MinValueValidator(0)])
     commission_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0, validators=[MinValueValidator(0), MaxValueValidator(100)])
     currency = models.CharField(max_length=3, default="ZAR")
+    deposit_due_hours = models.PositiveSmallIntegerField(default=48)
+    balance_due_days_before = models.PositiveSmallIntegerField(default=7)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
