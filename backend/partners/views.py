@@ -1,3 +1,4 @@
+from datetime import datetime
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.shortcuts import get_object_or_404
@@ -594,6 +595,8 @@ class PartnerReservationDecisionView(APIView):
             item.partner_response = serializer.validated_data["partner_response"]
             item.responded_at = timezone.now()
             item.save(update_fields=["status", "booking_reference", "partner_response", "responded_at", "updated_at"])
+            if decision == ReservationRequest.Status.CONFIRMED:
+                _create_reservation_installments(item, accepted_quote)
             event = "reservation_confirmed" if decision == ReservationRequest.Status.CONFIRMED else "reservation_declined"
             title = "Reservation confirmed" if decision == ReservationRequest.Status.CONFIRMED else "Reservation request declined"
             message = serializer.validated_data["partner_response"] or title
@@ -890,6 +893,32 @@ from .serializers import (
 )
 
 
+def _create_reservation_installments(reservation, accepted_quote):
+    """Snapshot deposit and balance milestones once, after partner confirmation."""
+    from .models import ReservationInstallment
+    if reservation.installments.exists():
+        return
+    total, currency = accepted_quote.total_amount, accepted_quote.currency
+    deposit = accepted_quote.deposit_amount
+    if deposit <= 0:
+        deposit = (total * Decimal("0.30")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    deposit = min(total, deposit)
+    deposit_due = timezone.now() + timedelta(hours=48)
+    ReservationInstallment.objects.create(
+        reservation=reservation, sequence=1, kind=ReservationInstallment.Kind.DEPOSIT,
+        amount=deposit, currency=currency, due_at=deposit_due,
+    )
+    balance = total - deposit
+    if balance > 0:
+        balance_due = timezone.make_aware(datetime.combine(
+            reservation.start_date - timedelta(days=7), datetime.min.time()
+        ))
+        ReservationInstallment.objects.create(
+            reservation=reservation, sequence=2, kind=ReservationInstallment.Kind.BALANCE,
+            amount=balance, currency=currency, due_at=max(balance_due, deposit_due),
+        )
+
+
 def _reservation_financial_totals(reservation):
     if reservation.quoted_total is not None:
         total = reservation.quoted_total
@@ -1001,6 +1030,46 @@ class ReservationPaymentListCreateView(APIView):
                 kind=kind, amount=amount, currency=currency, idempotency_key=key,
             )
         return Response(ReservationPaymentSerializer(payment).data, status=status.HTTP_201_CREATED)
+
+
+class ReservationInstallmentScheduleView(APIView):
+    """Private payment milestones visible only to the customer or owning partner."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        from .models import ReservationInstallment, ReservationRefund
+        reservation = get_object_or_404(
+            ReservationRequest.objects.select_related("partner", "customer").filter(
+                Q(customer=request.user) | Q(partner__owner=request.user)
+            ), pk=pk,
+        )
+        installments = list(ReservationInstallment.objects.filter(reservation=reservation).order_by("sequence"))
+        captured = reservation.payments.filter(status=ReservationPayment.Status.CAPTURED).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+        refunded = ReservationRefund.objects.filter(
+            payment__reservation=reservation, status=ReservationRefund.Status.REFUNDED
+        ).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+        remaining_paid = max(Decimal("0.00"), captured - refunded)
+        rows = []
+        for installment in installments:
+            allocated = min(remaining_paid, installment.amount)
+            remaining_paid -= allocated
+            outstanding = installment.amount - allocated
+            state = "paid" if outstanding <= 0 else ("overdue" if installment.due_at < timezone.now() else "upcoming")
+            rows.append({
+                "id": installment.pk, "sequence": installment.sequence, "kind": installment.kind,
+                "amount": str(installment.amount), "paid_amount": str(allocated),
+                "outstanding_amount": str(outstanding), "currency": installment.currency,
+                "due_at": installment.due_at, "status": state,
+            })
+        return Response({
+            "reservation_id": reservation.pk,
+            "booking_reference": str(reservation.booking_reference or ""),
+            "reservation_status": reservation.status,
+            "currency": rows[0]["currency"] if rows else reservation.quoted_currency,
+            "total_amount": str(sum((item.amount for item in installments), Decimal("0.00"))),
+            "outstanding_amount": str(sum((Decimal(row["outstanding_amount"]) for row in rows), Decimal("0.00"))),
+            "installments": rows,
+        })
 
 
 class AdminPaymentReconciliationView(APIView):
