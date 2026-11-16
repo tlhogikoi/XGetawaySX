@@ -798,3 +798,21 @@ Implemented on `feat/application-foundation` (migration `0013_customer_email_pre
 - Branded HTML templates use inline styles for email-client compatibility; visual rendering still needs checking in major email clients.
 - No production SMTP provider or sender domain has been configured.
 - **Not yet verified:** Django checks/tests, migration application/drift, frontend typecheck/build, CI, real inbox rendering/delivery, merge or deployment.
+
+
+## Development 23 — Customer Email Settings UI & Delivery Operations
+
+Implemented on `feat/application-foundation`:
+
+- Added a customer-facing `CustomerEmailPreferences` React component with authenticated preference loading and updates through the Development 22 API.
+- Embedded the settings panel in `ReservationWorkspace`, with a clear marketing opt-in toggle, saving/error feedback and a prominent explanation that essential booking, cancellation, payment and refund emails remain enabled.
+- Styled the settings panel in the existing reservation workspace stylesheet using the XGetawaySX deep-blue visual language.
+- Improved `retry_reservation_emails` operations with a default batch limit of 100, configurable `--limit`, `--dry-run` preview, input validation and separate attempted/accepted/failed totals.
+- Added tests for retry-command dry-run reporting and rejection of a negative limit.
+
+### Development 23 boundaries
+
+- The customer settings component is integrated into the existing authenticated `ReservationWorkspace` component. The current public `App.tsx` does not expose a customer account route or authentication shell; a complete account navigation/login experience remains a separate integration task.
+- The retry command is an operational batch tool, not a scheduler. Production should invoke it from a controlled scheduled worker/cron or task queue after SMTP is configured.
+- Retry success means the configured email backend accepted the message; it does not confirm inbox delivery.
+- **Not yet verified:** Django checks/tests, migration application/drift, frontend typecheck/build, browser interaction, CI, scheduled execution, live SMTP, merge or deployment.
