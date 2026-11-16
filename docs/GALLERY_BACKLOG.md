@@ -816,3 +816,24 @@ Implemented on `feat/application-foundation`:
 - The retry command is an operational batch tool, not a scheduler. Production should invoke it from a controlled scheduled worker/cron or task queue after SMTP is configured.
 - Retry success means the configured email backend accepted the message; it does not confirm inbox delivery.
 - **Not yet verified:** Django checks/tests, migration application/drift, frontend typecheck/build, browser interaction, CI, scheduled execution, live SMTP, merge or deployment.
+
+
+## Development 24 — Customer Account & Authentication Experience
+
+Implemented on `feat/application-foundation`:
+
+- Added customer registration, email/password sign-in, JWT access/refresh issuance and an authenticated current-account endpoint under `/api/v1/accounts/`.
+- Reused the existing `accounts.User` email-based identity model and customer role; no duplicate user table or partner account was introduced.
+- Added password-confirmation validation, Django password validators and response serializers that never expose password fields.
+- Configured SimpleJWT authentication in DRF and added the SimpleJWT package dependency. Access tokens expire after 15 minutes; refresh tokens expire after seven days and rotate on refresh.
+- Added the public `/account/` React route and homepage navigation entry.
+- Added a responsive, deep-blue branded login/registration experience. The signed-in workspace mounts reservation management, email preferences and payment history/checkout.
+- Stores access and refresh tokens in session-scoped browser storage, attempts refresh after an expired access token and clears the session if refresh is rejected.
+- Added API tests for registration, mismatched passwords, login, authenticated profile access and unauthenticated rejection.
+
+### Development 24 boundaries and security notes
+
+- No email verification, password-reset workflow, MFA, social login, partner onboarding, account deletion, consent/terms acceptance capture or production security review is included yet.
+- Refresh tokens are held in sessionStorage (not HttpOnly cookies); this is a practical first integration, not the preferred final production session architecture. A hardened cookie/BFF approach and CSRF review are still required before public launch.
+- Registration currently creates customer-role accounts only. Partner role assignment remains controlled by the existing partner onboarding/admin process.
+- No automated frontend build, Django checks/tests, migration check, CI run, browser test, deployment or live authentication test has been executed or confirmed by this stage.
