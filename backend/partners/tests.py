@@ -801,6 +801,41 @@ class RefundReconciliationTests(TestCase):
                 )
 
 
+
+    def test_successful_refund_sends_separate_audit_emails_once(self):
+        from django.core import mail
+        from django.test import override_settings
+        from .models import RefundAuditEmail
+
+        self.client.force_authenticate(user=self.admin)
+        response = self.refund("25.00", "refund-audit-email-001")
+        self.assertEqual(response.status_code, 201)
+        audit = RefundAuditEmail.objects.get(refund_id=response.data["id"])
+        self.assertEqual(audit.status, RefundAuditEmail.Status.PENDING)
+        self.assertEqual(audit.customer_email, self.customer.email)
+        self.assertEqual(audit.partner_email, self.admin.email)
+
+        with override_settings(
+            EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+            DEFAULT_FROM_EMAIL="audit@example.test",
+        ):
+            from .refund_notifications import send_refund_audit_email
+            send_refund_audit_email(audit.pk)
+            self.assertEqual(len(mail.outbox), 2)
+            self.assertEqual(mail.outbox[0].to, [self.customer.email])
+            self.assertEqual(mail.outbox[1].to, [self.admin.email])
+            self.assertIn("Refund confirmation", mail.outbox[0].subject)
+            self.assertIn("25.00", mail.outbox[0].body)
+            send_refund_audit_email(audit.pk)
+            self.assertEqual(len(mail.outbox), 2)
+
+        audit.refresh_from_db()
+        self.assertEqual(audit.status, RefundAuditEmail.Status.SENT)
+        self.assertIsNotNone(audit.customer_sent_at)
+        self.assertIsNotNone(audit.partner_sent_at)
+        self.assertEqual(audit.attempts, 2)
+
+
 class DualGatewayIntegrationTests(TestCase):
     def setUp(self):
         import uuid
