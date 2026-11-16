@@ -530,9 +530,10 @@ class PartnerReservationCancellationInboxView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        items = ReservationCancellationRequest.objects.filter(
+        items = ReservationCancellationRequest.objects.all() if request.user.is_staff else ReservationCancellationRequest.objects.filter(
             reservation__partner__owner=request.user
-        ).select_related("reservation__partner", "customer")
+        )
+        items = items.select_related("reservation__partner", "customer")
         return Response(ReservationCancellationRequestSerializer(items, many=True).data)
 
 
