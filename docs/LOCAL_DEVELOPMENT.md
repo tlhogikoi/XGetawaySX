@@ -92,3 +92,21 @@ Partner/staff operations:
 - If captured funds exist, approval does not cancel the reservation or release capacity. Staff must refund every captured payment through the existing Development 18 workflow; final refund reconciliation completes the cancellation and releases capacity automatically.
 
 Migration `0010_cancellation_workflow_notifications.py` adds cancellation workflow and in-app notification records. Run `python manage.py migrate` after pulling the branch. No extra provider credentials are needed.
+
+
+### Development 20 — Successful refund audit emails
+
+A confirmed refund creates one durable `RefundAuditEmail` record. After the database transaction commits, XGetawaySX sends separate confirmation emails to the customer and the partner account owner. Each email contains the booking reference, refund record ID, amount/currency, provider and provider refund reference, and confirmation timestamp. It does not include payment credentials or card data.
+
+Emails are sent only after a refund reaches the successful/refunded state through verified provider confirmation or authorised staff reconciliation. A refund request, pending provider response, or failed refund does not trigger a success email. Repeated webhook delivery or refund finalisation does not create duplicate audit records or resend an email already accepted by the configured email backend.
+
+Configure outbound SMTP using `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USE_TLS`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, and `DEFAULT_FROM_EMAIL`. Keep credentials in deployment environment variables, never in source control. In local development, set `EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend` to print messages to the runserver console.
+
+The Django admin exposes read-only refund email audit records, including recipient snapshots, per-recipient delivery timestamps, attempt count and the last delivery error. To retry pending, partial or failed deliveries after fixing SMTP configuration, run:
+
+```bash
+cd backend
+python manage.py retry_refund_audit_emails
+```
+
+Apply migration `0011_refund_audit_email.py` with `python manage.py migrate`. Email delivery is an external service dependency: a refund remains successful even if SMTP is unavailable; the audit record captures the failure for later retry.
