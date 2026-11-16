@@ -1032,7 +1032,7 @@ class DualGatewayIntegrationTests(TestCase):
         PartnerFinancialSettings.objects.create(partner=self.partner, commission_rate="10.00", currency="ZAR")
         self.payment = ReservationPayment.objects.create(
             reservation=self.reservation, customer=self.customer, partner=self.partner,
-            kind=ReservationPayment.Kind.DEPOSIT, status=ReservationPayment.Status.PENDING,
+            kind=ReservationPayment.Kind.DEPOSIT, status="pending",
             amount="50.00", currency="ZAR", idempotency_key="gateway-idempotency-001",
             provider="yoco", checkout_session_id="ch_yoco_checkout_001",
         )
@@ -1094,7 +1094,7 @@ class DualGatewayIntegrationTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.payment.refresh_from_db()
-        self.assertEqual(self.payment.status, ReservationPayment.Status.PENDING)
+        self.assertEqual(self.payment.status, "pending")
         self.assertFalse(PaymentProviderEvent.objects.filter(provider="yoco").exists())
         self.assertFalse(PartnerCommissionLedger.objects.filter(payment=self.payment).exists())
 
@@ -1105,7 +1105,7 @@ class DualGatewayIntegrationTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.payment.refresh_from_db()
-        self.assertEqual(self.payment.status, ReservationPayment.Status.PENDING)
+        self.assertEqual(self.payment.status, "pending")
         self.assertFalse(PaymentProviderEvent.objects.filter(provider="yoco").exists())
         self.assertFalse(PartnerCommissionLedger.objects.filter(payment=self.payment).exists())
 
@@ -1119,7 +1119,7 @@ class DualGatewayIntegrationTests(TestCase):
 
         self.assertEqual(response.status_code, 404)
         self.payment.refresh_from_db()
-        self.assertEqual(self.payment.status, ReservationPayment.Status.PENDING)
+        self.assertEqual(self.payment.status, "pending")
         self.assertFalse(PaymentProviderEvent.objects.filter(provider="yoco").exists())
 
     def test_yoco_duplicate_webhook_is_idempotent(self):
