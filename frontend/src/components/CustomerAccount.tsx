@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { ArrowRight, LogIn, UserPlus, ShieldCheck, LogOut } from "lucide-react";
 import ReservationWorkspace from "./ReservationWorkspace";
 import CustomerPaymentsWorkspace from "./CustomerPaymentsWorkspace";
+import TripPlanner from "./TripPlanner";
 import "./customer-account.css";
 
 const API = (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env.VITE_API_BASE_URL ?? "";
@@ -105,6 +106,7 @@ export default function CustomerAccount() {
         <p>{account.email} · Your getaway plans, reservations and payments in one place.</p>
         <div className="account-trust"><ShieldCheck size={17}/> Your account information and bookings are private to your account.</div>
       </section>
+      <TripPlanner accessToken={tokens.access}/>
       <ReservationWorkspace accessToken={tokens.access}/>
       <CustomerPaymentsWorkspace accessToken={tokens.access}/>
       <footer className="account-footer"><a href="/">Back to XGetawaySX</a><span>TRAVEL THROUGH US.</span></footer>
