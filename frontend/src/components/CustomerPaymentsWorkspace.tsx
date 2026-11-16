@@ -14,7 +14,8 @@ const API=(import.meta as ImportMeta & {env:Record<string,string|undefined>}).en
 export default function CustomerPaymentsWorkspace({accessToken}:{accessToken:string}){
  const headers={Authorization:`Bearer ${accessToken}`,"Content-Type":"application/json"};
  const [reservations,setReservations]=useState<Reservation[]>([]);
- const [payments,setPayments]=useState<Payment[]>([]);\n const [schedules,setSchedules]=useState<PaymentSchedule[]>([]);
+ const [payments,setPayments]=useState<Payment[]>([]);
+ const [schedules,setSchedules]=useState<PaymentSchedule[]>([]);
  const [reservationId,setReservationId]=useState("");
  const [gateway,setGateway]=useState<Gateway>("payfast");
  const [busy,setBusy]=useState(false);
