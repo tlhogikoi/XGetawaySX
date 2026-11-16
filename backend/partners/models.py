@@ -385,6 +385,8 @@ class PartnerFinancialSettings(models.Model):
     currency = models.CharField(max_length=3, default="ZAR")
     deposit_due_hours = models.PositiveSmallIntegerField(default=48)
     balance_due_days_before = models.PositiveSmallIntegerField(default=7)
+    balance_installment_count = models.PositiveSmallIntegerField(default=1)
+    balance_installment_interval_days = models.PositiveSmallIntegerField(default=7)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
