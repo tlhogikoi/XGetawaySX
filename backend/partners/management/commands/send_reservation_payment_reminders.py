@@ -6,7 +6,7 @@ from django.db.models import Sum
 from django.utils import timezone
 
 from partners.models import (
-    ReservationEmailDelivery, ReservationInstallment, ReservationPayment,
+    ReservationInstallment, ReservationPayment,
     ReservationRefund, ReservationRequest,
 )
 from partners.reservation_email_notifications import queue_reservation_email
@@ -54,10 +54,9 @@ class Command(BaseCommand):
                 due_soon += 1
             else:
                 continue
+            # Idempotency is recipient-specific in queue_reservation_email. Do not
+            # short-circuit the second recipient if only the first delivery succeeded.
             event_key = f"installment:{installment.pk}:{stage}"
-            if ReservationEmailDelivery.objects.filter(event_key=event_key, status=ReservationEmailDelivery.Status.SENT).exists():
-                skipped += 1
-                continue
             subject = (
                 f"XGetawaySX: overdue {installment.kind} payment"
                 if stage == "overdue" else f"XGetawaySX: {installment.kind} payment due soon"
