@@ -16,6 +16,7 @@ export default function TripPlanner({ accessToken }: { accessToken: string }) {
   const [selectedPartnerId, setSelectedPartnerId] = useState<number | null>(null);
   const [title, setTitle] = useState("My getaway");
   const [message, setMessage] = useState("");
+  const [planNotes, setPlanNotes] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [enquiries, setEnquiries] = useState<Enquiry[]>([]);
@@ -39,7 +40,7 @@ export default function TripPlanner({ accessToken }: { accessToken: string }) {
   async function refreshPlans() {
     const data = await request("trips/") as TripPlan[];
     setPlans(data);
-    if (!selectedPlanId && data.length) setSelectedPlanId(data[0].id);
+    if (!selectedPlanId && data.length) { setSelectedPlanId(data[0].id); setStartDate(data[0].start_date || ""); setEndDate(data[0].end_date || ""); setPlanNotes(data[0].notes || ""); }
     return data;
   }
 
@@ -51,7 +52,7 @@ export default function TripPlanner({ accessToken }: { accessToken: string }) {
       fetch(`${API_BASE}/api/v1/partners/enquiries/`, { headers, signal: controller.signal }).then(async r => { if (!r.ok) throw new Error("Could not load your enquiries."); return r.json(); }),
     ]).then(([p, t, e]) => {
       setPartners(p as Partner[]); setPlans(t as TripPlan[]); setEnquiries(e as Enquiry[]);
-      if ((t as TripPlan[]).length) setSelectedPlanId((t as TripPlan[])[0].id);
+      if ((t as TripPlan[]).length) { const first = (t as TripPlan[])[0]; setSelectedPlanId(first.id); setStartDate(first.start_date || ""); setEndDate(first.end_date || ""); setPlanNotes(first.notes || ""); }
     }).catch(reason => { if (reason instanceof Error && reason.name !== "AbortError") setError(reason.message); });
     return () => controller.abort();
   }, [accessToken]);
@@ -60,7 +61,7 @@ export default function TripPlanner({ accessToken }: { accessToken: string }) {
     setBusy(true); setError(""); setNotice("");
     try {
       const plan = await request("trips/", { method: "POST", body: JSON.stringify({ title: title.trim() || "My getaway" }) }) as TripPlan;
-      setPlans(current => [plan, ...current]); setSelectedPlanId(plan.id); setTitle("My getaway"); setNotice("Your private getaway plan has been created.");
+      setPlans(current => [plan, ...current]); setSelectedPlanId(plan.id); setStartDate(""); setEndDate(""); setPlanNotes(""); setTitle("My getaway"); setNotice("Your private getaway plan has been created.");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not create plan."); }
     finally { setBusy(false); }
   }
@@ -105,15 +106,16 @@ export default function TripPlanner({ accessToken }: { accessToken: string }) {
       <div className="trip-plan-panel">
         <h3>Your getaway plans</h3>
         <div className="trip-create-row"><input value={title} onChange={e => setTitle(e.target.value)} aria-label="New getaway plan title" placeholder="Name your getaway"/><button disabled={busy} onClick={createPlan}><Plus size={15}/> New plan</button></div>
-        <label className="trip-field"><span>Selected plan</span><select value={selectedPlanId ?? ""} onChange={e => setSelectedPlanId(Number(e.target.value) || null)}><option value="">Choose a plan</option>{plans.map(plan => <option key={plan.id} value={plan.id}>{plan.title}</option>)}</select></label>
+        <label className="trip-field"><span>Selected plan</span><select value={selectedPlanId ?? ""} onChange={e => { const id = Number(e.target.value) || null; const plan = plans.find(item => item.id === id); setSelectedPlanId(id); setStartDate(plan?.start_date || ""); setEndDate(plan?.end_date || ""); setPlanNotes(plan?.notes || ""); setSelectedPartnerId(null); }}><option value="">Choose a plan</option>{plans.map(plan => <option key={plan.id} value={plan.id}>{plan.title}</option>)}</select></label>
         {selectedPlan && <><div className="trip-date-grid"><label><span>Start date</span><input type="date" value={startDate || selectedPlan.start_date || ""} onChange={e => setStartDate(e.target.value)}/></label><label><span>End date</span><input type="date" value={endDate || selectedPlan.end_date || ""} onChange={e => setEndDate(e.target.value)}/></label></div>
-          <button className="trip-save-dates" disabled={busy} onClick={async()=>{setBusy(true);try{const updated=await request(`trips/${selectedPlan.id}/`,{method:"PATCH",body:JSON.stringify({start_date:startDate||selectedPlan.start_date,end_date:endDate||selectedPlan.end_date})}) as TripPlan;setPlans(current=>current.map(p=>p.id===updated.id?updated:p));setNotice("Trip dates saved.");}catch(e){setError(e instanceof Error?e.message:"Could not save dates.");}finally{setBusy(false);}}}><CalendarDays size={15}/> Save dates</button>
+          <label className="trip-field"><span>Private trip notes</span><textarea rows={3} maxLength={5000} value={planNotes} onChange={e=>setPlanNotes(e.target.value)} placeholder="Add your plans, group preferences, special occasions or things to remember."/></label>
+          <div className="trip-plan-save-row"><span>{planNotes.length}/5000 characters</span><button className="trip-save-dates" disabled={busy || (!!startDate && !!endDate && endDate < startDate)} onClick={async()=>{setBusy(true);setError("");try{const updated=await request(`trips/${selectedPlan.id}/`,{method:"PATCH",body:JSON.stringify({start_date:startDate||null,end_date:endDate||null,notes:planNotes})}) as TripPlan;setPlans(current=>current.map(p=>p.id===updated.id?updated:p));setNotice("Your trip dates and notes have been saved.");}catch(e){setError(e instanceof Error?e.message:"Could not save trip details.");}finally{setBusy(false);}}}><CalendarDays size={15}/> Save trip details</button></div>
           <div className="trip-itinerary"><h4>Saved places <span>{selectedPlan.items.length}</span></h4>{selectedPlan.items.length ? selectedPlan.items.map(item=><div className="trip-itinerary-item" key={item.id}><div><strong>{item.partner.name}</strong><small>{[item.partner.city,item.partner.province].filter(Boolean).join(", ")}</small></div><button aria-label={`Remove ${item.partner.name}`} disabled={busy} onClick={()=>removeItem(item.id)}><Trash2 size={15}/></button></div>):<p className="trip-muted">Your itinerary is empty. Add an approved partner below.</p>}</div>
         </>}
       </div>
       <div className="trip-discovery-panel"><h3>Discover approved partners</h3><div className="trip-partner-list">{partners.map(partner=><article key={partner.id}><div><span>{partner.category.replace(/_/g," ")}</span><strong>{partner.name}</strong><small>{[partner.city,partner.province].filter(Boolean).join(", ")}</small></div><button disabled={busy || !selectedPlan || !!selectedPlan.items.some(i=>i.partner.slug===partner.slug)} onClick={()=>addPartner(partner.id)}><Plus size={15}/> Add</button></article>)}</div></div>
     </div>
-    {selectedPlan?.items.length ? <div className="trip-enquiry-panel"><h3>Contact a partner</h3><p>Send a separate enquiry to each partner in your plan. They will respond directly through their partner workspace.</p>
+    {selectedPlan?.items.length ? <div className="trip-enquiry-panel"><h3>Turn your plan into an enquiry</h3><p>Choose a saved partner and send your dates and requirements. This is an enquiry only; it does not confirm availability or create a booking.</p>
       <label className="trip-field"><span>Partner</span><select value={selectedPartnerId ?? ""} onChange={e=>setSelectedPartnerId(Number(e.target.value)||null)}><option value="">Choose a saved partner</option>{selectedPlan.items.map(item=><option key={item.partner.slug} value={item.partner.id}>{item.partner.name}</option>)}</select></label>
       <label className="trip-field"><span>Your enquiry</span><textarea rows={4} value={message} onChange={e=>setMessage(e.target.value)} placeholder="Tell the partner about your plans, group size and what you would like to know."/></label>
       <button className="trip-send-button" disabled={busy || !selectedPartner || message.trim().length<10} onClick={submitEnquiry}><Send size={15}/> Send enquiry <ArrowRight size={15}/></button>
