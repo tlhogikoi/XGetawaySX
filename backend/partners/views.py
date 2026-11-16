@@ -468,6 +468,8 @@ class PartnerReservationQuoteCreateView(APIView):
                 raise NotFound("Reservation request not found.")
             if reservation.status != ReservationRequest.Status.PENDING:
                 raise ValidationError("Quotes can only be issued for pending reservation requests.")
+            if reservation.partner.booking_status != Partner.ApprovalStatus.APPROVED:
+                raise ValidationError("This partner is not currently approved to issue booking quotations.")
             latest = reservation.quotes.order_by("-version").first()
             if latest and latest.status == ReservationQuote.Status.ACCEPTED:
                 raise ValidationError("An accepted quotation cannot be replaced.")
@@ -524,7 +526,13 @@ class CustomerReservationQuoteDecisionView(APIView):
             if quote.status != ReservationQuote.Status.SENT:
                 raise ValidationError("Only the latest outstanding quotation can be accepted or declined.")
             if quote.expires_at <= timezone.now():
-                raise ValidationError("This quotation has expired. Ask the partner to issue a new quote.")
+                quote.status = ReservationQuote.Status.EXPIRED
+                quote.responded_at = timezone.now()
+                quote.save(update_fields=["status", "responded_at"])
+                return Response(
+                    {"detail": "This quotation has expired. Ask the partner to issue a new quote."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             quote.status = decision
             quote.responded_at = timezone.now()
             quote.save(update_fields=["status", "responded_at"])
