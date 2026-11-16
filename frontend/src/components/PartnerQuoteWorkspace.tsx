@@ -65,7 +65,7 @@ export default function PartnerQuoteWorkspace({accessToken}:{accessToken:string}
   {items.length?items.filter(x=>x.status==="pending").map(item=><article className="pq-card" key={item.id}>
    <div className="pq-card-head"><div><strong>{item.partner.name} · Request #{item.id}</strong><span>{item.customer_email}</span></div><span className="pq-status">{item.status}</span></div>
    <p>{item.start_date} to {item.end_date} · {item.guests} guests</p>
-   {item.latest_quote&&<div className="pq-existing"><strong>Latest quote: v{(item.latest_quote as {version:number}).version}</strong><span>Status: {(item.latest_quote as {status:string}).status}</span></div>}
+   {item.latest_quote != null&&<div className="pq-existing"><strong>Latest quote: v{(item.latest_quote as {version:number}).version}</strong><span>Status: {(item.latest_quote as {status:string}).status}</span></div>}
    {(item.latest_quote as {status:string}|null)?.status==="accepted"
     ? <div className="pq-accepted">
        <p>Customer accepted the quotation. Review availability and make your final reservation decision.</p>
