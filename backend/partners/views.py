@@ -1371,3 +1371,63 @@ class PaymentProviderWebhookView(APIView):
             event_record.processed_at = timezone.now()
             event_record.save(update_fields=["processed_at"])
         return Response({"received": True}, status=status.HTTP_200_OK)
+
+
+# Customer marketing preferences are deliberately separate from essential booking emails.
+from rest_framework.permissions import IsAuthenticated
+from rest_framework import status
+from .models import CustomerEmailPreference
+
+
+class CustomerEmailPreferenceView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def _preference(self, user):
+        preference, _created = CustomerEmailPreference.objects.get_or_create(user=user)
+        return preference
+
+    def get(self, request):
+        preference = self._preference(request.user)
+        return Response({
+            "marketing_opt_in": preference.marketing_opt_in,
+            "updated_at": preference.updated_at,
+            "essential_transactional_emails": True,
+        })
+
+    def patch(self, request):
+        value = request.data.get("marketing_opt_in")
+        if not isinstance(value, bool):
+            return Response(
+                {"marketing_opt_in": "Provide true or false."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        preference = self._preference(request.user)
+        preference.marketing_opt_in = value
+        preference.save(update_fields=["marketing_opt_in", "updated_at"])
+        return Response({
+            "marketing_opt_in": preference.marketing_opt_in,
+            "updated_at": preference.updated_at,
+            "essential_transactional_emails": True,
+        })
+
+
+class MarketingUnsubscribeView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def post(self, request, token):
+        try:
+            preference = CustomerEmailPreference.objects.get(unsubscribe_token=token)
+        except (CustomerEmailPreference.DoesNotExist, ValueError):
+            return Response(
+                {"detail": "This unsubscribe link is invalid or has expired."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if preference.marketing_opt_in:
+            preference.marketing_opt_in = False
+            preference.save(update_fields=["marketing_opt_in", "updated_at"])
+        return Response({
+            "detail": "You are unsubscribed from marketing emails.",
+            "marketing_opt_in": False,
+            "essential_transactional_emails": True,
+        })
