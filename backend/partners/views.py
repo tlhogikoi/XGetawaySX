@@ -876,6 +876,8 @@ def _finalize_provider_refund(refund, provider_reference="", reconciled_by=None)
         if refunded_total + refund.amount == payment.amount:
             payment.status = ReservationPayment.Status.REFUNDED
             payment.save(update_fields=["status", "updated_at"])
+        from .refund_notifications import queue_refund_audit_email
+        queue_refund_audit_email(refund)
         ReservationNotification.objects.create(
             recipient=payment.customer, reservation=payment.reservation, event=ReservationNotification.Event.REFUND_UPDATE,
             title="Refund confirmed",
@@ -1071,6 +1073,8 @@ class AdminPaymentRefundView(APIView):
                 payment.status = ReservationPayment.Status.REFUNDED
                 payment.save(update_fields=["status", "updated_at"])
 
+        from .refund_notifications import queue_refund_audit_email
+        queue_refund_audit_email(refund)
         ReservationNotification.objects.create(
             recipient=payment.customer, reservation=payment.reservation,
             event=ReservationNotification.Event.REFUND_UPDATE,
