@@ -454,6 +454,24 @@ class RefundAuditEmail(models.Model):
         return f"Refund audit email — refund {self.refund_id}"
 
 
+class CustomerEmailPreference(models.Model):
+    """Marketing consent only; essential booking and financial emails are never disabled."""
+    import uuid as _uuid
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="email_preferences"
+    )
+    marketing_opt_in = models.BooleanField(default=False)
+    unsubscribe_token = models.UUIDField(default=_uuid.uuid4, unique=True, editable=False)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "customer email preference"
+
+    def __str__(self):
+        return f"Email preferences — {self.user_id}"
+
+
 class ReservationEmailDelivery(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
