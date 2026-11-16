@@ -296,13 +296,21 @@ class ReservationPaymentCreateSerializer(serializers.Serializer):
         return attrs
 
 
+class ReservationRefundHistorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ReservationRefund
+        fields = ("id", "amount", "currency", "status", "provider", "provider_reference", "provider_status", "reason", "reconciled_at", "created_at")
+        read_only_fields = fields
+
+
 class ReservationPaymentSerializer(serializers.ModelSerializer):
     partner_name = serializers.CharField(source="partner.name", read_only=True)
     reservation_reference = serializers.UUIDField(source="reservation.booking_reference", read_only=True)
+    refunds = ReservationRefundHistorySerializer(many=True, read_only=True)
 
     class Meta:
         model = ReservationPayment
-        fields = ("id", "reservation", "reservation_reference", "partner_name", "kind", "status", "amount", "currency", "provider", "checkout_session_id", "checkout_url", "provider_reference", "failure_reason", "created_at", "captured_at")
+        fields = ("id", "reservation", "reservation_reference", "partner_name", "kind", "status", "amount", "currency", "provider", "checkout_session_id", "checkout_url", "provider_reference", "failure_reason", "refunds", "created_at", "captured_at")
         read_only_fields = fields
 
 
