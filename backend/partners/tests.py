@@ -1037,7 +1037,10 @@ class DualGatewayIntegrationTests(TestCase):
             provider="yoco", checkout_session_id="ch_yoco_checkout_001",
         )
 
-    def yoco_webhook(self, webhook_id="wh_evt_001", signature_valid=True):
+    def yoco_webhook(
+        self, webhook_id="wh_evt_001", signature_valid=True,
+        amount=5000, currency="ZAR", checkout_id="ch_yoco_checkout_001",
+    ):
         import base64
         import hashlib
         import hmac
@@ -1051,8 +1054,8 @@ class DualGatewayIntegrationTests(TestCase):
             "id": "evt_yoco_001",
             "type": "payment.succeeded",
             "payload": {
-                "amount": 5000, "currency": "ZAR", "id": "pay_yoco_001",
-                "status": "succeeded", "metadata": {"checkoutId": "ch_yoco_checkout_001"},
+                "amount": amount, "currency": currency, "id": "pay_yoco_001",
+                "status": "succeeded", "metadata": {"checkoutId": checkout_id},
             },
         }, separators=(",", ":")).encode()
         timestamp = str(int(time.time()))
@@ -1083,6 +1086,41 @@ class DualGatewayIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.payment.refresh_from_db()
         self.assertEqual(self.payment.status, "pending")
+
+    def test_yoco_webhook_rejects_amount_mismatch_without_recording_event(self):
+        from .models import PaymentProviderEvent, PartnerCommissionLedger
+
+        response = self.yoco_webhook(webhook_id="wh_evt_wrong_amount", amount=4999)
+
+        self.assertEqual(response.status_code, 400)
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, ReservationPayment.Status.PENDING)
+        self.assertFalse(PaymentProviderEvent.objects.filter(provider="yoco").exists())
+        self.assertFalse(PartnerCommissionLedger.objects.filter(payment=self.payment).exists())
+
+    def test_yoco_webhook_rejects_currency_mismatch_without_recording_event(self):
+        from .models import PaymentProviderEvent, PartnerCommissionLedger
+
+        response = self.yoco_webhook(webhook_id="wh_evt_wrong_currency", currency="USD")
+
+        self.assertEqual(response.status_code, 400)
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, ReservationPayment.Status.PENDING)
+        self.assertFalse(PaymentProviderEvent.objects.filter(provider="yoco").exists())
+        self.assertFalse(PartnerCommissionLedger.objects.filter(payment=self.payment).exists())
+
+    def test_yoco_webhook_rejects_unrecognised_checkout(self):
+        from .models import PaymentProviderEvent
+
+        response = self.yoco_webhook(
+            webhook_id="wh_evt_unknown_checkout",
+            checkout_id="ch_yoco_unknown",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, ReservationPayment.Status.PENDING)
+        self.assertFalse(PaymentProviderEvent.objects.filter(provider="yoco").exists())
 
     def test_yoco_duplicate_webhook_is_idempotent(self):
         from .models import PaymentProviderEvent, PartnerCommissionLedger
