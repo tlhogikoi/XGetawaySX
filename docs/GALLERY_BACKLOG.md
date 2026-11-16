@@ -736,4 +736,23 @@ Implemented on `feat/application-foundation`:
 - Customer cancellations for unconfirmed requests remain immediate withdrawals; confirmed reservation cancellations require partner/staff review.
 - Notifications are in-app only. Email, SMS, WhatsApp, push delivery, scheduled reminders, cancellation-policy fee calculations and customer self-service refund execution are not included.
 - No provider credentials or live/sandbox payment calls were used by this stage.
-- **Not yet verified:** Django checks/tests, migration application/drift, frontend typecheck/build, CI, merge or deployment.
+
+
+## Development 20 — Successful Refund Audit Email Delivery
+
+Implemented on `feat/application-foundation` (migration `0011_refund_audit_email.py`):
+
+- Added one `RefundAuditEmail` audit record per reconciled refund, with immutable customer and partner recipient-address snapshots.
+- Sends separate confirmation emails to the customer and partner only after the refund transaction commits and the refund has been marked successful.
+- Includes booking reference, refund record, amount/currency, payment provider, provider refund reference and confirmation timestamp.
+- Tracks each recipient independently so a retry does not resend an email already accepted by the configured email backend.
+- Records pending, sent, partial and failed delivery states, attempt count and bounded error details.
+- Added `retry_refund_audit_emails` management command for pending, partial and failed deliveries.
+- Integrated audit-email queuing into provider-confirmed refund finalisation and authorised staff reconciliation.
+
+### Development 20 boundaries
+
+- This is an email audit confirmation, not proof of a bank settlement beyond the verified provider refund status.
+- Email delivery requires valid SMTP settings in environment variables; no production mail provider or credentials are configured in the repository.
+- Cancellation lifecycle notifications remain in-app only. SMS, WhatsApp, push delivery, scheduled reminders and customer self-service refund execution are not included.
+- **Not yet verified:** Django checks/tests, migration application/drift, frontend typecheck/build, CI, provider sandbox tests, merge or deployment.
