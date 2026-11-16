@@ -709,7 +709,7 @@ class ReservationPaymentListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        payments = ReservationPayment.objects.filter(customer=request.user).select_related("partner", "reservation")
+        payments = ReservationPayment.objects.filter(customer=request.user).select_related("partner", "reservation").prefetch_related("refunds")
         return Response(ReservationPaymentSerializer(payments, many=True).data)
 
     def post(self, request):
