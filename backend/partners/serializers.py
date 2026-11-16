@@ -477,3 +477,7 @@ class ReservationNotificationSerializer(serializers.ModelSerializer):
             "event", "title", "message", "read_at", "created_at",
         )
         read_only_fields = fields
+
+
+class ReservationQuoteDecisionSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=(ReservationQuote.Status.ACCEPTED, ReservationQuote.Status.DECLINED))
