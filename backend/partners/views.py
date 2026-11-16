@@ -489,7 +489,7 @@ class PartnerReservationQuoteCreateView(APIView):
                 ReservationQuoteItem(quote=quote, **item) for item in data["items"]
             ])
         _queue_reservation_lifecycle_emails(
-            reservation, "reservation_quote_issued", "A partner quotation is ready",
+            reservation, f"reservation_quote_v{quote.version}", "A partner quotation is ready",
             f"The partner has issued quotation version {quote.version}. "
             f"Total: {quote.total_amount} {quote.currency}. Deposit: {quote.deposit_amount} {quote.currency}. "
             f"Please review and accept or decline it in your XGetawaySX account before {quote.expires_at}.",
@@ -543,7 +543,7 @@ class CustomerReservationQuoteDecisionView(APIView):
             else "The customer declined the quotation. The partner may issue a revised quotation if appropriate."
         )
         _queue_reservation_lifecycle_emails(
-            reservation, f"reservation_quote_{decision}", title, message
+            reservation, f"reservation_quote_{decision}_v{quote.version}", title, message
         )
         return Response(ReservationQuoteSerializer(quote).data)
 
