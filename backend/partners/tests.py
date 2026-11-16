@@ -1010,6 +1010,52 @@ class RefundReconciliationTests(TestCase):
         self.assertEqual(audit.attempts, 2)
 
 
+    def test_refund_audit_retry_command_dry_run_does_not_send(self):
+        from django.core.management import call_command
+        from .models import RefundAuditEmail
+
+        self.client.force_authenticate(user=self.admin)
+        response = self.refund("15.00", "refund-audit-dry-run-001")
+        self.assertEqual(response.status_code, 201)
+        audit = RefundAuditEmail.objects.get(refund_id=response.data["id"])
+
+        from io import StringIO
+        output = StringIO()
+        call_command("retry_refund_audit_emails", "--dry-run", stdout=output)
+
+        audit.refresh_from_db()
+        self.assertEqual(audit.attempts, 0)
+        self.assertEqual(audit.status, RefundAuditEmail.Status.PENDING)
+        self.assertIn("would be processed", output.getvalue())
+
+    def test_refund_audit_retry_command_respects_limit_and_attempt_cap(self):
+        from django.core import mail
+        from django.core.management import call_command
+        from django.test import override_settings
+        from .models import RefundAuditEmail
+
+        self.client.force_authenticate(user=self.admin)
+        first = self.refund("10.00", "refund-audit-limit-001")
+        second = self.refund("10.00", "refund-audit-limit-002")
+        first_audit = RefundAuditEmail.objects.get(refund_id=first.data["id"])
+        second_audit = RefundAuditEmail.objects.get(refund_id=second.data["id"])
+        second_audit.attempts = 10
+        second_audit.save(update_fields=["attempts"])
+
+        with override_settings(
+            EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+            DEFAULT_FROM_EMAIL="audit@example.test",
+        ):
+            call_command("retry_refund_audit_emails", "--limit", "1", "--max-attempts", "10")
+
+        first_audit.refresh_from_db()
+        second_audit.refresh_from_db()
+        self.assertEqual(first_audit.status, RefundAuditEmail.Status.SENT)
+        self.assertEqual(first_audit.attempts, 1)
+        self.assertEqual(second_audit.attempts, 10)
+        self.assertEqual(len(mail.outbox), 2)
+
+
 class DualGatewayIntegrationTests(TestCase):
     def setUp(self):
         import uuid
