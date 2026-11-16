@@ -51,7 +51,9 @@ export default function PartnerQuoteWorkspace({accessToken}:{accessToken:string}
    <div className="pq-card-head"><div><strong>{item.partner.name} · Request #{item.id}</strong><span>{item.customer_email}</span></div><span className="pq-status">{item.status}</span></div>
    <p>{item.start_date} to {item.end_date} · {item.guests} guests</p>
    {item.latest_quote&&<div className="pq-existing"><strong>Latest quote: v{(item.latest_quote as {version:number}).version}</strong><span>Status: {(item.latest_quote as {status:string}).status}</span></div>}
-   <h3><FileText size={16}/> Build quotation (ZAR)</h3>
+   {(item.latest_quote as {status:string}|null)?.status==="accepted"
+    ? <p className="pq-accepted">Customer accepted the quotation. This reservation is ready for your normal confirmation decision.</p>
+    : <><h3><FileText size={16}/> Build quotation (ZAR)</h3>
    {(lines[item.id]??[emptyLine()]).map((line,index)=><div className="pq-line" key={index}>
     <label>Description<input value={line.description} onChange={e=>updateLine(item.id,index,"description",e.target.value)}/></label>
     <label>Qty<input type="number" min="0.01" step="0.01" value={line.quantity} onChange={e=>updateLine(item.id,index,"quantity",e.target.value)}/></label>
