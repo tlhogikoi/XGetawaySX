@@ -336,6 +336,30 @@ class ReservationFoundationTests(TestCase):
             "message": "Please confirm our weekend reservation.",
         }, format="json")
 
+    def accept_quote(self, reservation_id):
+        from datetime import timedelta
+        from django.utils import timezone
+
+        self.client.force_authenticate(user=self.owner)
+        quote = self.client.post(
+            f"/api/v1/partners/partner/reservations/{reservation_id}/quotes/",
+            {
+                "currency": "ZAR",
+                "deposit_amount": "300.00",
+                "expires_at": (timezone.now() + timedelta(days=2)).isoformat(),
+                "items": [{"description": "Accommodation", "quantity": "1", "unit_price": "1000.00"}],
+            },
+            format="json",
+        )
+        self.assertEqual(quote.status_code, 201, quote.data)
+        self.client.force_authenticate(user=self.customer)
+        accepted = self.client.post(
+            f"/api/v1/partners/reservations/{reservation_id}/quote-decision/",
+            {"status": "accepted"},
+            format="json",
+        )
+        self.assertEqual(accepted.status_code, 200, accepted.data)
+
     def test_customer_can_request_published_dates_but_request_is_not_auto_confirmed(self):
         self.client.force_authenticate(user=self.customer)
         response = self.make_request()
@@ -348,6 +372,7 @@ class ReservationFoundationTests(TestCase):
         self.client.force_authenticate(user=self.customer)
         request = self.make_request(guests=3)
         self.assertEqual(request.status_code, 201)
+        self.accept_quote(request.data['id'])
         self.client.force_authenticate(user=self.owner)
         decision = self.client.post(
             f"/api/v1/partners/partner/reservations/{request.data['id']}/decision/",
@@ -363,6 +388,7 @@ class ReservationFoundationTests(TestCase):
         from .models import PartnerAvailability
         self.client.force_authenticate(user=self.customer)
         request = self.make_request(guests=2)
+        self.accept_quote(request.data['id'])
         PartnerAvailability.objects.filter(partner=self.partner, date=self.start).update(booked_count=3)
         self.client.force_authenticate(user=self.owner)
         decision = self.client.post(
@@ -546,6 +572,7 @@ class ReservationFoundationTests(TestCase):
             with self.captureOnCommitCallbacks(execute=True):
                 self.client.force_authenticate(user=self.customer)
                 request = self.make_request()
+            self.accept_quote(request.data['id'])
             mail.outbox.clear()
             with self.captureOnCommitCallbacks(execute=True):
                 self.client.force_authenticate(user=self.owner)
@@ -604,25 +631,28 @@ class ReservationFoundationTests(TestCase):
             )
 
     def test_failed_reservation_email_can_be_retried_without_resending_success(self):
-        from unittest.mock import patch
+        from unittest.mock import Mock, patch
         from django.test import override_settings
         from .models import ReservationEmailDelivery, ReservationRequest
         from .reservation_email_notifications import queue_reservation_email, send_reservation_email
         with override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend"):
-            with patch("partners.reservation_email_notifications.send_mail", side_effect=RuntimeError("SMTP unavailable")):
-                delivery = queue_reservation_email(
-                    reservation=ReservationRequest.objects.create(
-                        customer=self.customer, partner=self.partner, start_date=self.start,
-                        end_date=self.start + __import__("datetime").timedelta(days=1), guests=1,
-                    ),
-                    event="test_event", event_key="test-event-customer",
-                    recipient_email=self.customer.email, recipient_role="customer",
-                    subject="Test", body="Test body",
-                )
+            reservation = ReservationRequest.objects.create(
+                customer=self.customer, partner=self.partner, start_date=self.start,
+                end_date=self.start + __import__("datetime").timedelta(days=1), guests=1,
+            )
+            with self.captureOnCommitCallbacks(execute=True):
+                with patch("partners.reservation_email_notifications.EmailMultiAlternatives", side_effect=RuntimeError("SMTP unavailable")):
+                    delivery = queue_reservation_email(
+                        reservation=reservation, event="test_event", event_key="test-event-customer",
+                        recipient_email=self.customer.email, recipient_role="customer",
+                        subject="Test", body="Test body",
+                    )
             delivery.refresh_from_db()
             self.assertEqual(delivery.status, ReservationEmailDelivery.Status.FAILED)
             self.assertEqual(delivery.attempts, 1)
-            with patch("partners.reservation_email_notifications.send_mail", return_value=1):
+            message = Mock()
+            message.send.return_value = 1
+            with patch("partners.reservation_email_notifications.EmailMultiAlternatives", return_value=message):
                 send_reservation_email(delivery.pk)
                 send_reservation_email(delivery.pk)
             delivery.refresh_from_db()
