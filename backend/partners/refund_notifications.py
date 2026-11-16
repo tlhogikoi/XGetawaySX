@@ -31,7 +31,7 @@ def send_refund_audit_email(audit_id):
     payment = refund.payment
     reservation = payment.reservation
     reference = str(reservation.booking_reference or reservation.pk)
-    subject = f"XGetawaySX refund confirmation — {reference}"
+    subject = f"XGetawaySX Refund Confirmation — {reference}"
     body = (
         "This is an official XGetawaySX refund confirmation for your records.\n\n"
         f"Booking reference: {reference}\n"
