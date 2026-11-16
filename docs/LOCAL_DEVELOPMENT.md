@@ -75,3 +75,20 @@ Staff API operations:
 Yoco webhook subscriptions must include `refund.succeeded` and `refund.failed` events at `/api/v1/partners/webhooks/yoco/`. Configure the endpoint as public HTTPS and store the subscription signing secret in `YOCO_WEBHOOK_SECRET`. A successful Yoco API submission may remain pending; the signed refund webhook is the final state confirmation.
 
 PayFast automated refund requests query the refundable balance first and support only refunds back to the original payment source. Bank-payout cases require a separate authorised process and are not automated. Never retry an uncertain provider request until the provider's refund state has been checked.
+
+### Development 19 — Cancellation and notification API
+
+Customer operations:
+
+- `POST /api/v1/partners/reservations/{id}/cancel/` with a `reason` for confirmed bookings. Unconfirmed reservation requests can be withdrawn immediately.
+- `GET /api/v1/partners/reservations/cancellations/` lists the customer's cancellation requests.
+- `GET /api/v1/partners/notifications/` lists the authenticated user's in-app notifications; add `?unread=true` to filter unread items.
+- `POST /api/v1/partners/notifications/{id}/read/` marks only the recipient's notification as read.
+
+Partner/staff operations:
+
+- `GET /api/v1/partners/partner/cancellations/` lists cancellation requests for the authenticated partner owner.
+- `POST /api/v1/partners/cancellations/{id}/decision/` accepts `status` (`approved` or `declined`) and a `decision_note`. Only the owning partner or staff can decide.
+- If captured funds exist, approval does not cancel the reservation or release capacity. Staff must refund every captured payment through the existing Development 18 workflow; final refund reconciliation completes the cancellation and releases capacity automatically.
+
+Migration `0010_cancellation_workflow_notifications.py` adds cancellation workflow and in-app notification records. Run `python manage.py migrate` after pulling the branch. No extra provider credentials are needed.
