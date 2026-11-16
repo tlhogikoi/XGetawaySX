@@ -86,6 +86,7 @@ export default function PartnerQuoteWorkspace({accessToken}:{accessToken:string}
    </div>
    <label className="pq-terms">Terms and inclusions<textarea rows={3} maxLength={3000} value={terms[item.id]??""} onChange={e=>setTerms(v=>({...v,[item.id]:e.target.value}))} placeholder="Describe inclusions, exclusions, payment conditions and any important restrictions."/></label>
    <button className="pq-submit" disabled={busy===item.id} onClick={()=>issueQuote(item.id)}><Send size={15}/>{busy===item.id?"Sending…":"Send quotation to customer"}</button>
+    </>}
   </article>):<p className="pq-empty">No pending reservation requests are available for partner profiles linked to this account.</p>}
  </section>;
 }
