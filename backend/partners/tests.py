@@ -606,12 +606,15 @@ class ReservationFoundationTests(TestCase):
     def test_failed_reservation_email_can_be_retried_without_resending_success(self):
         from unittest.mock import patch
         from django.test import override_settings
-        from .models import ReservationEmailDelivery
+        from .models import ReservationEmailDelivery, ReservationRequest
         from .reservation_email_notifications import queue_reservation_email, send_reservation_email
         with override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend"):
             with patch("partners.reservation_email_notifications.send_mail", side_effect=RuntimeError("SMTP unavailable")):
                 delivery = queue_reservation_email(
-                    reservation=ReservationRequest.objects.create(\n                        customer=self.customer, partner=self.partner, start_date=self.start,\n                        end_date=self.start + __import__("datetime").timedelta(days=1), guests=1,\n                    ),
+                    reservation=ReservationRequest.objects.create(
+                        customer=self.customer, partner=self.partner, start_date=self.start,
+                        end_date=self.start + __import__("datetime").timedelta(days=1), guests=1,
+                    ),
                     event="test_event", event_key="test-event-customer",
                     recipient_email=self.customer.email, recipient_role="customer",
                     subject="Test", body="Test body",
