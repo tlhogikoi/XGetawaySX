@@ -291,6 +291,8 @@ class ReservationQuoteCreateSerializer(serializers.Serializer):
         total = total.quantize(Decimal("0.01"))
         if total <= 0:
             raise serializers.ValidationError({"items": "Quote total must be greater than zero."})
+        if total > Decimal("9999999999.99"):
+            raise serializers.ValidationError({"items": "Quote total exceeds the supported amount."})
         if attrs["deposit_amount"] > total:
             raise serializers.ValidationError({"deposit_amount": "Deposit cannot exceed the quotation total."})
         attrs["items"] = clean_items
