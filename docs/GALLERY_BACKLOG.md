@@ -880,3 +880,30 @@ Implemented on `feat/application-foundation`:
 - Conversion checks the latest published availability and guest capacity, but this is not a capacity hold. Capacity is managed by the existing reservation confirmation workflow; the partner must confirm promptly and the reservation decision path remains authoritative.
 - No quote line items, binding price acceptance, automatic booking confirmation, deposit collection or payment initiation is introduced by this stage.
 - No automated Django checks/tests, migration validation, frontend typecheck/build, browser test, CI run, provider workflow, merge or deployment has been executed or confirmed.
+
+
+## Development 27 — Structured Partner Quotations & Customer Price Acceptance
+
+Implemented on `feat/application-foundation`:
+
+- Added versioned `ReservationQuote` and itemised `ReservationQuoteItem` records with migration `0015_reservation_quotes.py`.
+- Partner owners can issue a quotation for a pending reservation request through `POST /api/v1/partners/partner/reservations/{id}/quotes/`.
+- Quote lines contain description, quantity and unit price. The backend calculates line totals and the overall total; client-supplied totals are not trusted.
+- Quotes capture currency, deposit amount, terms/inclusions, issue time, expiry time, creator and version.
+- A revised quotation creates a new version and expires the prior outstanding version. An accepted quote cannot be replaced.
+- Customers can explicitly accept or decline the latest outstanding, unexpired quote through `POST /api/v1/partners/reservations/{id}/quote-decision/`.
+- Customer acceptance snapshots the accepted total, deposit and currency onto the reservation. The accepted amount is then used by the existing payment calculation after confirmation.
+- Partner confirmation is blocked until the customer has accepted a quotation. The partner still makes the final reservation decision and availability/capacity are rechecked before confirmation.
+- Added a partner quotation workspace to the signed-in account, customer quotation review/accept/decline controls, and final partner confirmation/decline actions.
+- Added read-only Django admin visibility for quote records and line items.
+- Added backend tests for quote creation and server-calculated totals, acceptance without automatic booking confirmation, partner confirmation gating, successful confirmation after acceptance, customer ownership isolation and expiry validation.
+- Quote issue/decision emails use version-specific event keys to preserve an audit email for each quote revision.
+
+### Development 27 boundaries
+
+- The quote workflow currently uses ZAR in the partner workspace, while the API validates a three-letter currency code.
+- Deposit amount is a quoted amount, not a payment. No payment is initiated until the reservation is confirmed and the customer starts checkout through the existing payment flow.
+- Quote acceptance does not confirm availability or hold capacity. Final partner confirmation rechecks capacity and can still fail if availability has changed.
+- Quote acceptance records the customer's price agreement; production legal terms, cancellation/refund policy display, and customer-facing quote PDF remain future work.
+- SMTP/provider delivery is not configured by this implementation; queued email acceptance is not proof of inbox delivery.
+- No automated Django checks/tests, migration validation, frontend typecheck/build, browser test, CI run, provider workflow, merge or deployment has been executed or confirmed.
