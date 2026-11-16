@@ -217,3 +217,30 @@ class CustomerEmailPreferenceAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+from .models import ReservationQuote, ReservationQuoteItem
+
+
+class ReservationQuoteItemInline(admin.TabularInline):
+    model = ReservationQuoteItem
+    extra = 0
+    readonly_fields = ("description", "quantity", "unit_price", "line_total")
+
+
+@admin.register(ReservationQuote)
+class ReservationQuoteAdmin(admin.ModelAdmin):
+    list_display = ("id", "reservation", "version", "status", "currency", "total_amount", "deposit_amount", "expires_at", "created_by")
+    list_filter = ("status", "currency", "created_at")
+    search_fields = ("reservation__partner__name", "reservation__customer__email")
+    readonly_fields = ("reservation", "version", "status", "currency", "total_amount", "deposit_amount", "terms", "expires_at", "created_by", "responded_at", "created_at")
+    inlines = (ReservationQuoteItemInline,)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
