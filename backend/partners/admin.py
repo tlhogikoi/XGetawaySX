@@ -176,3 +176,27 @@ class RefundAuditEmailAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+from .models import ReservationEmailDelivery
+
+
+@admin.register(ReservationEmailDelivery)
+class ReservationEmailDeliveryAdmin(admin.ModelAdmin):
+    list_display = ("event", "event_key", "recipient_email", "recipient_role", "status", "attempts", "sent_at")
+    list_filter = ("event", "status", "recipient_role", "created_at")
+    search_fields = ("event_key", "recipient_email", "reservation__booking_reference")
+    readonly_fields = (
+        "reservation", "cancellation_request", "event", "event_key",
+        "recipient_email", "recipient_role", "subject", "body", "status",
+        "sent_at", "attempts", "last_error", "created_at", "updated_at",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
