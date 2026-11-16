@@ -56,6 +56,37 @@ class GalleryPublicationTests(TestCase):
         shutil.rmtree(self.private_storage_dir, ignore_errors=True)
 
 
+
+    def test_social_media_only_permission_does_not_publish_story_on_website(self):
+        self.permission.permitted_channels = ["social_media"]
+        self.permission.save(update_fields=("permitted_channels",))
+        GalleryStory.objects.create(
+            media=self.media,
+            summary=" ".join(["A verified short story about this place and its setting."] * 5),
+            status=GalleryStory.Status.PUBLISHED,
+            owner_approved_by=self.owner,
+            owner_approved_at=timezone.now(),
+            owner_approved_version=1,
+            editorial_approved_by=self.editor,
+            editorial_approved_at=timezone.now(),
+            editorial_approved_version=1,
+            published_at=timezone.now(),
+        )
+        response = self.client.get("/api/v1/gallery/stories/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
+    def test_website_permission_is_required_before_editorial_media_approval(self):
+        self.permission.permitted_channels = ["social_media"]
+        self.permission.save(update_fields=("permitted_channels",))
+        self.client.force_authenticate(self.editor)
+        response = self.client.post(
+            f"/api/v1/gallery/media/{self.media.id}/editorial-approve/"
+        )
+        self.assertEqual(response.status_code, 400)
+        self.media.refresh_from_db()
+        self.assertNotEqual(self.media.status, GalleryMedia.Status.APPROVED)
+
     def test_partner_draft_list_exposes_publication_gate_status(self):
         GalleryStory.objects.create(
             media=self.media,
@@ -340,6 +371,30 @@ class GalleryPublicationTests(TestCase):
         self.media.save()
         blocked = self.client.get(f"/api/v1/gallery/media/{self.media.id}/image/")
         self.assertEqual(blocked.status_code, 404)
+
+
+    def test_social_media_only_permission_blocks_public_image_delivery(self):
+        self.permission.permitted_channels = ["social_media"]
+        self.permission.save(update_fields=("permitted_channels",))
+        self.media.image_file = SimpleUploadedFile(
+            "social-only.png",
+            base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC"),
+        )
+        self.media.save()
+        GalleryStory.objects.create(
+            media=self.media,
+            summary=" ".join(["A verified short story about this place and its setting."] * 5),
+            status=GalleryStory.Status.PUBLISHED,
+            owner_approved_by=self.owner,
+            owner_approved_at=timezone.now(),
+            owner_approved_version=1,
+            editorial_approved_by=self.editor,
+            editorial_approved_at=timezone.now(),
+            editorial_approved_version=1,
+            published_at=timezone.now(),
+        )
+        response = self.client.get(f"/api/v1/gallery/media/{self.media.id}/image/")
+        self.assertEqual(response.status_code, 404)
 
     def test_image_validator_rejects_unsupported_file_content(self):
         from .validators import validate_gallery_image
