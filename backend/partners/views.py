@@ -905,7 +905,8 @@ def _create_reservation_installments(reservation, accepted_quote):
     if deposit <= 0:
         deposit = (total * Decimal("0.30")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     deposit = min(total, deposit)
-    deposit_due = timezone.now() + timedelta(hours=48)
+    policy, _created = PartnerFinancialSettings.objects.get_or_create(partner=reservation.partner)
+    deposit_due = timezone.now() + timedelta(hours=policy.deposit_due_hours)
     ReservationInstallment.objects.create(
         reservation=reservation, sequence=1, kind=ReservationInstallment.Kind.DEPOSIT,
         amount=deposit, currency=currency, due_at=deposit_due,
@@ -913,7 +914,7 @@ def _create_reservation_installments(reservation, accepted_quote):
     balance = total - deposit
     if balance > 0:
         balance_due = timezone.make_aware(datetime.combine(
-            reservation.start_date - timedelta(days=7), datetime.min.time()
+            reservation.start_date - timedelta(days=policy.balance_due_days_before), datetime.min.time()
         ))
         ReservationInstallment.objects.create(
             reservation=reservation, sequence=2, kind=ReservationInstallment.Kind.BALANCE,
