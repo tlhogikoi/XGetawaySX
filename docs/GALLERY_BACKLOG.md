@@ -944,7 +944,7 @@ Implemented on `feat/application-foundation`:
 ### Development 28 — multi-stage instalment completion
 
 - Added partner settings `balance_installment_count` (1–6) and `balance_installment_interval_days` (1–90), migration `0018_balance_installment_options.py`.
-- Partners can configure the deposit policy, deposit deadline, balance deadline, number of balance instalments and spacing through the partner account UI and authenticated financial-settings API.
+- Partners can configure the deposit policy, deposit deadline, balance deadline, number of balance instalments and spacing through the partner account UI and authenticated financial-settings API. An explicit deposit in the accepted quote takes precedence; otherwise the partner's percentage/fixed deposit policy applies, falling back to the platform's 30% suggestion only when no partner deposit is configured.
 - Confirmed reservations now snapshot one deposit plus the configured number of equal balance instalments. Rounding remainder is applied to the final balance instalment so the schedule total exactly matches the accepted quotation.
 - Customer checkout now selects the next outstanding scheduled instalment instead of charging the entire remaining balance in one payment. Existing pending-payment protection remains in place.
 - Added tests for configurable multi-stage splits and checkout selecting the next scheduled amount.
