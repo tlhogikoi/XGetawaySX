@@ -634,30 +634,45 @@ class ReservationFoundationTests(TestCase):
         from unittest.mock import Mock, patch
         from django.test import override_settings
         from .models import ReservationEmailDelivery, ReservationRequest
-        from .reservation_email_notifications import queue_reservation_email, send_reservation_email
+        from .reservation_email_notifications import send_reservation_email
+
+        reservation = ReservationRequest.objects.create(
+            customer=self.customer, partner=self.partner, start_date=self.start,
+            end_date=self.start + __import__("datetime").timedelta(days=1), guests=1,
+        )
+        delivery = ReservationEmailDelivery.objects.create(
+            reservation=reservation, event="test_event", event_key="test-event-customer",
+            recipient_email=self.customer.email, recipient_role="customer",
+            subject="Test", body="Test body",
+        )
+
         with override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend"):
-            reservation = ReservationRequest.objects.create(
-                customer=self.customer, partner=self.partner, start_date=self.start,
-                end_date=self.start + __import__("datetime").timedelta(days=1), guests=1,
-            )
-            with self.captureOnCommitCallbacks(execute=True):
-                with patch("partners.reservation_email_notifications.EmailMultiAlternatives", side_effect=RuntimeError("SMTP unavailable")):
-                    delivery = queue_reservation_email(
-                        reservation=reservation, event="test_event", event_key="test-event-customer",
-                        recipient_email=self.customer.email, recipient_role="customer",
-                        subject="Test", body="Test body",
-                    )
+            failed_message = Mock()
+            failed_message.send.side_effect = RuntimeError("SMTP unavailable")
+            with patch(
+                "partners.reservation_email_notifications.EmailMultiAlternatives",
+                return_value=failed_message,
+            ):
+                send_reservation_email(delivery.pk)
+
             delivery.refresh_from_db()
             self.assertEqual(delivery.status, ReservationEmailDelivery.Status.FAILED)
             self.assertEqual(delivery.attempts, 1)
-            message = Mock()
-            message.send.return_value = 1
-            with patch("partners.reservation_email_notifications.EmailMultiAlternatives", return_value=message):
+            self.assertIn("SMTP unavailable", delivery.last_error)
+
+            successful_message = Mock()
+            successful_message.send.return_value = 1
+            with patch(
+                "partners.reservation_email_notifications.EmailMultiAlternatives",
+                return_value=successful_message,
+            ):
                 send_reservation_email(delivery.pk)
                 send_reservation_email(delivery.pk)
+
             delivery.refresh_from_db()
             self.assertEqual(delivery.status, ReservationEmailDelivery.Status.SENT)
             self.assertEqual(delivery.attempts, 2)
+            successful_message.send.assert_called_once_with(fail_silently=False)
 
 class PaymentAndPartnerFinanceTests(TestCase):
     def setUp(self):
