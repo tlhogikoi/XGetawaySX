@@ -246,6 +246,77 @@ class ReservationRequest(models.Model):
     def __str__(self):
         return f"Reservation request {self.pk} — {self.partner.name}"
 
+
+class ReservationCancellationRequest(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending review"
+        APPROVED = "approved", "Approved — refund/cancellation in progress"
+        DECLINED = "declined", "Declined"
+        COMPLETED = "completed", "Completed"
+
+    reservation = models.ForeignKey(
+        ReservationRequest, on_delete=models.PROTECT, related_name="cancellation_requests"
+    )
+    customer = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="reservation_cancellations"
+    )
+    reason = models.CharField(max_length=1000)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    decision_note = models.CharField(max_length=1000, blank=True)
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True,
+        related_name="decided_reservation_cancellations",
+    )
+    requested_at = models.DateTimeField(auto_now_add=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("-requested_at",)
+        constraints = [
+            models.UniqueConstraint(
+                fields=("reservation",),
+                condition=models.Q(status__in=("pending", "approved")),
+                name="uniq_active_reservation_cancel",
+            )
+        ]
+        indexes = [models.Index(fields=("status", "requested_at"), name="cancel_status_date_idx")]
+
+    def __str__(self):
+        return f"Cancellation request {self.pk} — reservation {self.reservation_id}"
+
+
+class ReservationNotification(models.Model):
+    class Event(models.TextChoices):
+        CANCELLATION_REQUESTED = "cancellation_requested", "Cancellation requested"
+        CANCELLATION_DECISION = "cancellation_decision", "Cancellation decision"
+        CANCELLATION_COMPLETED = "cancellation_completed", "Cancellation completed"
+        REFUND_UPDATE = "refund_update", "Refund update"
+
+    recipient = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="reservation_notifications"
+    )
+    reservation = models.ForeignKey(
+        ReservationRequest, on_delete=models.CASCADE, related_name="notifications"
+    )
+    cancellation_request = models.ForeignKey(
+        ReservationCancellationRequest, on_delete=models.CASCADE, null=True, blank=True,
+        related_name="notifications",
+    )
+    event = models.CharField(max_length=32, choices=Event.choices)
+    title = models.CharField(max_length=160)
+    message = models.CharField(max_length=500)
+    read_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=("recipient", "read_at", "created_at"), name="res_notif_inbox_idx")]
+
+    def __str__(self):
+        return f"{self.title} — {self.recipient_id}"
+
+
 class PartnerFinancialSettings(models.Model):
     class DepositType(models.TextChoices):
         NONE = "none", "No deposit"
