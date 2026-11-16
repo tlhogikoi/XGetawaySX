@@ -200,3 +200,20 @@ class ReservationEmailDeliveryAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+from .models import CustomerEmailPreference
+
+
+@admin.register(CustomerEmailPreference)
+class CustomerEmailPreferenceAdmin(admin.ModelAdmin):
+    list_display = ("user", "marketing_opt_in", "updated_at")
+    list_filter = ("marketing_opt_in", "updated_at")
+    search_fields = ("user__email",)
+    readonly_fields = ("user", "unsubscribe_token", "updated_at")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
