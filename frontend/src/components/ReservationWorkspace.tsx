@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { CalendarCheck, ClipboardList, Send, Ban } from "lucide-react";
 import "./reservation.css";
+import CustomerEmailPreferences from "./CustomerEmailPreferences";
 
 type Partner = { id: number; name: string; city: string; province: string };
 type Reservation = { id: number; partner: Partner; start_date: string; end_date: string; guests: number; status: string; booking_reference: string | null; partner_response: string };
@@ -61,6 +62,7 @@ export default function ReservationWorkspace({ accessToken }: { accessToken: str
     }
   }
   return <section className="reservation-workspace"><header><p className="eyebrow">YOUR GETAWAY</p><h2>Reservation requests</h2><p>Check partner-published availability, request your dates and manage cancellation requests.</p></header>
+    <CustomerEmailPreferences accessToken={accessToken} />
     {error&&<p className="reservation-feedback error" role="alert">{error}</p>}{notice&&<p className="reservation-feedback" role="status">{notice}</p>}
     <div className="reservation-form"><h3><CalendarCheck size={18}/> Request a stay or experience</h3>
       <label>Partner<select value={partnerId} onChange={e=>{setPartnerId(e.target.value);setAvailability([]);}}><option value="">Choose a partner</option>{partners.map(p=><option key={p.id} value={p.id}>{p.name} — {[p.city,p.province].filter(Boolean).join(", ")}</option>)}</select></label>
