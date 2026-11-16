@@ -421,6 +421,95 @@ class ReservationFoundationTests(TestCase):
         }, format="json")
         self.assertEqual(denied.status_code, 404)
 
+
+    def test_confirmed_customer_cancellation_requires_partner_decision_and_notifies_both_parties(self):
+        from .models import ReservationRequest, ReservationCancellationRequest, ReservationNotification
+        import uuid
+        item = ReservationRequest.objects.create(
+            customer=self.customer, partner=self.partner, start_date=self.start,
+            end_date=self.start + __import__("datetime").timedelta(days=2), guests=2,
+            status=ReservationRequest.Status.CONFIRMED, booking_reference=uuid.uuid4(),
+        )
+        self.client.force_authenticate(user=self.customer)
+        response = self.client.post(
+            f"/api/v1/partners/reservations/{item.pk}/cancel/",
+            {"reason": "Our travel dates have changed unexpectedly."}, format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["status"], "pending")
+        self.assertEqual(ReservationNotification.objects.filter(cancellation_request_id=response.data["id"]).count(), 2)
+
+    def test_partner_approval_completes_unpaid_cancellation_and_releases_capacity(self):
+        from .models import PartnerAvailability, ReservationRequest, ReservationCancellationRequest, ReservationNotification
+        import uuid
+        item = ReservationRequest.objects.create(
+            customer=self.customer, partner=self.partner, start_date=self.start,
+            end_date=self.start + __import__("datetime").timedelta(days=2), guests=2,
+            status=ReservationRequest.Status.CONFIRMED, booking_reference=uuid.uuid4(),
+        )
+        PartnerAvailability.objects.filter(partner=self.partner, date__lt=item.end_date).update(booked_count=2)
+        self.client.force_authenticate(user=self.customer)
+        created = self.client.post(
+            f"/api/v1/partners/reservations/{item.pk}/cancel/",
+            {"reason": "We can no longer travel on these dates."}, format="json",
+        )
+        self.client.force_authenticate(user=self.owner)
+        decided = self.client.post(
+            f"/api/v1/partners/cancellations/{created.data['id']}/decision/",
+            {"status": "approved", "decision_note": "Approved; dates released."}, format="json",
+        )
+        self.assertEqual(decided.status_code, 200)
+        self.assertEqual(decided.data["status"], "completed")
+        item.refresh_from_db()
+        self.assertEqual(item.status, ReservationRequest.Status.CANCELLED)
+        self.assertEqual(list(PartnerAvailability.objects.filter(partner=self.partner).order_by("date").values_list("booked_count", flat=True)), [0, 0, 0])
+        self.assertEqual(ReservationNotification.objects.filter(cancellation_request_id=created.data["id"]).count(), 4)
+
+    def test_partner_cannot_decide_cancellation_for_another_partner(self):
+        from .models import ReservationRequest
+        import uuid
+        item = ReservationRequest.objects.create(
+            customer=self.customer, partner=self.partner, start_date=self.start,
+            end_date=self.start + __import__("datetime").timedelta(days=1), guests=1,
+            status=ReservationRequest.Status.CONFIRMED, booking_reference=uuid.uuid4(),
+        )
+        self.client.force_authenticate(user=self.customer)
+        created = self.client.post(
+            f"/api/v1/partners/reservations/{item.pk}/cancel/",
+            {"reason": "We need to change our plans."}, format="json",
+        )
+        other = User.objects.create_user(email="other-cancel-partner@example.com", password="test-password", role=User.Role.PARTNER)
+        self.client.force_authenticate(user=other)
+        denied = self.client.post(
+            f"/api/v1/partners/cancellations/{created.data['id']}/decision/",
+            {"status": "approved", "decision_note": "Approved by unauthorised user."}, format="json",
+        )
+        self.assertEqual(denied.status_code, 403)
+
+    def test_customer_can_only_read_and_mark_own_reservation_notifications(self):
+        from .models import ReservationRequest, ReservationNotification
+        import uuid
+        item = ReservationRequest.objects.create(
+            customer=self.customer, partner=self.partner, start_date=self.start,
+            end_date=self.start + __import__("datetime").timedelta(days=1), guests=1,
+            status=ReservationRequest.Status.CONFIRMED, booking_reference=uuid.uuid4(),
+        )
+        notification = ReservationNotification.objects.create(
+            recipient=self.customer, reservation=item, event="cancellation_requested",
+            title="Cancellation update", message="Your request is under review.",
+        )
+        self.client.force_authenticate(user=self.customer)
+        inbox = self.client.get("/api/v1/partners/notifications/?unread=true")
+        self.assertEqual(inbox.status_code, 200)
+        self.assertEqual(len(inbox.data), 1)
+        read = self.client.post(f"/api/v1/partners/notifications/{notification.pk}/read/")
+        self.assertEqual(read.status_code, 200)
+        self.assertIsNotNone(read.data["read_at"])
+        other = User.objects.create_user(email="other-notification@example.com", password="test-password")
+        self.client.force_authenticate(user=other)
+        denied = self.client.post(f"/api/v1/partners/notifications/{notification.pk}/read/")
+        self.assertEqual(denied.status_code, 404)
+
 class PaymentAndPartnerFinanceTests(TestCase):
     def setUp(self):
         from datetime import date, timedelta
