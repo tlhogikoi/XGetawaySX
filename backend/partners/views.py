@@ -524,9 +524,6 @@ class CustomerReservationQuoteDecisionView(APIView):
             if quote.status != ReservationQuote.Status.SENT:
                 raise ValidationError("Only the latest outstanding quotation can be accepted or declined.")
             if quote.expires_at <= timezone.now():
-                quote.status = ReservationQuote.Status.EXPIRED
-                quote.responded_at = timezone.now()
-                quote.save(update_fields=["status", "responded_at"])
                 raise ValidationError("This quotation has expired. Ask the partner to issue a new quote.")
             quote.status = decision
             quote.responded_at = timezone.now()
@@ -575,8 +572,6 @@ class PartnerReservationDecisionView(APIView):
                 accepted_quote = item.quotes.filter(status=ReservationQuote.Status.ACCEPTED).order_by("-version").first()
                 if not accepted_quote:
                     raise ValidationError("The customer must accept the latest quotation before the reservation can be confirmed.")
-                if accepted_quote.expires_at <= timezone.now():
-                    raise ValidationError("The accepted quotation has expired. A new quotation and customer acceptance are required.")
                 dates = [item.start_date + timedelta(days=offset) for offset in range((item.end_date - item.start_date).days)]
                 days = list(PartnerAvailability.objects.select_for_update().filter(
                     partner=item.partner, date__in=dates
