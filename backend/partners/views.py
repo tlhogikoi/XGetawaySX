@@ -913,13 +913,23 @@ def _create_reservation_installments(reservation, accepted_quote):
     )
     balance = total - deposit
     if balance > 0:
-        balance_due = timezone.make_aware(datetime.combine(
-            reservation.start_date - timedelta(days=policy.balance_due_days_before), datetime.min.time()
-        ))
-        ReservationInstallment.objects.create(
-            reservation=reservation, sequence=2, kind=ReservationInstallment.Kind.BALANCE,
-            amount=balance, currency=currency, due_at=max(balance_due, deposit_due),
-        )
+        count = policy.balance_installment_count
+        base_amount = (balance / Decimal(count)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        allocated = Decimal("0.00")
+        for index in range(count):
+            amount = balance - allocated if index == count - 1 else base_amount
+            allocated += amount
+            days_before = policy.balance_due_days_before + (
+                (count - index - 1) * policy.balance_installment_interval_days
+            )
+            due_at = timezone.make_aware(datetime.combine(
+                reservation.start_date - timedelta(days=days_before), datetime.min.time()
+            ))
+            ReservationInstallment.objects.create(
+                reservation=reservation, sequence=index + 2,
+                kind=ReservationInstallment.Kind.BALANCE,
+                amount=amount, currency=currency, due_at=max(due_at, deposit_due),
+            )
 
 
 def _reservation_financial_totals(reservation):
