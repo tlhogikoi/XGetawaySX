@@ -245,7 +245,7 @@ class ReservationDecisionSerializer(serializers.Serializer):
     partner_response = serializers.CharField(min_length=5, max_length=3000)
 
 from decimal import Decimal
-from .models import PartnerFinancialSettings, ReservationPayment, PartnerCommissionLedger
+from .models import PartnerFinancialSettings, ReservationPayment, PartnerCommissionLedger, ReservationRefund
 
 
 class PartnerFinancialSettingsSerializer(serializers.ModelSerializer):
@@ -336,7 +336,7 @@ class PartnerCommissionLedgerSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
-from .models import ReservationRefund, PartnerCommissionAdjustment
+from .models import PartnerCommissionAdjustment
 
 
 class ReservationRefundSerializer(serializers.ModelSerializer):
