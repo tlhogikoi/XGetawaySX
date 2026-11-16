@@ -376,9 +376,8 @@ class ReservationFoundationTests(TestCase):
         request_record = ReservationRequest.objects.get(pk=request.data["id"])
         self.assertEqual(request_record.status, ReservationRequest.Status.PENDING)
 
-    def test_customer_cancellation_releases_confirmed_capacity(self):
+    def test_customer_cancellation_releases_confirmed_capacity_after_partner_approval(self):
         from .models import PartnerAvailability, ReservationRequest
-        from django.utils import timezone
         import uuid
         item = ReservationRequest.objects.create(
             customer=self.customer, partner=self.partner, start_date=self.start,
@@ -387,9 +386,20 @@ class ReservationFoundationTests(TestCase):
         )
         PartnerAvailability.objects.filter(partner=self.partner, date__lt=item.end_date).update(booked_count=2)
         self.client.force_authenticate(user=self.customer)
-        response = self.client.post(f"/api/v1/partners/reservations/{item.pk}/cancel/")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["status"], "cancelled")
+        response = self.client.post(
+            f"/api/v1/partners/reservations/{item.pk}/cancel/",
+            {"reason": "We need to cancel these travel dates."}, format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        self.client.force_authenticate(user=self.owner)
+        decision = self.client.post(
+            f"/api/v1/partners/cancellations/{response.data['id']}/decision/",
+            {"status": "approved", "decision_note": "Cancellation approved."}, format="json",
+        )
+        self.assertEqual(decision.status_code, 200)
+        self.assertEqual(decision.data["status"], "completed")
+        item.refresh_from_db()
+        self.assertEqual(item.status, "cancelled")
         self.assertEqual(list(PartnerAvailability.objects.filter(partner=self.partner).order_by("date").values_list("booked_count", flat=True)), [0, 0, 0])
 
     def test_partner_cannot_decide_another_partners_reservation(self):
@@ -606,10 +616,56 @@ class PaymentAndPartnerFinanceTests(TestCase):
             provider="test_gateway", provider_reference="captured-cancel-test-001",
         )
         self.client.force_authenticate(user=self.customer)
-        response = self.client.post(f"/api/v1/partners/reservations/{self.reservation.pk}/cancel/")
-        self.assertEqual(response.status_code, 400)
+        response = self.client.post(
+            f"/api/v1/partners/reservations/{self.reservation.pk}/cancel/",
+            {"reason": "I can no longer travel on the selected dates."}, format="json",
+        )
+        self.assertEqual(response.status_code, 201)
         self.reservation.refresh_from_db()
         self.assertEqual(self.reservation.status, "confirmed")
+        self.assertEqual(response.data["status"], "pending")
+
+    def test_captured_payment_cancellation_completes_only_after_staff_refund_reconciliation(self):
+        import uuid
+        from .models import ReservationPayment, PartnerCommissionLedger, ReservationCancellationRequest, ReservationNotification, ReservationRequest
+        payment = ReservationPayment.objects.create(
+            reservation=self.reservation, customer=self.customer, partner=self.partner,
+            kind=ReservationPayment.Kind.DEPOSIT, status=ReservationPayment.Status.CAPTURED,
+            amount="80.00", currency="ZAR", idempotency_key="captured-cancel-flow-001",
+            provider="sample_gateway", provider_reference="captured-cancel-flow-002",
+        )
+        PartnerCommissionLedger.objects.create(
+            payment=payment, partner=self.partner, gross_amount="80.00",
+            commission_rate="10.00", commission_amount="8.00", partner_net_amount="72.00",
+        )
+        self.client.force_authenticate(user=self.customer)
+        created = self.client.post(
+            f"/api/v1/partners/reservations/{self.reservation.pk}/cancel/",
+            {"reason": "My travel plans have changed and I need to cancel."}, format="json",
+        )
+        self.client.force_authenticate(user=self.owner)
+        approved = self.client.post(
+            f"/api/v1/partners/cancellations/{created.data['id']}/decision/",
+            {"status": "approved", "decision_note": "Approved subject to refund completion."}, format="json",
+        )
+        self.assertEqual(approved.status_code, 200)
+        self.assertEqual(approved.data["status"], ReservationCancellationRequest.Status.APPROVED)
+        self.reservation.refresh_from_db()
+        self.assertEqual(self.reservation.status, ReservationRequest.Status.CONFIRMED)
+        self.client.force_authenticate(user=self.admin)
+        refund = self.client.post(
+            f"/api/v1/partners/payments/{payment.pk}/refunds/",
+            {"amount": "80.00", "provider": "sample_gateway", "provider_reference": "manual-cancel-refund-001", "reason": "Approved reservation cancellation"},
+            format="json",
+        )
+        self.assertEqual(refund.status_code, 201)
+        self.reservation.refresh_from_db()
+        self.assertEqual(self.reservation.status, ReservationRequest.Status.CANCELLED)
+        cancellation = ReservationCancellationRequest.objects.get(pk=created.data["id"])
+        self.assertEqual(cancellation.status, ReservationCancellationRequest.Status.COMPLETED)
+        self.assertTrue(ReservationNotification.objects.filter(
+            recipient=self.customer, event="cancellation_completed", cancellation_request=cancellation
+        ).exists())
 
     def test_admin_cannot_capture_payment_after_reservation_cancelled(self):
         self.client.force_authenticate(user=self.customer)
