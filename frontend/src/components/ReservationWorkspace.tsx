@@ -6,6 +6,8 @@ type Partner = { id: number; name: string; city: string; province: string };
 type Reservation = { id: number; partner: Partner; start_date: string; end_date: string; guests: number; status: string; booking_reference: string | null; partner_response: string };
 type Cancellation = { id: number; reservation_id: number; partner_name: string; reason: string; status: string; decision_note: string; requested_at: string };
 type Notice = { id:number; title:string; message:string; event:string; read_at:string|null; created_at:string };
+type Refund = { id:number; amount:string; currency:string; status:string; provider:string; provider_reference:string|null; provider_status:string; reason:string; reconciled_at:string|null; created_at:string };
+type Payment = { id:number; reservation:number; reservation_reference:string|null; partner_name:string; kind:string; status:string; amount:string; currency:string; provider:string; provider_reference:string|null; failure_reason:string; refunds:Refund[]; created_at:string; captured_at:string|null };
 type Availability = { date: string; available_guests: number; price_per_guest: string | null; currency: string };
 const API = (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env.VITE_API_BASE_URL ?? "";
 
@@ -15,6 +17,7 @@ export default function ReservationWorkspace({ accessToken }: { accessToken: str
   const [items,setItems]=useState<Reservation[]>([]);
   const [cancellations,setCancellations]=useState<Cancellation[]>([]);
   const [notifications,setNotifications]=useState<Notice[]>([]);
+  const [payments,setPayments]=useState<Payment[]>([]);
   const [reasons,setReasons]=useState<Record<number,string>>({});
   const [partnerId,setPartnerId]=useState("");
   const [start,setStart]=useState("");
@@ -26,14 +29,15 @@ export default function ReservationWorkspace({ accessToken }: { accessToken: str
   const [error,setError]=useState("");
   const [notice,setNotice]=useState("");
   async function load(){
-    const [p,r,c,n]=await Promise.all([
+    const [p,r,c,n,pay]=await Promise.all([
       fetch(`${API}/api/v1/partners/?booking_ready=true`),
       fetch(`${API}/api/v1/partners/reservations/`,{headers}),
       fetch(`${API}/api/v1/partners/reservations/cancellations/`,{headers}),
-      fetch(`${API}/api/v1/partners/notifications/`,{headers})
+      fetch(`${API}/api/v1/partners/notifications/`,{headers}),
+      fetch(`${API}/api/v1/partners/payments/`,{headers})
     ]);
-    if(!p.ok||!r.ok||!c.ok||!n.ok)throw new Error("Could not load booking information.");
-    setPartners(await p.json());setItems(await r.json());setCancellations(await c.json());setNotifications(await n.json());
+    if(!p.ok||!r.ok||!c.ok||!n.ok||!pay.ok)throw new Error("Could not load booking and payment information.");
+    setPartners(await p.json());setItems(await r.json());setCancellations(await c.json());setNotifications(await n.json());setPayments(await pay.json());
   }
   useEffect(()=>{let live=true;load().catch(e=>{if(live)setError(e.message);});return()=>{live=false;};},[accessToken]);
   async function check(){setError("");setNotice("");setAvailability([]);if(!partnerId||!start||!end){setError("Choose a partner and both dates first.");return;}const r=await fetch(`${API}/api/v1/partners/availability/?partner_id=${partnerId}&start_date=${start}&end_date=${end}`);const data=await r.json();if(!r.ok){setError(data.detail||"Could not check availability.");return;}setAvailability(data);if(!data.length)setNotice("No published availability was found for this date range.");}
@@ -70,6 +74,14 @@ export default function ReservationWorkspace({ accessToken }: { accessToken: str
     <div className="reservation-history"><h3><ClipboardList size={18}/> Your reservation history</h3>{items.length?items.map(item=>{
       const cancellation=cancellations.find(x=>x.reservation_id===item.id&&["pending","approved"].includes(x.status));
       return <article key={item.id}><div><strong>{item.partner.name}</strong><span className={`reservation-status ${item.status}`}>{item.status}</span></div><p>{item.start_date} to {item.end_date} · {item.guests} guests</p>{item.booking_reference&&<p>Booking reference: <strong>{item.booking_reference}</strong></p>}{item.partner_response&&<p>{item.partner_response}</p>}
+      {payments.filter(payment=>payment.reservation===item.id).length>0&&<div className="availability-list"><strong>Payment history</strong>
+        {payments.filter(payment=>payment.reservation===item.id).map(payment=><div key={payment.id}>
+          <span>{payment.kind.replace("_"," ")} · {payment.currency} {payment.amount} · <strong>{payment.status}</strong></span>
+          <span>Provider: {payment.provider}{payment.captured_at? ` · Paid ${new Date(payment.captured_at).toLocaleString()}`: ` · Created ${new Date(payment.created_at).toLocaleString()}`}</span>
+          {payment.failure_reason&&<span>Payment issue: {payment.failure_reason}</span>}
+          {payment.refunds.map(refund=><span key={refund.id}>Refund #{refund.id}: {refund.currency} {refund.amount} · <strong>{refund.status}</strong>{refund.reconciled_at? ` · Confirmed ${new Date(refund.reconciled_at).toLocaleString()}`: ` · Requested ${new Date(refund.created_at).toLocaleString()}`}{refund.provider_reference? ` · Ref ${refund.provider_reference}`: ""}</span>)}
+        </div>)}
+      </div>}
       {cancellation&&<div className="availability-list"><strong>Cancellation: {cancellation.status.replace("_"," ")}</strong><span>{cancellation.decision_note||"Awaiting partner review or refund completion."}</span></div>}
       {["pending","confirmed"].includes(item.status)&&!cancellation&&<><label>Cancellation reason<textarea rows={2} value={reasons[item.id]||""} onChange={e=>setReasons(v=>({...v,[item.id]:e.target.value}))} placeholder="Explain why you need to cancel (10 characters minimum for confirmed bookings)."/></label><button className="reservation-secondary" onClick={()=>cancel(item.id)}><Ban size={15}/> {item.status==="confirmed"?"Request cancellation":"Withdraw request"}</button></>}
       </article>;
