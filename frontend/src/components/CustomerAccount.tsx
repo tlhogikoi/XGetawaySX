@@ -30,19 +30,20 @@ export default function CustomerAccount() {
 
   useEffect(() => {
     if (!tokens) { setAccount(null); return; }
+    const activeTokens = tokens;
     let active = true;
     async function loadAccount() {
-      let access = tokens.access;
+      let access = activeTokens.access;
       let response = await fetch(`${API}/api/v1/accounts/me/`, { headers: { Authorization: `Bearer ${access}` } });
       if (response.status === 401) {
         const refreshResponse = await fetch(`${API}/api/v1/accounts/token/refresh/`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ refresh: tokens.refresh }),
+          body: JSON.stringify({ refresh: activeTokens.refresh }),
         });
         const refreshed = await refreshResponse.json();
         if (!refreshResponse.ok || !refreshed.access) throw new Error("Your session has expired. Please sign in again.");
         access = refreshed.access as string;
-        const nextRefresh = (refreshed.refresh as string | undefined) ?? tokens.refresh;
+        const nextRefresh = (refreshed.refresh as string | undefined) ?? activeTokens.refresh;
         sessionStorage.setItem("xgs_access", access);
         sessionStorage.setItem("xgs_refresh", nextRefresh);
         if (active) setTokens({ access, refresh: nextRefresh });
