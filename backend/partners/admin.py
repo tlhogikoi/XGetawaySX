@@ -127,3 +127,28 @@ class PaymentProviderEventAdmin(admin.ModelAdmin):
 
     def has_change_permission(self, request, obj=None):
         return False
+
+
+from .models import ReservationCancellationRequest, ReservationNotification
+
+
+@admin.register(ReservationCancellationRequest)
+class ReservationCancellationRequestAdmin(admin.ModelAdmin):
+    list_display = ("id", "reservation", "customer", "status", "requested_at", "decided_by", "completed_at")
+    list_filter = ("status", "requested_at")
+    search_fields = ("reservation__booking_reference", "reservation__partner__name", "customer__email")
+    readonly_fields = ("reservation", "customer", "reason", "status", "decision_note", "decided_by", "requested_at", "decided_at", "completed_at")
+
+
+@admin.register(ReservationNotification)
+class ReservationNotificationAdmin(admin.ModelAdmin):
+    list_display = ("id", "recipient", "reservation", "event", "read_at", "created_at")
+    list_filter = ("event", "read_at", "created_at")
+    search_fields = ("recipient__email", "title", "message")
+    readonly_fields = ("recipient", "reservation", "cancellation_request", "event", "title", "message", "read_at", "created_at")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
