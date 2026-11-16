@@ -360,6 +360,10 @@ class CustomerReservationListCreateView(APIView):
             start_date=data["start_date"], end_date=data["end_date"],
             guests=data["guests"], message=data.get("message", ""),
         )
+        _queue_reservation_lifecycle_emails(
+            item, "reservation_requested", "Reservation request received",
+            "We have received your reservation request. It is awaiting the partner's decision.",
+        )
         return Response(ReservationRequestSerializer(item).data, status=status.HTTP_201_CREATED)
 
 
@@ -405,8 +409,53 @@ class PartnerReservationDecisionView(APIView):
             item.partner_response = serializer.validated_data["partner_response"]
             item.responded_at = timezone.now()
             item.save(update_fields=["status", "booking_reference", "partner_response", "responded_at", "updated_at"])
+            event = "reservation_confirmed" if decision == ReservationRequest.Status.CONFIRMED else "reservation_declined"
+            title = "Reservation confirmed" if decision == ReservationRequest.Status.CONFIRMED else "Reservation request declined"
+            message = serializer.validated_data["partner_response"] or title
+            _queue_reservation_lifecycle_emails(item, event, title, message)
         return Response(ReservationRequestSerializer(item).data)
 
+
+
+def _queue_reservation_lifecycle_emails(reservation, event, title, message, cancellation=None):
+    """Queue idempotent, auditable email copies for the customer and partner owner."""
+    from .reservation_email_notifications import queue_reservation_email
+
+    reference = str(reservation.booking_reference or reservation.pk)
+    detail = (
+        f"Booking reference: {reference}\n"
+        f"Partner: {reservation.partner.name}\n"
+        f"Dates: {reservation.start_date} to {reservation.end_date}\n"
+        f"Guests: {reservation.guests}\n"
+    )
+    if cancellation:
+        detail += (
+            f"Cancellation request: {cancellation.pk}\n"
+            f"Cancellation reason: {cancellation.reason}\n"
+            f"Decision note: {cancellation.decision_note or 'Not supplied'}\n"
+        )
+    body = (
+        f"{message}\n\n{detail}\n"
+        "View your XGetawaySX account for the latest reservation details.\n\n"
+        "XGetawaySX — travel through us"
+    )
+    recipients = (
+        ("customer", reservation.customer.email),
+        ("partner", reservation.partner.owner.email),
+    )
+    for role, email in recipients:
+        if email:
+            suffix = cancellation.pk if cancellation else "reservation"
+            queue_reservation_email(
+                reservation,
+                event=event,
+                event_key=f"reservation:{reservation.pk}:{event}:{suffix}:{role}",
+                recipient_email=email,
+                recipient_role=role,
+                subject=f"XGetawaySX: {title} — {reference}",
+                body=body,
+                cancellation=cancellation,
+            )
 
 
 def _create_reservation_notification(recipient, reservation, event, title, message, cancellation=None):
@@ -462,6 +511,11 @@ def _complete_approved_cancellation(cancellation):
             f"Reservation #{reservation.pk} has been cancelled and its capacity released.",
             item,
         )
+        _queue_reservation_lifecycle_emails(
+            reservation, "cancellation_completed", "Cancellation completed",
+            "The reservation has been cancelled and its reserved capacity released. Any captured payments have been refunded.",
+            item,
+        )
         return item
 
 
@@ -487,6 +541,10 @@ class CustomerReservationCancelView(APIView):
                     "Reservation request withdrawn",
                     f"The customer withdrew reservation request #{item.pk}.",
                 )
+                _queue_reservation_lifecycle_emails(
+                    item, "reservation_withdrawn", "Reservation request withdrawn",
+                    "The customer has withdrawn this unconfirmed reservation request.",
+                )
                 return Response(ReservationRequestSerializer(item).data)
             if item.status != ReservationRequest.Status.CONFIRMED:
                 raise ValidationError("Only pending or confirmed reservations can be cancelled.")
@@ -511,6 +569,11 @@ class CustomerReservationCancelView(APIView):
                 request.user, item, ReservationNotification.Event.CANCELLATION_REQUESTED,
                 "Cancellation request submitted",
                 "Your cancellation request has been sent to the partner for review.",
+                cancellation,
+            )
+            _queue_reservation_lifecycle_emails(
+                item, "cancellation_requested", "Cancellation request received",
+                "A cancellation request has been submitted and is awaiting partner review.",
                 cancellation,
             )
         return Response(ReservationCancellationRequestSerializer(cancellation).data, status=status.HTTP_201_CREATED)
@@ -569,6 +632,11 @@ class ReservationCancellationDecisionView(APIView):
                     "Cancellation request declined",
                     cancellation.decision_note, cancellation,
                 )
+                _queue_reservation_lifecycle_emails(
+                    reservation, "cancellation_declined", "Cancellation request declined",
+                    cancellation.decision_note or "The partner has declined the cancellation request.",
+                    cancellation,
+                )
             else:
                 has_captured = reservation.payments.filter(status=ReservationPayment.Status.CAPTURED).exists()
                 if has_captured:
@@ -576,6 +644,12 @@ class ReservationCancellationDecisionView(APIView):
                         cancellation.customer, reservation, ReservationNotification.Event.CANCELLATION_DECISION,
                         "Cancellation approved — refund in progress",
                         "Your cancellation has been approved. The reservation will be cancelled after all captured payments are refunded.",
+                        cancellation,
+                    )
+                    _queue_reservation_lifecycle_emails(
+                        reservation, "cancellation_approved_refund_pending",
+                        "Cancellation approved — refund in progress",
+                        "The cancellation has been approved. The reservation remains active until all captured payments have been fully refunded.",
                         cancellation,
                     )
                 else:
