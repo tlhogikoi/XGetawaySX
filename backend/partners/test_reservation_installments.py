@@ -71,7 +71,10 @@ class ReservationInstallmentScheduleTests(TestCase):
         _create_reservation_installments(self.reservation, self.quote)
         items = list(self.reservation.installments.all())
         self.assertGreaterEqual(items[0].due_at, before + timedelta(hours=71, minutes=59))
-        self.assertEqual(items[1].due_at.date(), self.reservation.start_date - timedelta(days=14))
+        self.assertEqual(
+            timezone.localtime(items[1].due_at).date(),
+            self.reservation.start_date - timedelta(days=14),
+        )
         self.assertEqual(policy.deposit_due_hours, 72)
 
 
@@ -100,6 +103,13 @@ class ReservationInstallmentScheduleTests(TestCase):
             partner=self.partner, balance_installment_count=3,
             balance_installment_interval_days=7,
         )
+        self.reservation.quoted_total = self.quote.total_amount
+        self.reservation.quoted_deposit = self.quote.deposit_amount
+        self.reservation.quoted_currency = self.quote.currency
+        self.reservation.quoted_at = timezone.now()
+        self.reservation.save(update_fields=[
+            "quoted_total", "quoted_deposit", "quoted_currency", "quoted_at", "updated_at",
+        ])
         _create_reservation_installments(self.reservation, self.quote)
         client = APIClient()
         client.force_authenticate(self.customer)
