@@ -41,7 +41,7 @@ export default function PartnerPaymentScheduleWorkspace({accessToken}:{accessTok
   let active=true;
   fetch(`${API}/api/v1/partners/partner/financial-settings/?partner_id=${selectedPartner}`,{headers})
    .then(r=>r.ok?r.json():Promise.reject(new Error("Could not load partner payment terms.")))
-   .then((data:Record<string,unknown>[])=>{if(active&&data.length){const item=data[0];setPolicy({deposit_type:item.deposit_type as Policy["deposit_type"],deposit_value:String(item.deposit_value),deposit_due_hours:Number(item.deposit_due_hours),balance_due_days_before:Number(item.balance_due_days_before),balance_installment_count:Number(item.balance_installment_count),balance_installment_interval_days:Number(item.balance_installment_interval_days),currency:String(item.currency)});}else if(active)setPolicy({deposit_type:"none",deposit_value:"0",deposit_due_hours:48,balance_due_days_before:7,currency:"ZAR"});})
+   .then((data:Record<string,unknown>[])=>{if(active&&data.length){const item=data[0];setPolicy({deposit_type:item.deposit_type as Policy["deposit_type"],deposit_value:String(item.deposit_value),deposit_due_hours:Number(item.deposit_due_hours),balance_due_days_before:Number(item.balance_due_days_before),balance_installment_count:Number(item.balance_installment_count),balance_installment_interval_days:Number(item.balance_installment_interval_days),currency:String(item.currency)});}else if(active)setPolicy({deposit_type:"none",deposit_value:"0",deposit_due_hours:48,balance_due_days_before:7,balance_installment_count:1,balance_installment_interval_days:7,currency:"ZAR"});})
    .catch(reason=>{if(active)setError(reason instanceof Error?reason.message:"Could not load payment terms.");});
   return()=>{active=false;};
  },[selectedPartner,accessToken]);
