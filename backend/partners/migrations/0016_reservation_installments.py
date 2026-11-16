@@ -27,7 +27,7 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name="reservationinstallment",
-            constraint=models.CheckConstraint(condition=models.Q(("amount__gt", 0)), name="res_installment_amount_positive"),
+            constraint=models.CheckConstraint(condition=models.Q(amount__gt=0), name="res_installment_amount_positive"),
         ),
         migrations.AddIndex(
             model_name="reservationinstallment",
