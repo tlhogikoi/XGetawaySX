@@ -9,7 +9,10 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         queryset = ReservationEmailDelivery.objects.filter(
-            status=ReservationEmailDelivery.Status.FAILED
+            status__in=(
+                ReservationEmailDelivery.Status.PENDING,
+                ReservationEmailDelivery.Status.FAILED,
+            )
         ).order_by("created_at")
         count = 0
         for delivery in queryset.iterator():
