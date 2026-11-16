@@ -4,6 +4,7 @@ import ReservationWorkspace from "./ReservationWorkspace";
 import CustomerPaymentsWorkspace from "./CustomerPaymentsWorkspace";
 import TripPlanner from "./TripPlanner";
 import PartnerQuoteWorkspace from "./PartnerQuoteWorkspace";
+import PartnerPaymentScheduleWorkspace from "./PartnerPaymentScheduleWorkspace";
 import "./customer-account.css";
 
 const API = (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env.VITE_API_BASE_URL ?? "";
@@ -109,6 +110,7 @@ export default function CustomerAccount() {
       </section>
       <TripPlanner accessToken={tokens.access}/>
       <PartnerQuoteWorkspace accessToken={tokens.access}/>
+      <PartnerPaymentScheduleWorkspace accessToken={tokens.access}/>
       <ReservationWorkspace accessToken={tokens.access}/>
       <CustomerPaymentsWorkspace accessToken={tokens.access}/>
       <footer className="account-footer"><a href="/">Back to XGetawaySX</a><span>TRAVEL THROUGH US.</span></footer>
