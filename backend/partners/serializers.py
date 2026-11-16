@@ -347,3 +347,47 @@ class RefundReconciliationSerializer(serializers.Serializer):
         if not value:
             raise serializers.ValidationError("A verified external refund reference is required.")
         return value
+
+
+from .models import ReservationCancellationRequest, ReservationNotification
+
+
+class ReservationCancellationRequestSerializer(serializers.ModelSerializer):
+    reservation_id = serializers.IntegerField(read_only=True)
+    partner_name = serializers.CharField(source="reservation.partner.name", read_only=True)
+    booking_reference = serializers.UUIDField(source="reservation.booking_reference", read_only=True)
+
+    class Meta:
+        model = ReservationCancellationRequest
+        fields = (
+            "id", "reservation_id", "partner_name", "booking_reference",
+            "reason", "status", "decision_note", "requested_at",
+            "decided_at", "completed_at",
+        )
+        read_only_fields = fields
+
+
+class ReservationCancellationCreateSerializer(serializers.Serializer):
+    reason = serializers.CharField(min_length=10, max_length=1000)
+
+
+class ReservationCancellationDecisionSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=(
+        ReservationCancellationRequest.Status.APPROVED,
+        ReservationCancellationRequest.Status.DECLINED,
+    ))
+    decision_note = serializers.CharField(min_length=5, max_length=1000)
+
+
+class ReservationNotificationSerializer(serializers.ModelSerializer):
+    reservation_id = serializers.IntegerField(read_only=True)
+    booking_reference = serializers.UUIDField(source="reservation.booking_reference", read_only=True)
+    partner_name = serializers.CharField(source="reservation.partner.name", read_only=True)
+
+    class Meta:
+        model = ReservationNotification
+        fields = (
+            "id", "reservation_id", "booking_reference", "partner_name",
+            "event", "title", "message", "read_at", "created_at",
+        )
+        read_only_fields = fields
