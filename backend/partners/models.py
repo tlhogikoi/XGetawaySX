@@ -388,6 +388,34 @@ class PartnerFinancialSettings(models.Model):
         return f"Financial settings — {self.partner.name}"
 
 
+class ReservationInstallment(models.Model):
+    """Partner-approved payment milestones for a confirmed reservation."""
+    class Kind(models.TextChoices):
+        DEPOSIT = "deposit", "Deposit"
+        BALANCE = "balance", "Balance"
+
+    reservation = models.ForeignKey(
+        ReservationRequest, on_delete=models.PROTECT, related_name="installments"
+    )
+    sequence = models.PositiveSmallIntegerField()
+    kind = models.CharField(max_length=12, choices=Kind.choices)
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    currency = models.CharField(max_length=3, default="ZAR")
+    due_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("sequence",)
+        constraints = [
+            models.UniqueConstraint(fields=("reservation", "sequence"), name="uniq_res_installment_seq"),
+            models.CheckConstraint(condition=models.Q(amount__gt=0), name="res_installment_amount_positive"),
+        ]
+        indexes = [models.Index(fields=("due_at", "reservation"), name="res_installment_due_idx")]
+
+    def __str__(self):
+        return f"{self.kind} — reservation {self.reservation_id}"
+
+
 class ReservationPayment(models.Model):
     class Kind(models.TextChoices):
         DEPOSIT = "deposit", "Deposit"
