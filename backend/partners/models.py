@@ -456,8 +456,6 @@ class RefundAuditEmail(models.Model):
 
 class CustomerEmailPreference(models.Model):
     """Marketing consent only; essential booking and financial emails are never disabled."""
-    import uuid as _uuid
-
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="email_preferences"
     )
