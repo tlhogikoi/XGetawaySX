@@ -16,7 +16,7 @@ from .views import (
     CustomerEnquiryListCreateView, PartnerEnquiryRespondView,
     PartnerIncomingEnquiryListView, TripPlanDetailView,
     TripPlanItemCreateView, TripPlanItemDetailView, TripPlanListCreateView,
-    CustomerEmailPreferenceView, MarketingUnsubscribeView,
+    CustomerEmailPreferenceView, MarketingUnsubscribeView, CustomerEnquiryConvertView,
 )
 
 urlpatterns = [
@@ -32,6 +32,7 @@ urlpatterns = [
     path("trips/<int:pk>/items/", TripPlanItemCreateView.as_view(), name="trip-plan-item-create"),
     path("trips/<int:pk>/items/<int:item_id>/", TripPlanItemDetailView.as_view(), name="trip-plan-item-detail"),
     path("enquiries/", CustomerEnquiryListCreateView.as_view(), name="customer-enquiry-list-create"),
+    path("enquiries/<int:pk>/convert/", CustomerEnquiryConvertView.as_view(), name="customer-enquiry-convert"),
     path("availability/", PublicPartnerAvailabilityView.as_view(), name="public-partner-availability"),
     path("partner/availability/", PartnerAvailabilityManagementView.as_view(), name="partner-availability-management"),
     path("partner/profiles/", PartnerBookingProfileListView.as_view(), name="partner-booking-profiles"),
