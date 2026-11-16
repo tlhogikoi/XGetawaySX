@@ -28,20 +28,34 @@ export default function CustomerAccount() {
   useEffect(() => {
     if (!tokens) { setAccount(null); return; }
     let active = true;
-    fetch(`${API}/api/v1/accounts/me/`, { headers: { Authorization: `Bearer ${tokens.access}` } })
-      .then(async response => {
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.detail || "Your session has expired. Please sign in again.");
-        return data as Account;
-      })
-      .then(data => { if (active) setAccount(data); })
-      .catch(reason => {
-        if (!active) return;
-        sessionStorage.removeItem("xgs_access");
-        sessionStorage.removeItem("xgs_refresh");
-        setTokens(null);
-        setError(reason instanceof Error ? reason.message : "Could not load your account.");
-      });
+    async function loadAccount() {
+      let access = tokens.access;
+      let response = await fetch(`${API}/api/v1/accounts/me/`, { headers: { Authorization: `Bearer ${access}` } });
+      if (response.status === 401) {
+        const refreshResponse = await fetch(`${API}/api/v1/accounts/token/refresh/`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refresh: tokens.refresh }),
+        });
+        const refreshed = await refreshResponse.json();
+        if (!refreshResponse.ok || !refreshed.access) throw new Error("Your session has expired. Please sign in again.");
+        access = refreshed.access as string;
+        const nextRefresh = (refreshed.refresh as string | undefined) ?? tokens.refresh;
+        sessionStorage.setItem("xgs_access", access);
+        sessionStorage.setItem("xgs_refresh", nextRefresh);
+        if (active) setTokens({ access, refresh: nextRefresh });
+        response = await fetch(`${API}/api/v1/accounts/me/`, { headers: { Authorization: `Bearer ${access}` } });
+      }
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Could not load your account.");
+      if (active) setAccount(data as Account);
+    }
+    loadAccount().catch(reason => {
+      if (!active) return;
+      sessionStorage.removeItem("xgs_access");
+      sessionStorage.removeItem("xgs_refresh");
+      setTokens(null);
+      setError(reason instanceof Error ? reason.message : "Could not load your account.");
+    });
     return () => { active = false; };
   }, [tokens]);
 
