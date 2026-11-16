@@ -756,3 +756,24 @@ Implemented on `feat/application-foundation` (migration `0011_refund_audit_email
 - Email delivery requires valid SMTP settings in environment variables; no production mail provider or credentials are configured in the repository.
 - Cancellation lifecycle notifications remain in-app only. SMS, WhatsApp, push delivery, scheduled reminders and customer self-service refund execution are not included.
 - **Not yet verified:** Django checks/tests, migration application/drift, frontend typecheck/build, CI, provider sandbox tests, merge or deployment.
+
+
+## Development 21 — Transactional Booking & Cancellation Email Notifications
+
+Implemented on `feat/application-foundation` (migration `0012_reservation_email_delivery.py`):
+
+- Added `ReservationEmailDelivery` as an auditable per-recipient delivery record with a unique event key, recipient snapshot, event type, subject/body snapshot, status, attempt count, sent timestamp and error details.
+- Added an idempotent email dispatcher that creates delivery records inside the business transaction and sends only after commit using Django `transaction.on_commit`.
+- Sends lifecycle emails to the customer and partner owner for new reservation requests, confirmed/declined booking decisions, customer withdrawal of unconfirmed requests, cancellation requests, cancellation decisions, and completed cancellations.
+- Includes booking reference (or request ID while awaiting confirmation), partner name, travel dates, guest count, cancellation reason and decision note where applicable.
+- Added read-only Django admin visibility for reservation email delivery audit records.
+- Added `retry_reservation_emails` management command to retry failed deliveries without resending records already accepted by the configured email backend.
+- Added tests for customer/partner delivery, booking-reference content, cancellation request/completion messages, failed delivery retries and duplicate-send protection.
+
+### Development 21 boundaries
+
+- A status of `sent` means the configured Django email backend accepted the message; it does not prove inbox delivery or that the recipient read it.
+- Production email delivery requires valid SMTP settings and a monitored outbound mail service. No production mail credentials or provider have been configured.
+- Failed deliveries are retried by the management command; scheduling that command, exponential backoff, provider webhooks, bounce handling, SMS, WhatsApp and push notifications are not included.
+- Email templates currently use plain text. Branded HTML templates, user notification preferences and localisation are future work.
+- **Not yet verified:** Django checks/tests, migration application/drift, frontend typecheck/build, CI, live email delivery, merge or deployment.
