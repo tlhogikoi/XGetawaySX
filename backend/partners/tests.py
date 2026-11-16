@@ -802,6 +802,26 @@ class RefundReconciliationTests(TestCase):
 
 
 
+    def test_customer_payment_history_includes_refunds_and_is_scoped_to_customer(self):
+        from .models import ReservationRefund
+        self.client.force_authenticate(user=self.admin)
+        refund_response = self.refund("25.00", "refund-history-visible-001")
+        self.assertEqual(refund_response.status_code, 201)
+        self.client.force_authenticate(user=self.customer)
+        response = self.client.get("/api/v1/partners/payments/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        payment = response.data[0]
+        self.assertEqual(payment["id"], self.payment.pk)
+        self.assertEqual(len(payment["refunds"]), 1)
+        self.assertEqual(payment["refunds"][0]["amount"], "25.00")
+        self.assertEqual(payment["refunds"][0]["status"], ReservationRefund.Status.REFUNDED)
+        other = User.objects.create_user(email="other-customer@example.com", password="test-password")
+        self.client.force_authenticate(user=other)
+        other_response = self.client.get("/api/v1/partners/payments/")
+        self.assertEqual(other_response.status_code, 200)
+        self.assertEqual(other_response.data, [])
+
     def test_successful_refund_sends_separate_audit_emails_once(self):
         from django.core import mail
         from django.test import override_settings
