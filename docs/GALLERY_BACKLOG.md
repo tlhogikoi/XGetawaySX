@@ -837,3 +837,24 @@ Implemented on `feat/application-foundation`:
 - Refresh tokens are held in sessionStorage (not HttpOnly cookies); this is a practical first integration, not the preferred final production session architecture. A hardened cookie/BFF approach and CSRF review are still required before public launch.
 - Registration currently creates customer-role accounts only. Partner role assignment remains controlled by the existing partner onboarding/admin process.
 - No automated frontend build, Django checks/tests, migration check, CI run, browser test, deployment or live authentication test has been executed or confirmed by this stage.
+
+
+## Development 25 — Saved Getaway Planner Integration
+
+Implemented on `feat/application-foundation`:
+
+- Mounted the existing authenticated `TripPlanner` inside the customer account dashboard, so saved itineraries are reachable after sign-in.
+- Connected the customer workspace to the existing private trip-plan, itinerary-item, approved-partner discovery and partner-enquiry APIs; no duplicate trip-plan backend or migration was introduced.
+- Added editable private trip notes (up to 5,000 characters) alongside start/end date editing, with a single save action and a character counter.
+- Selecting a different saved plan now loads that plan's own dates and notes rather than carrying the previous plan's unsaved form values into it.
+- New plans start with clean date and notes fields.
+- Clarified that sending a partner enquiry is not a confirmed reservation or an availability guarantee.
+- Added API tests for customer-owned plan creation and editing, private-plan access isolation, approved-partner-only itinerary additions and date-order validation.
+- Added responsive styling for the trip-notes editor and save controls.
+
+### Development 25 boundaries
+
+- Partner enquiries are sent individually to each selected partner. This does not automatically create a reservation, collect a deposit or confirm partner availability.
+- The current planner lists partners that are approved for Gallery publication and enquiries; booking eligibility is still checked separately by the reservation flow.
+- The plan's notes are private to the owning customer through the authenticated trip-plan endpoints; do not place payment-card data, passwords or other secrets in free-text notes.
+- **Not yet verified:** Django checks/tests, frontend typecheck/build, browser interaction, CI, migration validation, provider workflows, merge or deployment.
