@@ -15,3 +15,5 @@
 .email-preference-status,.email-preference-error{font-size:.88rem;margin:12px 0 0!important}
 .email-preference-error{color:#a3342c!important}
 @media(max-width:600px){.email-preferences-panel{padding:17px}.email-preference-toggle{align-items:flex-start}}
+
+.reservation-quote-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}.reservation-quote-actions button{cursor:pointer}
