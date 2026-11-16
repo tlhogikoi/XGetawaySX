@@ -858,3 +858,25 @@ Implemented on `feat/application-foundation`:
 - The current planner lists partners that are approved for Gallery publication and enquiries; booking eligibility is still checked separately by the reservation flow.
 - The plan's notes are private to the owning customer through the authenticated trip-plan endpoints; do not place payment-card data, passwords or other secrets in free-text notes.
 - **Not yet verified:** Django checks/tests, frontend typecheck/build, browser interaction, CI, migration validation, provider workflows, merge or deployment.
+
+
+## Development 26 — Accepted Enquiry-to-Reservation Workflow
+
+Implemented on `feat/application-foundation`:
+
+- Added a one-to-one link from a customer `PartnerEnquiry` to the resulting `ReservationRequest`, with migration `0014_enquiry_reservation_link.py`.
+- Added authenticated `POST /api/v1/partners/enquiries/{id}/convert/` for the enquiry owner.
+- Conversion is allowed only after the partner has explicitly accepted the enquiry and the enquiry contains both requested travel dates.
+- Revalidates the partner's current booking approval, date range, published daily availability and requested guest capacity through the existing reservation-request serializer at conversion time.
+- Creates a separate reservation request in `pending` state; it does not confirm a booking, capture payment or bypass the partner's normal reservation decision.
+- Uses a row lock on the enquiry and a one-to-one database constraint to prevent duplicate conversions. Repeated requests return the already-created reservation instead of creating another.
+- Keeps the original enquiry and its partner response as the negotiation record, while exposing the linked reservation request ID in the enquiry API.
+- Updated the customer Trip Planner to show partner responses, requested dates, guest count and a conversion action for accepted enquiries. The customer can see the resulting reservation request ID and its pending-confirmation state.
+- Added API tests for successful conversion, idempotency, rejection of non-accepted enquiries, revalidation when availability is withdrawn, and customer ownership isolation.
+
+### Development 26 boundaries
+
+- A partner's acceptance of an enquiry is not itself a confirmed reservation or final price guarantee. The resulting reservation request still requires the partner's normal confirmation.
+- Conversion checks the latest published availability and guest capacity, but this is not a capacity hold. Capacity is managed by the existing reservation confirmation workflow; the partner must confirm promptly and the reservation decision path remains authoritative.
+- No quote line items, binding price acceptance, automatic booking confirmation, deposit collection or payment initiation is introduced by this stage.
+- No automated Django checks/tests, migration validation, frontend typecheck/build, browser test, CI run, provider workflow, merge or deployment has been executed or confirmed.
