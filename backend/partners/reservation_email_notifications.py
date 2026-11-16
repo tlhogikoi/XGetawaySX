@@ -1,6 +1,7 @@
 from django.conf import settings
-from django.core.mail import send_mail
+from django.core.mail import EmailMultiAlternatives
 from django.db import transaction
+from django.template.loader import render_to_string
 from django.utils import timezone
 
 from .models import ReservationEmailDelivery
@@ -33,19 +34,27 @@ def queue_reservation_email(
 
 
 def send_reservation_email(delivery_id):
-    """Attempt one delivery; successful records are immutable and never resent by retries."""
+    """Attempt one branded HTML + plain-text delivery; successful records are never resent."""
     delivery = ReservationEmailDelivery.objects.get(pk=delivery_id)
     if delivery.status == ReservationEmailDelivery.Status.SENT:
         return delivery
     delivery.attempts += 1
     try:
-        sent = send_mail(
+        context = {
+            "subject": delivery.subject,
+            "body": delivery.body,
+            "event": delivery.event.replace("_", " ").title(),
+            "recipient_role": delivery.recipient_role,
+        }
+        html_body = render_to_string("partners/emails/booking_event.html", context)
+        message = EmailMultiAlternatives(
             delivery.subject,
             delivery.body,
             getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@xgetawaysx.com"),
             [delivery.recipient_email],
-            fail_silently=False,
         )
+        message.attach_alternative(html_body, "text/html")
+        sent = message.send(fail_silently=False)
         if sent != 1:
             raise RuntimeError("Email backend did not accept the message.")
         delivery.status = ReservationEmailDelivery.Status.SENT
