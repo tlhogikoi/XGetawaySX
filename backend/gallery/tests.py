@@ -79,6 +79,8 @@ class GalleryPublicationTests(TestCase):
     def test_website_permission_is_required_before_editorial_media_approval(self):
         self.permission.permitted_channels = ["social_media"]
         self.permission.save(update_fields=("permitted_channels",))
+        self.media.status = GalleryMedia.Status.OWNER_REVIEW
+        self.media.save(update_fields=("status", "updated_at"))
         self.client.force_authenticate(self.editor)
         response = self.client.post(
             f"/api/v1/gallery/media/{self.media.id}/editorial-approve/"
