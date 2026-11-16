@@ -61,6 +61,26 @@ class ReservationInstallmentScheduleTests(TestCase):
         self.assertEqual(items[1].due_at.date(), self.reservation.start_date - timedelta(days=14))
         self.assertEqual(policy.deposit_due_hours, 72)
 
+
+    def test_partner_can_split_balance_into_multiple_instalments(self):
+        PartnerFinancialSettings.objects.create(
+            partner=self.partner, balance_installment_count=3,
+            balance_installment_interval_days=7,
+        )
+        _create_reservation_installments(self.reservation, self.quote)
+        items = list(self.reservation.installments.all())
+        self.assertEqual(len(items), 4)
+        self.assertEqual(items[0].kind, "deposit")
+        self.assertEqual([item.sequence for item in items], [1, 2, 3, 4])
+        self.assertEqual(
+            sum((item.amount for item in items[1:]), Decimal("0.00")),
+            Decimal("7500.00"),
+        )
+        self.assertEqual(
+            sum((item.amount for item in items), Decimal("0.00")),
+            Decimal("10000.00"),
+        )
+
     def test_schedule_creation_is_idempotent(self):
         _create_reservation_installments(self.reservation, self.quote)
         _create_reservation_installments(self.reservation, self.quote)
