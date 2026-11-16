@@ -1,3 +1,4 @@
+from datetime import timedelta
 from decimal import Decimal
 
 from django.core.management.base import BaseCommand
@@ -48,7 +49,7 @@ class Command(BaseCommand):
             if installment.due_at <= now:
                 stage = "overdue"
                 overdue += 1
-            elif installment.due_at <= now + timezone.timedelta(hours=window):
+            elif installment.due_at <= now + timedelta(hours=window):
                 stage = "due_soon"
                 due_soon += 1
             else:
