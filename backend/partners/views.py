@@ -912,17 +912,23 @@ def _create_reservation_installments(reservation, accepted_quote):
             deposit = (total * Decimal("0.30")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     deposit = min(total, deposit)
     deposit_due = timezone.now() + timedelta(hours=policy.deposit_due_hours)
-    ReservationInstallment.objects.create(
-        reservation=reservation, sequence=1, kind=ReservationInstallment.Kind.DEPOSIT,
-        amount=deposit, currency=currency, due_at=deposit_due,
-    )
     balance = total - deposit
+    next_sequence = 1
+    if deposit > 0:
+        ReservationInstallment.objects.create(
+            reservation=reservation, sequence=next_sequence,
+            kind=ReservationInstallment.Kind.DEPOSIT,
+            amount=deposit, currency=currency, due_at=deposit_due,
+        )
+        next_sequence += 1
     if balance > 0:
-        count = policy.balance_installment_count
+        # Every persisted instalment must be at least one cent (database constraint).
+        available_cents = int(balance * 100)
+        count = min(policy.balance_installment_count, available_cents)
         base_amount = (balance / Decimal(count)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         allocated = Decimal("0.00")
         for index in range(count):
-            amount = balance - allocated if index == count - 1 else base_amount
+            amount = balance - allocated if index == count - 1 else min(base_amount, balance - allocated)
             allocated += amount
             days_before = policy.balance_due_days_before + (
                 (count - index - 1) * policy.balance_installment_interval_days
@@ -931,7 +937,7 @@ def _create_reservation_installments(reservation, accepted_quote):
                 reservation.start_date - timedelta(days=days_before), datetime.min.time()
             ))
             ReservationInstallment.objects.create(
-                reservation=reservation, sequence=index + 2,
+                reservation=reservation, sequence=next_sequence + index,
                 kind=ReservationInstallment.Kind.BALANCE,
                 amount=amount, currency=currency, due_at=max(due_at, deposit_due),
             )
