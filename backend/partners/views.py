@@ -1035,11 +1035,39 @@ class ReservationPaymentListCreateView(APIView):
                 raise ValidationError("This reservation has already been paid in full.")
             if pending > 0:
                 raise ValidationError("A payment is already awaiting reconciliation for this reservation.")
-            deposit_due = max(Decimal("0.00"), deposit - paid)
-            if deposit_due > 0:
-                amount, kind = min(deposit_due, remaining), ReservationPayment.Kind.DEPOSIT
+            from .models import ReservationInstallment, ReservationRefund
+            scheduled = list(reservation.installments.order_by("sequence"))
+            if scheduled:
+                captured_total = reservation.payments.filter(
+                    status=ReservationPayment.Status.CAPTURED
+                ).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+                refunded_total = ReservationRefund.objects.filter(
+                    payment__reservation=reservation, status=ReservationRefund.Status.REFUNDED
+                ).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+                paid_for_schedule = max(Decimal("0.00"), captured_total - refunded_total)
+                next_installment = None
+                next_amount = Decimal("0.00")
+                for installment in scheduled:
+                    allocated = min(paid_for_schedule, installment.amount)
+                    paid_for_schedule -= allocated
+                    outstanding = installment.amount - allocated
+                    if outstanding > 0:
+                        next_installment, next_amount = installment, outstanding
+                        break
+                if next_installment is None:
+                    raise ValidationError("All scheduled instalments have been paid.")
+                amount = min(next_amount, remaining)
+                kind = (
+                    ReservationPayment.Kind.DEPOSIT
+                    if next_installment.kind == ReservationInstallment.Kind.DEPOSIT
+                    else ReservationPayment.Kind.BALANCE
+                )
             else:
-                amount, kind = remaining, ReservationPayment.Kind.BALANCE
+                deposit_due = max(Decimal("0.00"), deposit - paid)
+                if deposit_due > 0:
+                    amount, kind = min(deposit_due, remaining), ReservationPayment.Kind.DEPOSIT
+                else:
+                    amount, kind = remaining, ReservationPayment.Kind.BALANCE
             payment = ReservationPayment.objects.create(
                 reservation=reservation, customer=request.user, partner=reservation.partner,
                 kind=kind, amount=amount, currency=currency, idempotency_key=key,
