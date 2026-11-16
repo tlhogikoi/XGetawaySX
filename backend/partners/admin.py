@@ -152,3 +152,24 @@ class ReservationNotificationAdmin(admin.ModelAdmin):
 
     def has_change_permission(self, request, obj=None):
         return False
+
+
+from .models import RefundAuditEmail
+
+
+@admin.register(RefundAuditEmail)
+class RefundAuditEmailAdmin(admin.ModelAdmin):
+    list_display = ("refund", "customer_email", "partner_email", "status", "attempts", "customer_sent_at", "partner_sent_at")
+    list_filter = ("status", "created_at")
+    search_fields = ("customer_email", "partner_email", "refund__provider_reference", "refund__payment__reservation__booking_reference")
+    readonly_fields = (
+        "refund", "customer_email", "partner_email", "status",
+        "customer_sent_at", "partner_sent_at", "attempts", "last_error",
+        "created_at", "updated_at",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
