@@ -1138,6 +1138,10 @@ class DualGatewayIntegrationTests(TestCase):
         from django.test import override_settings
         from .gateways import _payfast_signature
 
+        # The shared fixture defaults to Yoco; PayFast ITNs only resolve
+        # payments explicitly associated with the PayFast provider.
+        self.payment.provider = "payfast"
+        self.payment.save(update_fields=["provider"])
         payload = {
             "m_payment_id": str(self.payment.pk),
             "pf_payment_id": transaction_id,
