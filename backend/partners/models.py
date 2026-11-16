@@ -454,6 +454,40 @@ class RefundAuditEmail(models.Model):
         return f"Refund audit email — refund {self.refund_id}"
 
 
+class ReservationEmailDelivery(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        SENT = "sent", "Accepted by email backend"
+        FAILED = "failed", "Failed"
+
+    reservation = models.ForeignKey(
+        ReservationRequest, on_delete=models.PROTECT, related_name="email_deliveries"
+    )
+    cancellation_request = models.ForeignKey(
+        ReservationCancellationRequest, on_delete=models.PROTECT, null=True, blank=True,
+        related_name="email_deliveries",
+    )
+    event = models.CharField(max_length=40)
+    event_key = models.CharField(max_length=180, unique=True)
+    recipient_email = models.EmailField()
+    recipient_role = models.CharField(max_length=20)
+    subject = models.CharField(max_length=200)
+    body = models.TextField()
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.PENDING)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    attempts = models.PositiveIntegerField(default=0)
+    last_error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=("status", "created_at"), name="res_email_status_idx")]
+
+    def __str__(self):
+        return f"{self.event} email to {self.recipient_email}"
+
+
 class PartnerCommissionAdjustment(models.Model):
     """Immutable commission reversal snapshot associated with a reconciled refund."""
     refund = models.OneToOneField(ReservationRefund, on_delete=models.PROTECT, related_name="commission_adjustment")
