@@ -1132,6 +1132,32 @@ class DualGatewayIntegrationTests(TestCase):
         self.assertEqual(PaymentProviderEvent.objects.filter(provider="yoco").count(), 1)
         self.assertEqual(PartnerCommissionLedger.objects.filter(payment=self.payment).count(), 1)
 
+    def payfast_webhook(self, payment_status="COMPLETE", amount="50.00", transaction_id="pf_txn_shared"):
+        from unittest.mock import patch
+        from urllib.parse import urlencode
+        from django.test import override_settings
+        from .gateways import _payfast_signature
+
+        payload = {
+            "m_payment_id": str(self.payment.pk),
+            "pf_payment_id": transaction_id,
+            "payment_status": payment_status,
+            "amount_gross": amount,
+            "merchant_id": "10000100",
+        }
+        payload["signature"] = _payfast_signature(payload)
+        raw = urlencode(payload).encode()
+        self.client.force_authenticate(user=None)
+        with override_settings(PAYFAST_MERCHANT_ID="10000100", PAYFAST_PASSPHRASE=""):
+            with patch("partners.views.verify_payfast_source_ip", return_value=True), patch(
+                "partners.views.validate_payfast_itn", return_value=True
+            ):
+                return self.client.generic(
+                    "POST", "/api/v1/partners/webhooks/payfast/", raw,
+                    content_type="application/x-www-form-urlencoded",
+                    REMOTE_ADDR="127.0.0.1",
+                )
+
     def test_payfast_itn_requires_valid_signature_source_and_server_validation(self):
         from unittest.mock import patch
         from urllib.parse import urlencode
@@ -1164,6 +1190,39 @@ class DualGatewayIntegrationTests(TestCase):
         self.assertEqual(self.payment.status, ReservationPayment.Status.CAPTURED)
         self.assertEqual(self.payment.provider_reference, "pf_txn_12345")
         self.assertEqual(PartnerCommissionLedger.objects.get(payment=self.payment).commission_amount, Decimal("5.00"))
+
+    def test_payfast_amount_mismatch_is_rejected_without_payment_or_ledger_change(self):
+        from .models import PaymentProviderEvent, PartnerCommissionLedger
+        response = self.payfast_webhook(amount="49.99", transaction_id="pf_wrong_amount")
+        self.assertEqual(response.status_code, 400)
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, "pending")
+        self.assertFalse(PaymentProviderEvent.objects.filter(provider="payfast").exists())
+        self.assertFalse(PartnerCommissionLedger.objects.filter(payment=self.payment).exists())
+
+    def test_payfast_cancelled_itn_marks_payment_failed_without_commission(self):
+        from .models import PaymentProviderEvent, PartnerCommissionLedger
+        response = self.payfast_webhook(
+            payment_status="CANCELLED", transaction_id="pf_cancelled_001"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, "failed")
+        self.assertIn("Payfast reported payment failure.", self.payment.failure_reason)
+        self.assertTrue(PaymentProviderEvent.objects.filter(provider="payfast").exists())
+        self.assertFalse(PartnerCommissionLedger.objects.filter(payment=self.payment).exists())
+
+    def test_payfast_duplicate_complete_itn_is_idempotent(self):
+        from .models import PaymentProviderEvent, PartnerCommissionLedger
+        first = self.payfast_webhook(transaction_id="pf_duplicate_001")
+        second = self.payfast_webhook(transaction_id="pf_duplicate_001")
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertTrue(second.data["duplicate"])
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, "captured")
+        self.assertEqual(PaymentProviderEvent.objects.filter(provider="payfast").count(), 1)
+        self.assertEqual(PartnerCommissionLedger.objects.filter(payment=self.payment).count(), 1)
 
     def test_payfast_checkout_returns_signed_sandbox_form(self):
         from django.test import override_settings
