@@ -6,7 +6,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from accounts.models import User
-from .models import Partner, ReservationRequest, ReservationQuote, ReservationInstallment
+from .models import Partner, ReservationRequest, ReservationQuote, ReservationInstallment, PartnerFinancialSettings
 from .views import _create_reservation_installments
 
 
@@ -48,6 +48,18 @@ class ReservationInstallmentScheduleTests(TestCase):
         items = list(self.reservation.installments.all())
         self.assertEqual(items[0].amount, Decimal("3000.00"))
         self.assertEqual(items[1].amount, Decimal("7000.00"))
+
+
+    def test_partner_can_configure_deposit_and_balance_deadlines(self):
+        policy = PartnerFinancialSettings.objects.create(
+            partner=self.partner, deposit_due_hours=72, balance_due_days_before=14
+        )
+        before = timezone.now()
+        _create_reservation_installments(self.reservation, self.quote)
+        items = list(self.reservation.installments.all())
+        self.assertGreaterEqual(items[0].due_at, before + timedelta(hours=71, minutes=59))
+        self.assertEqual(items[1].due_at.date(), self.reservation.start_date - timedelta(days=14))
+        self.assertEqual(policy.deposit_due_hours, 72)
 
     def test_schedule_creation_is_idempotent(self):
         _create_reservation_installments(self.reservation, self.quote)
