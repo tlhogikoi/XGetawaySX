@@ -950,3 +950,12 @@ Implemented on `feat/application-foundation`:
 - Added tests for configurable multi-stage splits and checkout selecting the next scheduled amount.
 
 **Reminder operations:** run `python manage.py send_reservation_payment_reminders --dry-run` to preview, then schedule `python manage.py send_reservation_payment_reminders` periodically (e.g. hourly). The command sends due-soon and overdue reminders to the customer and partner, is idempotent per instalment/stage/recipient, and never cancels a reservation or marks a payment as received.
+
+### Development 28 validation hardening follow-up
+
+- A zero-percent partner deposit policy now creates a balance-only schedule instead of attempting to persist a zero-value deposit.
+- Very small balances reduce the generated balance-instalment count to the number of available cents, preventing zero-value instalments and satisfying the positive-amount database constraint.
+- Payment reminder idempotency is enforced independently per recipient by the email-delivery queue. A successful customer email no longer suppresses a retry for a partner email that previously failed.
+- Added regression tests for zero-percent deposit schedules and minimum-cent balance schedules.
+- These changes are committed, but the tests have not yet been executed by a runner.
+
