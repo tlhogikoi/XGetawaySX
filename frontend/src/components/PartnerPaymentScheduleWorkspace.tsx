@@ -6,13 +6,13 @@ type Reservation={id:number;partner:{name:string};booking_reference:string|null;
 type Profile={id:number;name:string};
 type Installment={id:number;sequence:number;kind:string;amount:string;paid_amount:string;outstanding_amount:string;currency:string;due_at:string;status:"paid"|"overdue"|"upcoming"};
 type Schedule={reservation_id:number;booking_reference:string;reservation_status:string;currency:string|null;total_amount:string;outstanding_amount:string;installments:Installment[]};
-type Policy={deposit_type:"none"|"percentage"|"fixed";deposit_value:string;deposit_due_hours:number;balance_due_days_before:number;currency:string};
+type Policy={deposit_type:"none"|"percentage"|"fixed";deposit_value:string;deposit_due_hours:number;balance_due_days_before:number;balance_installment_count:number;balance_installment_interval_days:number;currency:string};
 
 export default function PartnerPaymentScheduleWorkspace({accessToken}:{accessToken:string}){
  const [schedules,setSchedules]=useState<Schedule[]>([]);
  const [profiles,setProfiles]=useState<Profile[]>([]);
  const [selectedPartner,setSelectedPartner]=useState("");
- const [policy,setPolicy]=useState<Policy>({deposit_type:"none",deposit_value:"0",deposit_due_hours:48,balance_due_days_before:7,currency:"ZAR"});
+ const [policy,setPolicy]=useState<Policy>({deposit_type:"none",deposit_value:"0",deposit_due_hours:48,balance_due_days_before:7,balance_installment_count:1,balance_installment_interval_days:7,currency:"ZAR"});
  const [error,setError]=useState("");
  const [notice,setNotice]=useState("");
  const [saving,setSaving]=useState(false);
@@ -41,7 +41,7 @@ export default function PartnerPaymentScheduleWorkspace({accessToken}:{accessTok
   let active=true;
   fetch(`${API}/api/v1/partners/partner/financial-settings/?partner_id=${selectedPartner}`,{headers})
    .then(r=>r.ok?r.json():Promise.reject(new Error("Could not load partner payment terms.")))
-   .then((data:Record<string,unknown>[])=>{if(active&&data.length){const item=data[0];setPolicy({deposit_type:item.deposit_type as Policy["deposit_type"],deposit_value:String(item.deposit_value),deposit_due_hours:Number(item.deposit_due_hours),balance_due_days_before:Number(item.balance_due_days_before),currency:String(item.currency)});}else if(active)setPolicy({deposit_type:"none",deposit_value:"0",deposit_due_hours:48,balance_due_days_before:7,currency:"ZAR"});})
+   .then((data:Record<string,unknown>[])=>{if(active&&data.length){const item=data[0];setPolicy({deposit_type:item.deposit_type as Policy["deposit_type"],deposit_value:String(item.deposit_value),deposit_due_hours:Number(item.deposit_due_hours),balance_due_days_before:Number(item.balance_due_days_before),balance_installment_count:Number(item.balance_installment_count),balance_installment_interval_days:Number(item.balance_installment_interval_days),currency:String(item.currency)});}else if(active)setPolicy({deposit_type:"none",deposit_value:"0",deposit_due_hours:48,balance_due_days_before:7,currency:"ZAR"});})
    .catch(reason=>{if(active)setError(reason instanceof Error?reason.message:"Could not load payment terms.");});
   return()=>{active=false;};
  },[selectedPartner,accessToken]);
@@ -55,7 +55,7 @@ export default function PartnerPaymentScheduleWorkspace({accessToken}:{accessTok
    });
    const data=await response.json();
    if(!response.ok)throw new Error(data.detail||JSON.stringify(data));
-   setPolicy({deposit_type:data.deposit_type,deposit_value:String(data.deposit_value),deposit_due_hours:data.deposit_due_hours,balance_due_days_before:data.balance_due_days_before,currency:data.currency});
+   setPolicy({deposit_type:data.deposit_type,deposit_value:String(data.deposit_value),deposit_due_hours:data.deposit_due_hours,balance_due_days_before:data.balance_due_days_before,balance_installment_count:data.balance_installment_count,balance_installment_interval_days:data.balance_installment_interval_days,currency:data.currency});
    setNotice("Payment terms saved for this partner profile.");
   }catch(reason){setError(reason instanceof Error?reason.message:"Could not save payment terms.");}
   finally{setSaving(false);}
@@ -70,6 +70,8 @@ export default function PartnerPaymentScheduleWorkspace({accessToken}:{accessTok
     {policy.deposit_type!=="none"&&<label>{policy.deposit_type==="percentage"?"Deposit percentage":"Deposit amount"}<input type="number" min="0" step="0.01" value={policy.deposit_value} onChange={e=>setPolicy(p=>({...p,deposit_value:e.target.value}))}/></label>}
     <label>Deposit due (hours after confirmation)<input type="number" min="1" max="720" value={policy.deposit_due_hours} onChange={e=>setPolicy(p=>({...p,deposit_due_hours:Number(e.target.value)}))}/></label>
     <label>Balance due (days before travel)<input type="number" min="0" max="365" value={policy.balance_due_days_before} onChange={e=>setPolicy(p=>({...p,balance_due_days_before:Number(e.target.value)}))}/></label>
+    <label>Number of balance instalments<input type="number" min="1" max="6" value={policy.balance_installment_count} onChange={e=>setPolicy(p=>({...p,balance_installment_count:Number(e.target.value)}))}/></label>
+    <label>Days between balance instalments<input type="number" min="1" max="90" value={policy.balance_installment_interval_days} onChange={e=>setPolicy(p=>({...p,balance_installment_interval_days:Number(e.target.value)}))}/></label>
     <button disabled={saving} onClick={savePolicy}>{saving?"Saving…":"Save payment terms"}</button>
    </>:<p>Approved booking partner profiles will appear here when linked to your account.</p>}
    {notice&&<p className="finance-feedback" role="status">{notice}</p>}
