@@ -539,7 +539,9 @@ class CustomerReservationQuoteDecisionView(APIView):
             quote.save(update_fields=["status", "responded_at"])
             if decision == ReservationQuote.Status.ACCEPTED:
                 reservation.quoted_total = quote.total_amount
-                reservation.quoted_deposit = quote.deposit_amount
+                reservation.quoted_deposit = quote.deposit_amount or (
+                    quote.total_amount * Decimal("0.30")
+                ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
                 reservation.quoted_currency = quote.currency
                 reservation.quoted_at = timezone.now()
                 reservation.save(update_fields=[
@@ -924,6 +926,8 @@ def _reservation_financial_totals(reservation):
         total = reservation.quoted_total
         currency = reservation.quoted_currency
         deposit = reservation.quoted_deposit or Decimal("0.00")
+        if deposit <= 0:
+            deposit = (total * Decimal("0.30")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     else:
         dates = [
             reservation.start_date + timedelta(days=offset)
