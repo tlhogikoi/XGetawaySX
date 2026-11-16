@@ -427,6 +427,33 @@ class ReservationRefund(models.Model):
         return f"Refund {self.pk} — payment {self.payment_id}"
 
 
+class RefundAuditEmail(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        SENT = "sent", "Sent to all recipients"
+        PARTIAL = "partial", "Partially sent"
+        FAILED = "failed", "Failed"
+
+    refund = models.OneToOneField(
+        ReservationRefund, on_delete=models.PROTECT, related_name="audit_email"
+    )
+    customer_email = models.EmailField(blank=True)
+    partner_email = models.EmailField(blank=True)
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.PENDING)
+    customer_sent_at = models.DateTimeField(null=True, blank=True)
+    partner_sent_at = models.DateTimeField(null=True, blank=True)
+    attempts = models.PositiveIntegerField(default=0)
+    last_error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"Refund audit email — refund {self.refund_id}"
+
+
 class PartnerCommissionAdjustment(models.Model):
     """Immutable commission reversal snapshot associated with a reconciled refund."""
     refund = models.OneToOneField(ReservationRefund, on_delete=models.PROTECT, related_name="commission_adjustment")
