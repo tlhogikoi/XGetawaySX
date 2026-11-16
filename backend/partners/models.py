@@ -1,4 +1,4 @@
-from django.conf import settings
+import uuid\n\nfrom django.conf import settings
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
 from django.utils.text import slugify
@@ -462,7 +462,7 @@ class CustomerEmailPreference(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="email_preferences"
     )
     marketing_opt_in = models.BooleanField(default=False)
-    unsubscribe_token = models.UUIDField(default=_uuid.uuid4, unique=True, editable=False)
+    unsubscribe_token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
