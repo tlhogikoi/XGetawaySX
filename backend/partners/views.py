@@ -901,11 +901,16 @@ def _create_reservation_installments(reservation, accepted_quote):
     if reservation.installments.exists():
         return
     total, currency = accepted_quote.total_amount, accepted_quote.currency
+    policy, _created = PartnerFinancialSettings.objects.get_or_create(partner=reservation.partner)
     deposit = accepted_quote.deposit_amount
     if deposit <= 0:
-        deposit = (total * Decimal("0.30")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        if policy.deposit_type == PartnerFinancialSettings.DepositType.PERCENTAGE:
+            deposit = (total * policy.deposit_value / Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        elif policy.deposit_type == PartnerFinancialSettings.DepositType.FIXED:
+            deposit = min(total, policy.deposit_value)
+        else:
+            deposit = (total * Decimal("0.30")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     deposit = min(total, deposit)
-    policy, _created = PartnerFinancialSettings.objects.get_or_create(partner=reservation.partner)
     deposit_due = timezone.now() + timedelta(hours=policy.deposit_due_hours)
     ReservationInstallment.objects.create(
         reservation=reservation, sequence=1, kind=ReservationInstallment.Kind.DEPOSIT,
