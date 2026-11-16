@@ -1,0 +1,69 @@
+from datetime import timedelta
+from decimal import Decimal
+
+from django.test import TestCase
+from django.utils import timezone
+from rest_framework.test import APIClient
+
+from accounts.models import User
+from .models import Partner, ReservationRequest, ReservationQuote, ReservationInstallment
+from .views import _create_reservation_installments
+
+
+class ReservationInstallmentScheduleTests(TestCase):
+    def setUp(self):
+        self.customer = User.objects.create_user(email="traveller@example.com", password="test-password")
+        self.partner_owner = User.objects.create_user(email="host@example.com", password="test-password")
+        self.other = User.objects.create_user(email="other@example.com", password="test-password")
+        self.partner = Partner.objects.create(
+            owner=self.partner_owner, name="Coastal Lodge",
+            category=Partner.Category.ACCOMMODATION,
+            booking_status=Partner.ApprovalStatus.APPROVED,
+        )
+        self.reservation = ReservationRequest.objects.create(
+            customer=self.customer, partner=self.partner,
+            start_date=timezone.localdate() + timedelta(days=30),
+            end_date=timezone.localdate() + timedelta(days=33), guests=2,
+            status=ReservationRequest.Status.CONFIRMED,
+        )
+        self.quote = ReservationQuote.objects.create(
+            reservation=self.reservation, version=1,
+            status=ReservationQuote.Status.ACCEPTED, currency="ZAR",
+            total_amount=Decimal("10000.00"), deposit_amount=Decimal("2500.00"),
+            expires_at=timezone.now() + timedelta(days=1), created_by=self.partner_owner,
+            responded_at=timezone.now(),
+        )
+
+    def test_accepted_partner_deposit_is_used_and_balance_is_scheduled(self):
+        _create_reservation_installments(self.reservation, self.quote)
+        items = list(self.reservation.installments.all())
+        self.assertEqual([item.kind for item in items], ["deposit", "balance"])
+        self.assertEqual([item.amount for item in items], [Decimal("2500.00"), Decimal("7500.00")])
+        self.assertEqual(sum((item.amount for item in items), Decimal("0.00")), Decimal("10000.00"))
+
+    def test_thirty_percent_default_when_quote_has_no_deposit(self):
+        self.quote.deposit_amount = Decimal("0.00")
+        self.quote.save(update_fields=["deposit_amount"])
+        _create_reservation_installments(self.reservation, self.quote)
+        items = list(self.reservation.installments.all())
+        self.assertEqual(items[0].amount, Decimal("3000.00"))
+        self.assertEqual(items[1].amount, Decimal("7000.00"))
+
+    def test_schedule_creation_is_idempotent(self):
+        _create_reservation_installments(self.reservation, self.quote)
+        _create_reservation_installments(self.reservation, self.quote)
+        self.assertEqual(self.reservation.installments.count(), 2)
+
+    def test_schedule_visible_only_to_customer_or_partner_owner(self):
+        _create_reservation_installments(self.reservation, self.quote)
+        client = APIClient()
+        client.force_authenticate(self.other)
+        response = client.get(f"/api/v1/partners/reservations/{self.reservation.pk}/payment-schedule/")
+        self.assertEqual(response.status_code, 404)
+        client.force_authenticate(self.customer)
+        response = client.get(f"/api/v1/partners/reservations/{self.reservation.pk}/payment-schedule/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data["installments"]), 2)
+        client.force_authenticate(self.partner_owner)
+        response = client.get(f"/api/v1/partners/reservations/{self.reservation.pk}/payment-schedule/")
+        self.assertEqual(response.status_code, 200)
