@@ -767,7 +767,7 @@ Implemented on `feat/application-foundation` (migration `0012_reservation_email_
 - Sends lifecycle emails to the customer and partner owner for new reservation requests, confirmed/declined booking decisions, customer withdrawal of unconfirmed requests, cancellation requests, cancellation decisions, and completed cancellations.
 - Includes booking reference (or request ID while awaiting confirmation), partner name, travel dates, guest count, cancellation reason and decision note where applicable.
 - Added read-only Django admin visibility for reservation email delivery audit records.
-- Added `retry_reservation_emails` management command to retry failed deliveries without resending records already accepted by the configured email backend.
+- Added `retry_reservation_emails` management command to retry pending (for interrupted post-commit dispatch) and failed deliveries without resending records already accepted by the configured email backend.
 - Added tests for customer/partner delivery, booking-reference content, cancellation request/completion messages, failed delivery retries and duplicate-send protection.
 
 ### Development 21 boundaries
