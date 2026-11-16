@@ -447,6 +447,110 @@ class PartnerReservationInboxView(APIView):
         return Response(ReservationRequestSerializer(items, many=True).data)
 
 
+class PartnerReservationQuoteCreateView(APIView):
+    """Partner issues a versioned itemised quote for a pending reservation request."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from .models import ReservationQuote, ReservationQuoteItem, ReservationRequest
+        from .serializers import ReservationQuoteCreateSerializer, ReservationQuoteSerializer
+
+        serializer = ReservationQuoteCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        with transaction.atomic():
+            try:
+                reservation = ReservationRequest.objects.select_for_update().select_related(
+                    "partner", "customer"
+                ).get(pk=pk, partner__owner=request.user)
+            except ReservationRequest.DoesNotExist:
+                from rest_framework.exceptions import NotFound
+                raise NotFound("Reservation request not found.")
+            if reservation.status != ReservationRequest.Status.PENDING:
+                raise ValidationError("Quotes can only be issued for pending reservation requests.")
+            latest = reservation.quotes.order_by("-version").first()
+            if latest and latest.status == ReservationQuote.Status.ACCEPTED:
+                raise ValidationError("An accepted quotation cannot be replaced.")
+            if latest and latest.status == ReservationQuote.Status.SENT:
+                latest.status = ReservationQuote.Status.EXPIRED
+                latest.responded_at = timezone.now()
+                latest.save(update_fields=["status", "responded_at"])
+            quote = ReservationQuote.objects.create(
+                reservation=reservation,
+                version=(latest.version + 1) if latest else 1,
+                currency=data["currency"],
+                total_amount=data["total_amount"],
+                deposit_amount=data["deposit_amount"],
+                terms=data.get("terms", ""),
+                expires_at=data["expires_at"],
+                created_by=request.user,
+            )
+            ReservationQuoteItem.objects.bulk_create([
+                ReservationQuoteItem(quote=quote, **item) for item in data["items"]
+            ])
+        _queue_reservation_lifecycle_emails(
+            reservation, "reservation_quote_issued", "A partner quotation is ready",
+            f"The partner has issued quotation version {quote.version}. "
+            f"Total: {quote.total_amount} {quote.currency}. Deposit: {quote.deposit_amount} {quote.currency}. "
+            f"Please review and accept or decline it in your XGetawaySX account before {quote.expires_at}.",
+        )
+        return Response(ReservationQuoteSerializer(quote).data, status=status.HTTP_201_CREATED)
+
+
+class CustomerReservationQuoteDecisionView(APIView):
+    """Customer explicitly accepts or declines the latest unexpired partner quote."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from .models import ReservationQuote, ReservationRequest
+        from .serializers import ReservationQuoteDecisionSerializer, ReservationQuoteSerializer
+
+        serializer = ReservationQuoteDecisionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        decision = serializer.validated_data["status"]
+        with transaction.atomic():
+            try:
+                reservation = ReservationRequest.objects.select_for_update().select_related(
+                    "partner", "customer"
+                ).get(pk=pk, customer=request.user)
+            except ReservationRequest.DoesNotExist:
+                from rest_framework.exceptions import NotFound
+                raise NotFound("Reservation request not found.")
+            if reservation.status != ReservationRequest.Status.PENDING:
+                raise ValidationError("Only pending reservation requests can receive a quotation decision.")
+            quote = reservation.quotes.select_for_update().prefetch_related("items").order_by("-version").first()
+            if not quote:
+                raise ValidationError("There is no partner quotation to respond to.")
+            if quote.status != ReservationQuote.Status.SENT:
+                raise ValidationError("Only the latest outstanding quotation can be accepted or declined.")
+            if quote.expires_at <= timezone.now():
+                quote.status = ReservationQuote.Status.EXPIRED
+                quote.responded_at = timezone.now()
+                quote.save(update_fields=["status", "responded_at"])
+                raise ValidationError("This quotation has expired. Ask the partner to issue a new quote.")
+            quote.status = decision
+            quote.responded_at = timezone.now()
+            quote.save(update_fields=["status", "responded_at"])
+            if decision == ReservationQuote.Status.ACCEPTED:
+                reservation.quoted_total = quote.total_amount
+                reservation.quoted_deposit = quote.deposit_amount
+                reservation.quoted_currency = quote.currency
+                reservation.quoted_at = timezone.now()
+                reservation.save(update_fields=[
+                    "quoted_total", "quoted_deposit", "quoted_currency", "quoted_at", "updated_at"
+                ])
+        title = "Quotation accepted" if decision == ReservationQuote.Status.ACCEPTED else "Quotation declined"
+        message = (
+            "You accepted the partner's quotation. The reservation is still awaiting the partner's final confirmation."
+            if decision == ReservationQuote.Status.ACCEPTED
+            else "The customer declined the quotation. The partner may issue a revised quotation if appropriate."
+        )
+        _queue_reservation_lifecycle_emails(
+            reservation, f"reservation_quote_{decision}", title, message
+        )
+        return Response(ReservationQuoteSerializer(quote).data)
+
+
 class PartnerReservationDecisionView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -467,6 +571,12 @@ class PartnerReservationDecisionView(APIView):
             if decision == ReservationRequest.Status.CONFIRMED:
                 if item.partner.booking_status != Partner.ApprovalStatus.APPROVED:
                     raise ValidationError("This partner is not currently approved to confirm bookings.")
+                from .models import ReservationQuote
+                accepted_quote = item.quotes.filter(status=ReservationQuote.Status.ACCEPTED).order_by("-version").first()
+                if not accepted_quote:
+                    raise ValidationError("The customer must accept the latest quotation before the reservation can be confirmed.")
+                if accepted_quote.expires_at <= timezone.now():
+                    raise ValidationError("The accepted quotation has expired. A new quotation and customer acceptance are required.")
                 dates = [item.start_date + timedelta(days=offset) for offset in range((item.end_date - item.start_date).days)]
                 days = list(PartnerAvailability.objects.select_for_update().filter(
                     partner=item.partner, date__in=dates
