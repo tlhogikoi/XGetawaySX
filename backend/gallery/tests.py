@@ -57,6 +57,35 @@ class GalleryPublicationTests(TestCase):
 
 
 
+    def test_public_story_detail_returns_approved_content_without_private_history(self):
+        self.media.caption = "Morning light across the lodge grounds."
+        self.media.media_credit = "Lodge photography team"
+        self.media.save(update_fields=("caption", "media_credit", "updated_at"))
+        story = GalleryStory.objects.create(
+            media=self.media, owner_original_history="Private notes must remain private.",
+            owner_history_private=True,
+            summary=" ".join(["A verified short story about this place and its setting."] * 5),
+            status=GalleryStory.Status.PUBLISHED, owner_approved_by=self.owner,
+            owner_approved_at=timezone.now(), owner_approved_version=1,
+            editorial_approved_by=self.editor, editorial_approved_at=timezone.now(),
+            editorial_approved_version=1, published_at=timezone.now(),
+        )
+        response = self.client.get(f"/api/v1/gallery/stories/{story.id}/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["caption"], "Morning light across the lodge grounds.")
+        self.assertEqual(response.data["media_credit"], "Lodge photography team")
+        self.assertIsNone(response.data["owner_original_history"])
+        self.assertNotIn("ai_source_facts", response.data)
+
+    def test_public_story_detail_hides_unpublished_story(self):
+        story = GalleryStory.objects.create(
+            media=self.media,
+            summary=" ".join(["A verified short story about this place and its setting."] * 5),
+            status=GalleryStory.Status.DRAFT,
+        )
+        response = self.client.get(f"/api/v1/gallery/stories/{story.id}/")
+        self.assertEqual(response.status_code, 404)
+
     def test_social_media_only_permission_does_not_publish_story_on_website(self):
         self.permission.permitted_channels = ["social_media"]
         self.permission.save(update_fields=("permitted_channels",))

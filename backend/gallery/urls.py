@@ -24,10 +24,12 @@ from .views import (
     GalleryPartnerActivityView,
     GalleryEditorialQueueView,
     PublicGalleryStoriesView,
+    PublicGalleryStoryDetailView,
 )
 
 urlpatterns = [
     path("stories/", PublicGalleryStoriesView.as_view(), name="gallery-public-stories"),
+    path("stories/<int:pk>/", PublicGalleryStoryDetailView.as_view(), name="gallery-public-story-detail"),
     path("stories/drafts/", GalleryStoryOwnerDraftListView.as_view(), name="gallery-story-drafts"),
     path("stories/<int:pk>/draft/", GalleryStoryDraftUpdateView.as_view(), name="gallery-story-draft-update"),
     path("stories/<int:pk>/history-consent/", GalleryStoryHistoryConsentView.as_view(), name="gallery-story-history-consent"),

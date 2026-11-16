@@ -9,6 +9,7 @@ export type GalleryStoryCardProps = {
   partnerName: string;
   summary: string;
   partnerUrl: string;
+  storyUrl?: string;
 };
 
 export default function GalleryStoryCard({
@@ -19,6 +20,7 @@ export default function GalleryStoryCard({
   partnerName,
   summary,
   partnerUrl,
+  storyUrl,
 }: GalleryStoryCardProps) {
   const [storyVisible, setStoryVisible] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -75,9 +77,10 @@ export default function GalleryStoryCard({
         hidden={!storyVisible}
       >
         <p>{summary}</p>
-        <a href={partnerUrl}>
-          Explore partner story <ArrowUpRight size={15} aria-hidden="true" />
-        </a>
+        <div className="gallery-story-links">
+          {storyUrl && <a href={storyUrl}>Read full story <ArrowUpRight size={15} aria-hidden="true" /></a>}
+          <a href={partnerUrl}>Explore partner <ArrowUpRight size={15} aria-hidden="true" /></a>
+        </div>
       </div>
     </article>
   );

@@ -39,6 +39,7 @@ export default function GalleryPartnerGrid() {
         partnerName: item.partner_name,
         summary: item.summary,
         partnerUrl: `/partners/${encodeURIComponent(item.partner_slug)}/`,
+        storyUrl: `/gallery/stories/${item.id}/`,
         city: item.partner_city?.trim() ?? "",
       }))))
       .catch(err => {

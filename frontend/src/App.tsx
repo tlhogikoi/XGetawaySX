@@ -1,5 +1,6 @@
 import GalleryPartnerGrid from "./components/GalleryPartnerGrid";
 import GalleryExplorePage from "./components/GalleryExplorePage";
+import GalleryStoryDetailPage from "./components/GalleryStoryDetailPage";
 import PublicPartnerProfile from "./components/PublicPartnerProfile";
 import GalleryStoryEditor from "./components/GalleryStoryEditor";
 import PartnerDiscovery from "./components/PartnerDiscovery";
@@ -19,6 +20,8 @@ const categories = [
 export default function App() {
   const pathname = window.location.pathname;
   if (pathname === "/gallery" || pathname === "/gallery/") return <GalleryExplorePage />;
+  const galleryStoryMatch = pathname.match(/^\\/gallery\\/stories\\/(\\d+)\\/?$/);
+  if (galleryStoryMatch) return <GalleryStoryDetailPage storyId={galleryStoryMatch[1]} />;
   if (pathname === "/account" || pathname === "/account/") return <CustomerAccount />;
   if (pathname === "/partner/gallery" || pathname === "/partner/gallery/") return <GalleryStoryEditor />;
   const destinationMatch = pathname.match(/^\/destinations\/([^/]+)\/?$/);

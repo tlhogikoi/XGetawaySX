@@ -16,7 +16,7 @@ from partners.models import Partner
 from .models import GalleryAuditEvent, GalleryHistoryPublicationConsent, GalleryMedia, GalleryMediaPermissionGrant, GalleryPartnerNotification, GalleryStory, GalleryStoryEditorialReview, GalleryStoryRevision
 from .validators import gallery_image_content_type
 from .story_drafting import draft_story_summary
-from .serializers import GalleryAuditEventSerializer, GalleryMediaDraftSerializer, GalleryPartnerNotificationSerializer, GalleryStoryDraftSerializer, GalleryStoryRevisionSerializer, PublicGalleryStorySerializer
+from .serializers import GalleryAuditEventSerializer, GalleryMediaDraftSerializer, GalleryPartnerNotificationSerializer, GalleryStoryDraftSerializer, GalleryStoryRevisionSerializer, PublicGalleryStorySerializer, PublicGalleryStoryDetailSerializer
 
 
 
@@ -137,6 +137,27 @@ class GalleryPartnerActivityView(APIView):
             ),
             "occurred_at": event.created_at,
         } for event in events])
+
+
+class PublicGalleryStoryDetailView(generics.RetrieveAPIView):
+    serializer_class = PublicGalleryStoryDetailSerializer
+    permission_classes = [AllowAny]
+
+    def get_queryset(self):
+        website_grant_ids = active_gallery_permission_grant_ids("website")
+        if not website_grant_ids:
+            return GalleryStory.objects.none()
+        return GalleryStory.objects.filter(
+            status=GalleryStory.Status.PUBLISHED,
+            media__status=GalleryMedia.Status.APPROVED,
+            media__partner__gallery_status=Partner.ApprovalStatus.APPROVED,
+            media__permission_grants__id__in=website_grant_ids,
+            owner_approved_version=F("current_version"),
+            owner_approved_at__isnull=False,
+            editorial_approved_version=F("current_version"),
+            editorial_approved_at__isnull=False,
+            published_at__isnull=False,
+        ).select_related("media", "media__partner").prefetch_related("history_publication_consents").distinct()
 
 
 class PublicGalleryStoriesView(generics.ListAPIView):

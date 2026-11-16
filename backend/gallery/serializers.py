@@ -123,3 +123,11 @@ class GalleryPartnerNotificationSerializer(serializers.ModelSerializer):
         model = GalleryPartnerNotification
         fields = ("id", "story_id", "kind", "title", "message", "read_at", "created_at")
         read_only_fields = fields
+
+
+class PublicGalleryStoryDetailSerializer(PublicGalleryStorySerializer):
+    caption = serializers.CharField(source="media.caption", read_only=True)
+    media_credit = serializers.CharField(source="media.media_credit", read_only=True)
+
+    class Meta(PublicGalleryStorySerializer.Meta):
+        fields = PublicGalleryStorySerializer.Meta.fields + ("caption", "media_credit")
