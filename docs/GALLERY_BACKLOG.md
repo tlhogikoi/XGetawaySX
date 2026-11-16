@@ -907,3 +907,22 @@ Implemented on `feat/application-foundation`:
 - Quote acceptance records the customer's price agreement; production legal terms, cancellation/refund policy display, and customer-facing quote PDF remain future work.
 - SMTP/provider delivery is not configured by this implementation; queued email acceptance is not proof of inbox delivery.
 - No automated Django checks/tests, migration validation, frontend typecheck/build, browser test, CI run, provider workflow, merge or deployment has been executed or confirmed.
+
+
+## Development 28 — Reservation payment schedules and instalments
+
+**Implemented on `feat/application-foundation`:**
+- Added `ReservationInstallment` with a unique sequence per reservation, deposit/balance type, amount, currency and due timestamp; migration `0016_reservation_installments.py`.
+- On partner confirmation, the accepted quotation is snapshotted into a deposit and balance schedule. The deposit amount accepted in the quotation is honoured. Where the quote has no deposit, the platform suggests a 30% deposit and 70% balance.
+- Deposit deadline is 48 hours after confirmation. The balance deadline is seven days before the trip start date, but never earlier than the deposit deadline.
+- Added private `GET /api/v1/partners/reservations/{id}/payment-schedule/`, available only to the customer or owning partner.
+- Schedule status and outstanding amount are derived from captured payments less verified refunds; merely creating a payment or opening hosted checkout does not mark an instalment paid.
+- Customer Payments workspace now displays instalment amounts, deadlines, paid/outstanding amounts and overdue/upcoming/paid state.
+- Added tests for accepted partner deposit amounts, 30% fallback, idempotent schedule creation and customer/partner ownership access.
+
+**Boundaries and follow-up:**
+- This stage creates a two-part deposit/balance plan; it does not yet support arbitrary multi-date instalment plans or partner-configurable reminder cadence.
+- The current payment initiation flow remains responsible for collecting the deposit first and then the remaining balance; it does not yet enforce separate instalment checkout windows.
+- No automatic reminder scheduler or overdue cancellation policy is enabled.
+- A schedule is not payment confirmation. PayFast/Yoco webhook verification and reconciliation remain the source of truth.
+- Django tests, migration application/drift checks, frontend build/browser tests, CI and live provider workflows have not been run or verified as part of this commit sequence.
