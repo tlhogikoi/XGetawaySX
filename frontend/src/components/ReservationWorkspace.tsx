@@ -4,7 +4,8 @@ import "./reservation.css";
 import CustomerEmailPreferences from "./CustomerEmailPreferences";
 
 type Partner = { id: number; name: string; city: string; province: string };
-type Reservation = { id: number; partner: Partner; start_date: string; end_date: string; guests: number; status: string; booking_reference: string | null; partner_response: string };
+type Quote = { id:number; version:number; status:string; currency:string; total_amount:string; deposit_amount:string; terms:string; expires_at:string; items:{id:number;description:string;quantity:string;unit_price:string;line_total:string}[] };
+type Reservation = { id: number; partner: Partner; start_date: string; end_date: string; guests: number; status: string; booking_reference: string | null; partner_response: string; latest_quote:Quote|null };
 type Cancellation = { id: number; reservation_id: number; partner_name: string; reason: string; status: string; decision_note: string; requested_at: string };
 type Notice = { id:number; title:string; message:string; event:string; read_at:string|null; created_at:string };
 type Refund = { id:number; amount:string; currency:string; status:string; provider:string; provider_reference:string|null; provider_status:string; reason:string; reconciled_at:string|null; created_at:string };
@@ -43,6 +44,16 @@ export default function ReservationWorkspace({ accessToken }: { accessToken: str
   useEffect(()=>{let live=true;load().catch(e=>{if(live)setError(e.message);});return()=>{live=false;};},[accessToken]);
   async function check(){setError("");setNotice("");setAvailability([]);if(!partnerId||!start||!end){setError("Choose a partner and both dates first.");return;}const r=await fetch(`${API}/api/v1/partners/availability/?partner_id=${partnerId}&start_date=${start}&end_date=${end}`);const data=await r.json();if(!r.ok){setError(data.detail||"Could not check availability.");return;}setAvailability(data);if(!data.length)setNotice("No published availability was found for this date range.");}
   async function submit(){setBusy(true);setError("");setNotice("");try{const r=await fetch(`${API}/api/v1/partners/reservations/`,{method:"POST",headers,body:JSON.stringify({partner_id:Number(partnerId),start_date:start,end_date:end,guests,message})});const data=await r.json();if(!r.ok)throw new Error(data.detail||JSON.stringify(data));setItems(v=>[data,...v]);setNotice("Reservation request sent. It is not confirmed until the partner accepts it.");setMessage("");}catch(e){setError(e instanceof Error?e.message:"Could not submit request.");}finally{setBusy(false);}}
+  async function decideQuote(reservationId:number,decision:"accepted"|"declined"){
+    setError("");setNotice("");
+    const response=await fetch(`${API}/api/v1/partners/reservations/${reservationId}/quote-decision/`,{
+      method:"POST",headers,body:JSON.stringify({status:decision}),
+    });
+    const data=await response.json();
+    if(!response.ok){setError(data.detail||"Could not record your quotation decision.");return;}
+    await load();
+    setNotice(decision==="accepted"?"Quotation accepted. The reservation is still awaiting the partner's final confirmation.":"Quotation declined. The partner may issue a revised quotation.");
+  }
   async function markRead(id:number){
     const r=await fetch(`${API}/api/v1/partners/notifications/${id}/read/`,{method:"POST",headers});
     const data=await r.json();if(r.ok)setNotifications(v=>v.map(n=>n.id===id?data:n));
@@ -76,6 +87,19 @@ export default function ReservationWorkspace({ accessToken }: { accessToken: str
     <div className="reservation-history"><h3><ClipboardList size={18}/> Your reservation history</h3>{items.length?items.map(item=>{
       const cancellation=cancellations.find(x=>x.reservation_id===item.id&&["pending","approved"].includes(x.status));
       return <article key={item.id}><div><strong>{item.partner.name}</strong><span className={`reservation-status ${item.status}`}>{item.status}</span></div><p>{item.start_date} to {item.end_date} · {item.guests} guests</p>{item.booking_reference&&<p>Booking reference: <strong>{item.booking_reference}</strong></p>}{item.partner_response&&<p>{item.partner_response}</p>}
+      {item.latest_quote&&<div className="availability-list">
+        <strong>Partner quotation v{item.latest_quote.version} · {item.latest_quote.status}</strong>
+        {item.latest_quote.items.map(line=><span key={line.id}>{line.description} · {line.quantity} × {item.latest_quote!.currency} {line.unit_price} = {item.latest_quote!.currency} {line.line_total}</span>)}
+        <span><strong>Total: {item.latest_quote.currency} {item.latest_quote.total_amount}</strong></span>
+        <span>Deposit: {item.latest_quote.currency} {item.latest_quote.deposit_amount}</span>
+        {item.latest_quote.terms&&<span>Terms: {item.latest_quote.terms}</span>}
+        <span>Expires: {new Date(item.latest_quote.expires_at).toLocaleString()}</span>
+        {item.latest_quote.status==="sent"&&item.status==="pending"&&<div className="reservation-quote-actions">
+          <button className="reservation-secondary" onClick={()=>decideQuote(item.id,"accepted")}>Accept quotation</button>
+          <button className="reservation-secondary" onClick={()=>decideQuote(item.id,"declined")}>Decline quotation</button>
+        </div>}
+        {item.latest_quote.status==="accepted"&&<span>Accepted. Awaiting partner confirmation before payment.</span>}
+      </div>}
       {payments.filter(payment=>payment.reservation===item.id).length>0&&<div className="availability-list"><strong>Payment history</strong>
         {payments.filter(payment=>payment.reservation===item.id).map(payment=><div key={payment.id}>
           <span>{payment.kind.replace("_"," ")} · {payment.currency} {payment.amount} · <strong>{payment.status}</strong></span>
