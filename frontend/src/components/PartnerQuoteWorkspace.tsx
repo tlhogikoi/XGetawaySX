@@ -13,6 +13,7 @@ export default function PartnerQuoteWorkspace({accessToken}:{accessToken:string}
  const [deposits,setDeposits]=useState<Record<number,string>>({});
  const [expiries,setExpiries]=useState<Record<number,string>>({});
  const [terms,setTerms]=useState<Record<number,string>>({});
+ const [responses,setResponses]=useState<Record<number,string>>({});
  const [busy,setBusy]=useState<number|null>(null);
  const [error,setError]=useState("");
  const [notice,setNotice]=useState("");
@@ -24,6 +25,20 @@ export default function PartnerQuoteWorkspace({accessToken}:{accessToken:string}
  useEffect(()=>{let live=true;load().catch(e=>{if(live)setError(e.message);});return()=>{live=false;};},[accessToken]);
  function updateLine(id:number,index:number,key:keyof Line,value:string){
   setLines(v=>({...v,[id]:(v[id]??[emptyLine()]).map((line,i)=>i===index?{...line,[key]:value}:line)}));
+ }
+ async function decideReservation(id:number,decision:"confirmed"|"declined"){
+  setBusy(id);setError("");setNotice("");
+  try{
+   const responseText=(responses[id]||"").trim();
+   if(responseText.length<5)throw new Error("Add a partner response of at least five characters.");
+   const r=await fetch(`${API}/api/v1/partners/partner/reservations/${id}/decision/`,{
+    method:"POST",headers,body:JSON.stringify({status:decision,partner_response:responseText}),
+   });
+   const data=await r.json();if(!r.ok)throw new Error(data.detail||"Could not update reservation.");
+   setNotice(decision==="confirmed"?"Reservation confirmed. The customer can now proceed to payment.":"Reservation request declined.");
+   await load();
+  }catch(e){setError(e instanceof Error?e.message:"Could not update reservation.");}
+  finally{setBusy(null);}
  }
  async function issueQuote(id:number){
   setBusy(id);setError("");setNotice("");
@@ -52,7 +67,11 @@ export default function PartnerQuoteWorkspace({accessToken}:{accessToken:string}
    <p>{item.start_date} to {item.end_date} · {item.guests} guests</p>
    {item.latest_quote&&<div className="pq-existing"><strong>Latest quote: v{(item.latest_quote as {version:number}).version}</strong><span>Status: {(item.latest_quote as {status:string}).status}</span></div>}
    {(item.latest_quote as {status:string}|null)?.status==="accepted"
-    ? <p className="pq-accepted">Customer accepted the quotation. This reservation is ready for your normal confirmation decision.</p>
+    ? <div className="pq-accepted">
+       <p>Customer accepted the quotation. Review availability and make your final reservation decision.</p>
+       <label>Partner response<textarea rows={2} value={responses[item.id]??"Your reservation is confirmed."} onChange={e=>setResponses(v=>({...v,[item.id]:e.target.value}))}/></label>
+       <div className="pq-decision-actions"><button disabled={busy===item.id} onClick={()=>decideReservation(item.id,"confirmed")}>Confirm reservation</button><button disabled={busy===item.id} onClick={()=>decideReservation(item.id,"declined")}>Decline request</button></div>
+      </div>
     : <><h3><FileText size={16}/> Build quotation (ZAR)</h3>
    {(lines[item.id]??[emptyLine()]).map((line,index)=><div className="pq-line" key={index}>
     <label>Description<input value={line.description} onChange={e=>updateLine(item.id,index,"description",e.target.value)}/></label>
