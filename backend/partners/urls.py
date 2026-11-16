@@ -17,6 +17,7 @@ from .views import (
     PartnerIncomingEnquiryListView, TripPlanDetailView,
     TripPlanItemCreateView, TripPlanItemDetailView, TripPlanListCreateView,
     CustomerEmailPreferenceView, MarketingUnsubscribeView, CustomerEnquiryConvertView,
+    PartnerReservationQuoteCreateView, CustomerReservationQuoteDecisionView,
 )
 
 urlpatterns = [
@@ -54,6 +55,8 @@ urlpatterns = [
     path("notifications/<int:pk>/read/", ReservationNotificationReadView.as_view(), name="reservation-notification-read"),
     path("partner/reservations/", PartnerReservationInboxView.as_view(), name="partner-reservation-inbox"),
     path("partner/reservations/<int:pk>/decision/", PartnerReservationDecisionView.as_view(), name="partner-reservation-decision"),
+    path("partner/reservations/<int:pk>/quotes/", PartnerReservationQuoteCreateView.as_view(), name="partner-reservation-quote-create"),
+    path("reservations/<int:pk>/quote-decision/", CustomerReservationQuoteDecisionView.as_view(), name="customer-reservation-quote-decision"),
     path("partner/enquiries/", PartnerIncomingEnquiryListView.as_view(), name="partner-incoming-enquiries"),
     path("partner/enquiries/<int:pk>/respond/", PartnerEnquiryRespondView.as_view(), name="partner-enquiry-respond"),
     path("<slug:slug>/", PublicPartnerDetailView.as_view(), name="public-partner-detail"),
