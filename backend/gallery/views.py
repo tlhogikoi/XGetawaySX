@@ -20,13 +20,38 @@ from .serializers import GalleryAuditEventSerializer, GalleryMediaDraftSerialize
 
 
 
-def has_active_gallery_media_permission(media):
+def active_gallery_permission_grant_ids(channel):
+    """Return active, editorially verified grants that explicitly authorise a channel.
+
+    JSONField channel membership is evaluated in Python for consistent behaviour
+    across PostgreSQL and SQLite test environments.
+    """
     now = timezone.now()
-    return media.permission_grants.filter(
+    grants = GalleryMediaPermissionGrant.objects.filter(
         purpose=GalleryMediaPermissionGrant.Purpose.GALLERY_PROMOTION,
         review_status=GalleryMediaPermissionGrant.ReviewStatus.APPROVED,
         revoked_at__isnull=True,
-    ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now)).exists()
+    ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
+    return [
+        grant_id
+        for grant_id, channels in grants.values_list("pk", "permitted_channels")
+        if isinstance(channels, list) and channel in channels
+    ]
+
+
+def has_active_gallery_media_permission(media, channel=None):
+    now = timezone.now()
+    grants = media.permission_grants.filter(
+        purpose=GalleryMediaPermissionGrant.Purpose.GALLERY_PROMOTION,
+        review_status=GalleryMediaPermissionGrant.ReviewStatus.APPROVED,
+        revoked_at__isnull=True,
+    ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
+    if channel is None:
+        return grants.exists()
+    return any(
+        isinstance(channels, list) and channel in channels
+        for channels in grants.values_list("permitted_channels", flat=True)
+    )
 
 
 
@@ -119,21 +144,22 @@ class PublicGalleryStoriesView(generics.ListAPIView):
     permission_classes = [AllowAny]
 
     def get_queryset(self):
+        website_grant_ids = active_gallery_permission_grant_ids("website")
+        if not website_grant_ids:
+            return GalleryStory.objects.none()
         return GalleryStory.objects.filter(
-            Q(media__permission_grants__expires_at__isnull=True)
-            | Q(media__permission_grants__expires_at__gt=timezone.now()),
             status=GalleryStory.Status.PUBLISHED,
             media__status=GalleryMedia.Status.APPROVED,
             media__partner__gallery_status=Partner.ApprovalStatus.APPROVED,
-            media__permission_grants__purpose=GalleryMediaPermissionGrant.Purpose.GALLERY_PROMOTION,
-            media__permission_grants__review_status=GalleryMediaPermissionGrant.ReviewStatus.APPROVED,
-            media__permission_grants__revoked_at__isnull=True,
+            media__permission_grants__id__in=website_grant_ids,
             owner_approved_version=F("current_version"),
             owner_approved_at__isnull=False,
             editorial_approved_version=F("current_version"),
             editorial_approved_at__isnull=False,
             published_at__isnull=False,
-        ).select_related("media", "media__partner").prefetch_related("history_publication_consents").distinct()
+        ).select_related("media", "media__partner").prefetch_related(
+            "history_publication_consents"
+        ).distinct()
 
 
 class GalleryMediaCreateView(generics.CreateAPIView):
@@ -204,8 +230,8 @@ class GalleryMediaEditorialApprovalView(APIView):
         if not request.user.is_staff:
             raise PermissionDenied("Editorial approval is restricted to authorised staff.")
         media = generics.get_object_or_404(GalleryMedia.objects.select_for_update(), pk=pk)
-        if not has_active_gallery_media_permission(media):
-            raise ValidationError("An active, evidence-backed Gallery media permission grant is required.")
+        if not has_active_gallery_media_permission(media, channel="website"):
+            raise ValidationError("An active, evidence-backed permission grant for the website is required.")
         if media.partner.gallery_status != Partner.ApprovalStatus.APPROVED:
             raise ValidationError("Partner must be approved for Gallery advertising.")
         media.status = GalleryMedia.Status.APPROVED
@@ -744,7 +770,7 @@ class GalleryMediaImageView(APIView):
         if (
             media.status != GalleryMedia.Status.APPROVED
             or media.partner.gallery_status != Partner.ApprovalStatus.APPROVED
-            or not has_active_gallery_media_permission(media)
+            or not has_active_gallery_media_permission(media, channel="website")
         ):
             raise Http404
         story = getattr(media, "story", None)
