@@ -926,3 +926,16 @@ Implemented on `feat/application-foundation`:
 - No automatic reminder scheduler or overdue cancellation policy is enabled.
 - A schedule is not payment confirmation. PayFast/Yoco webhook verification and reconciliation remain the source of truth.
 - Django tests, migration application/drift checks, frontend build/browser tests, CI and live provider workflows have not been run or verified as part of this commit sequence.
+
+
+### Development 28 completion pass — partner controls and payment reminders
+
+- Added partner financial policy fields `deposit_due_hours` (default 48) and `balance_due_days_before` (default 7), migration `0017_partner_payment_deadlines.py`.
+- Exposed both settings through the authenticated partner financial-settings API, with validation bounds (1–720 hours; 0–365 days). Admin list now displays both values.
+- Instalment generation now reads the partner's configured deadline values.
+- Added a management command: `python manage.py send_reservation_payment_reminders`. It supports `--window-hours` (1–168, default 24) and `--dry-run`; it queues idempotent customer and partner emails for due-soon and overdue instalments. It does not cancel bookings or change payment state.
+- Added a partner-side payment tracking workspace showing confirmed reservation instalments, captured amounts, outstanding amounts and due dates.
+- Corrected a literal newline artifact in the customer payment workspace source.
+- Added coverage for partner-configurable due dates.
+
+**Operations:** schedule the reminder command using the deployment platform's scheduler/cron (for example, hourly or daily). Email delivery still requires SMTP/provider configuration. Reminder execution has not been scheduled automatically in the hosting environment.
