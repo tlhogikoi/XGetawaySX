@@ -5,7 +5,7 @@ import "./trip-planner.css";
 type Partner = { id: number; name: string; slug: string; category: string; city: string; province: string; country: string; description: string };
 type TripItem = { id: number; partner: Partner; note: string };
 type TripPlan = { id: number; title: string; notes: string; start_date: string | null; end_date: string | null; items: TripItem[] };
-type Enquiry = { id: number; status: string; partner: Partner };
+type Enquiry = { id: number; status: string; partner: Partner; requested_start_date: string | null; requested_end_date: string | null; partner_response: string; reservation_request_id: number | null };
 
 const API_BASE = (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env.VITE_API_BASE_URL ?? "";
 
@@ -20,6 +20,7 @@ export default function TripPlanner({ accessToken }: { accessToken: string }) {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [enquiries, setEnquiries] = useState<Enquiry[]>([]);
+  const [guestCount, setGuestCount] = useState(1);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -98,6 +99,21 @@ export default function TripPlanner({ accessToken }: { accessToken: string }) {
     finally { setBusy(false); }
   }
 
+
+
+  async function convertEnquiry(enquiryId: number) {
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const result = await request(`enquiries/${enquiryId}/convert/`, {
+        method: "POST", body: JSON.stringify({ guests: guestCount }),
+      }) as { enquiry: Enquiry; reservation: { id: number } };
+      setEnquiries(current => current.map(item => item.id === enquiryId ? result.enquiry : item));
+      setNotice(`Reservation request #${result.reservation.id} created. The partner must still confirm it before payment is available.`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not create the reservation request.");
+    } finally { setBusy(false); }
+  }
+
   return <section className="trip-planner">
     <header className="trip-planner-heading"><div><p className="eyebrow">MAKE IT YOURS</p><h2>Build your getaway.</h2><p>Save approved places into a private plan, then contact each partner directly.</p></div><span className="trip-planner-mark"><MapPin size={22}/></span></header>
     {error && <p className="trip-feedback is-error" role="alert">{error}</p>}
@@ -120,6 +136,21 @@ export default function TripPlanner({ accessToken }: { accessToken: string }) {
       <label className="trip-field"><span>Your enquiry</span><textarea rows={4} value={message} onChange={e=>setMessage(e.target.value)} placeholder="Tell the partner about your plans, group size and what you would like to know."/></label>
       <button className="trip-send-button" disabled={busy || !selectedPartner || message.trim().length<10} onClick={submitEnquiry}><Send size={15}/> Send enquiry <ArrowRight size={15}/></button>
     </div>:null}
-    <div className="trip-enquiry-history"><h3>Enquiry tracking</h3>{enquiries.length ? enquiries.map(item=><div key={item.id}><strong>{item.partner.name}</strong><span>{item.status.replace(/_/g," ")}</span></div>):<p className="trip-muted">Your partner enquiries will appear here.</p>}</div>
+    <div className="trip-enquiry-history">
+      <h3>Enquiry tracking</h3>
+      {enquiries.length ? <>
+        <label className="trip-field"><span>Guests for accepted enquiries</span><input type="number" min="1" max="100" value={guestCount} onChange={e=>setGuestCount(Math.max(1,Math.min(100,Number(e.target.value)||1)))}/></label>
+        {enquiries.map(item=><article key={item.id} className="trip-enquiry-record">
+          <strong>{item.partner.name}</strong><span>{item.status.replace(/_/g," ")}</span>
+          <small>{item.requested_start_date || "Dates not set"}{item.requested_end_date ? ` — ${item.requested_end_date}` : ""}</small>
+          {item.partner_response && <p>{item.partner_response}</p>}
+          {item.reservation_request_id
+            ? <p className="trip-muted">Reservation request #{item.reservation_request_id} — awaiting partner confirmation</p>
+            : item.status === "accepted"
+              ? <button disabled={busy || !item.requested_start_date || !item.requested_end_date} onClick={()=>convertEnquiry(item.id)}>Continue to reservation request <ArrowRight size={15}/></button>
+              : null}
+        </article>)}
+      </> : <p className="trip-muted">Your partner enquiries will appear here.</p>}
+    </div>
   </section>;
 }
