@@ -520,6 +520,113 @@ class ReservationFoundationTests(TestCase):
         denied = self.client.post(f"/api/v1/partners/notifications/{notification.pk}/read/")
         self.assertEqual(denied.status_code, 404)
 
+
+    def test_reservation_request_sends_audited_emails_to_customer_and_partner(self):
+        from django.core import mail
+        from django.test import override_settings
+        from .models import ReservationEmailDelivery
+        with override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend"):
+            with self.captureOnCommitCallbacks(execute=True):
+                self.client.force_authenticate(user=self.customer)
+                response = self.make_request()
+            self.assertEqual(response.status_code, 201)
+            self.assertEqual(len(mail.outbox), 2)
+            deliveries = ReservationEmailDelivery.objects.filter(
+                reservation_id=response.data["id"], event="reservation_requested"
+            )
+            self.assertEqual(deliveries.count(), 2)
+            self.assertTrue(all(item.status == ReservationEmailDelivery.Status.SENT for item in deliveries))
+            self.assertEqual(set(deliveries.values_list("recipient_role", flat=True)), {"customer", "partner"})
+
+    def test_partner_confirmation_emails_include_booking_reference(self):
+        from django.core import mail
+        from django.test import override_settings
+        from .models import ReservationEmailDelivery
+        with override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend"):
+            with self.captureOnCommitCallbacks(execute=True):
+                self.client.force_authenticate(user=self.customer)
+                request = self.make_request()
+            mail.outbox.clear()
+            with self.captureOnCommitCallbacks(execute=True):
+                self.client.force_authenticate(user=self.owner)
+                decision = self.client.post(
+                    f"/api/v1/partners/partner/reservations/{request.data['id']}/decision/",
+                    {"status": "confirmed", "partner_response": "Your stay is confirmed."},
+                    format="json",
+                )
+            self.assertEqual(decision.status_code, 200)
+            self.assertEqual(len(mail.outbox), 2)
+            self.assertTrue(decision.data["booking_reference"])
+            deliveries = ReservationEmailDelivery.objects.filter(
+                reservation_id=request.data["id"], event="reservation_confirmed"
+            )
+            self.assertEqual(deliveries.count(), 2)
+            self.assertTrue(all(str(decision.data["booking_reference"]) in item.body for item in deliveries))
+
+    def test_cancellation_request_and_completion_send_audited_emails(self):
+        import uuid
+        from datetime import timedelta
+        from django.core import mail
+        from django.test import override_settings
+        from .models import ReservationRequest, ReservationEmailDelivery
+        item = ReservationRequest.objects.create(
+            customer=self.customer, partner=self.partner, start_date=self.start,
+            end_date=self.start + timedelta(days=2), guests=2,
+            status=ReservationRequest.Status.CONFIRMED, booking_reference=uuid.uuid4(),
+        )
+        with override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend"):
+            with self.captureOnCommitCallbacks(execute=True):
+                self.client.force_authenticate(user=self.customer)
+                created = self.client.post(
+                    f"/api/v1/partners/reservations/{item.pk}/cancel/",
+                    {"reason": "Our travel dates have changed unexpectedly."}, format="json",
+                )
+            self.assertEqual(created.status_code, 201)
+            self.assertEqual(len(mail.outbox), 2)
+            mail.outbox.clear()
+            with self.captureOnCommitCallbacks(execute=True):
+                self.client.force_authenticate(user=self.owner)
+                decided = self.client.post(
+                    f"/api/v1/partners/cancellations/{created.data['id']}/decision/",
+                    {"status": "approved", "decision_note": "Approved."}, format="json",
+                )
+            self.assertEqual(decided.data["status"], "completed")
+            self.assertEqual(len(mail.outbox), 2)
+            self.assertEqual(
+                ReservationEmailDelivery.objects.filter(
+                    reservation=item, event="cancellation_requested", status="sent"
+                ).count(), 2,
+            )
+            self.assertEqual(
+                ReservationEmailDelivery.objects.filter(
+                    reservation=item, event="cancellation_completed", status="sent"
+                ).count(), 2,
+            )
+
+    def test_failed_reservation_email_can_be_retried_without_resending_success(self):
+        from unittest.mock import patch
+        from django.test import override_settings
+        from .models import ReservationEmailDelivery
+        from .reservation_email_notifications import queue_reservation_email, send_reservation_email
+        with override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend"):
+            with patch("partners.reservation_email_notifications.send_mail", side_effect=RuntimeError("SMTP unavailable")):
+                delivery = queue_reservation_email(
+                    reservation=ReservationRequest.objects.create(\n                        customer=self.customer, partner=self.partner, start_date=self.start,\n                        end_date=self.start + __import__("datetime").timedelta(days=1), guests=1,\n                    ),
+                    event="test_event", event_key="test-event-customer",
+                    recipient_email=self.customer.email, recipient_role="customer",
+                    subject="Test", body="Test body",
+                )
+                send_reservation_email(delivery.pk)
+            delivery.refresh_from_db()
+            self.assertEqual(delivery.status, ReservationEmailDelivery.Status.FAILED)
+            self.assertEqual(delivery.attempts, 1)
+            with patch("partners.reservation_email_notifications.send_mail", return_value=1):
+                send_reservation_email(delivery.pk)
+                send_reservation_email(delivery.pk)
+            delivery.refresh_from_db()
+            self.assertEqual(delivery.status, ReservationEmailDelivery.Status.SENT)
+            self.assertEqual(delivery.attempts, 2)
+
 class PaymentAndPartnerFinanceTests(TestCase):
     def setUp(self):
         from datetime import date, timedelta
