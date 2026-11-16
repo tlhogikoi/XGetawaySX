@@ -824,7 +824,7 @@ class RefundReconciliationTests(TestCase):
             self.assertEqual(len(mail.outbox), 2)
             self.assertEqual(mail.outbox[0].to, [self.customer.email])
             self.assertEqual(mail.outbox[1].to, [self.admin.email])
-            self.assertIn("Refund confirmation", mail.outbox[0].subject)
+            self.assertIn("Refund Confirmation", mail.outbox[0].subject)
             self.assertIn("25.00", mail.outbox[0].body)
             send_refund_audit_email(audit.pk)
             self.assertEqual(len(mail.outbox), 2)
