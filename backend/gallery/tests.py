@@ -752,7 +752,9 @@ class GalleryPartnerActivityTests(TestCase):
 
     def test_anonymous_user_cannot_view_partner_activity(self):
         response = self.client.get(f"/api/v1/gallery/partners/{self.partner.id}/activity/")
-        self.assertEqual(response.status_code, 403)
+        # DRF's IsAuthenticated permission returns 401 when no authentication
+        # challenge is configured for the request.
+        self.assertEqual(response.status_code, 401)
 
 
 class GalleryStoryEditorialQualityReviewTests(TestCase):
