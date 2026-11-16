@@ -111,3 +111,19 @@ class BrandedReservationEmailTests(TestCase):
         self.assertEqual(len(mail.outbox[0].alternatives), 1)
         self.assertIn("XGetawaySX", mail.outbox[0].alternatives[0][0])
         self.assertIn("travel through us", mail.outbox[0].alternatives[0][0])
+
+
+class ReservationEmailRetryCommandTests(TestCase):
+    def test_dry_run_reports_without_sending(self):
+        from io import StringIO
+        from django.core.management import call_command
+
+        output = StringIO()
+        call_command("retry_reservation_emails", dry_run=True, stdout=output)
+        self.assertIn("Dry run: 0 of 0", output.getvalue())
+
+    def test_negative_limit_is_rejected(self):
+        from django.core.management import call_command, CommandError
+
+        with self.assertRaises(CommandError):
+            call_command("retry_reservation_emails", limit=-1)
