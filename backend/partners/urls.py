@@ -15,10 +15,13 @@ from .views import (
     AdminPaymentRefundInitiateView, AdminPayFastRefundVerifyView,
     CustomerEnquiryListCreateView, PartnerEnquiryRespondView,
     PartnerIncomingEnquiryListView, TripPlanDetailView,
-    TripPlanItemCreateView, TripPlanItemDetailView, TripPlanListCreateView,\n    CustomerEmailPreferenceView, MarketingUnsubscribeView,
+    TripPlanItemCreateView, TripPlanItemDetailView, TripPlanListCreateView,
+    CustomerEmailPreferenceView, MarketingUnsubscribeView,
 )
 
-urlpatterns = [\n    path("email-preferences/", CustomerEmailPreferenceView.as_view(), name="customer-email-preferences"),\n    path("email-unsubscribe/<uuid:token>/", MarketingUnsubscribeView.as_view(), name="marketing-email-unsubscribe"),
+urlpatterns = [
+    path("email-preferences/", CustomerEmailPreferenceView.as_view(), name="customer-email-preferences"),
+    path("email-unsubscribe/<uuid:token>/", MarketingUnsubscribeView.as_view(), name="marketing-email-unsubscribe"),
     path("", PublicPartnerListView.as_view(), name="public-partners"),
     path("destinations/", PublicDestinationListView.as_view(), name="public-destinations"),
     path("destinations/<slug:slug>/", PublicDestinationDetailView.as_view(), name="public-destination-detail"),
