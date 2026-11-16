@@ -139,3 +139,34 @@ class ReservationInstallmentScheduleTests(TestCase):
         client.force_authenticate(self.partner_owner)
         response = client.get(f"/api/v1/partners/reservations/{self.reservation.pk}/payment-schedule/")
         self.assertEqual(response.status_code, 200)
+
+    def test_zero_percent_deposit_creates_balance_only_schedule(self):
+        self.quote.deposit_amount = Decimal("0.00")
+        self.quote.save(update_fields=["deposit_amount"])
+        PartnerFinancialSettings.objects.create(
+            partner=self.partner,
+            deposit_type=PartnerFinancialSettings.DepositType.PERCENTAGE,
+            deposit_value=Decimal("0.00"),
+        )
+        _create_reservation_installments(self.reservation, self.quote)
+        items = list(self.reservation.installments.all())
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].kind, ReservationInstallment.Kind.BALANCE)
+        self.assertEqual(items[0].amount, Decimal("10000.00"))
+
+    def test_small_balance_reduces_instalment_count_to_positive_cents(self):
+        self.quote.total_amount = Decimal("0.01")
+        self.quote.deposit_amount = Decimal("0.00")
+        self.quote.save(update_fields=["total_amount", "deposit_amount"])
+        PartnerFinancialSettings.objects.create(
+            partner=self.partner,
+            deposit_type=PartnerFinancialSettings.DepositType.PERCENTAGE,
+            deposit_value=Decimal("0.00"),
+            balance_installment_count=6,
+        )
+        _create_reservation_installments(self.reservation, self.quote)
+        items = list(self.reservation.installments.all())
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].amount, Decimal("0.01"))
+        self.assertEqual(items[0].kind, ReservationInstallment.Kind.BALANCE)
+\n
