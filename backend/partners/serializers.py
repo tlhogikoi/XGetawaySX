@@ -147,14 +147,15 @@ class PartnerEnquiryCreateSerializer(serializers.Serializer):
 class PartnerEnquirySerializer(serializers.ModelSerializer):
     partner = PublicPartnerSerializer(read_only=True)
     trip_plan_id = serializers.IntegerField(read_only=True)
+    reservation_request_id = serializers.IntegerField(read_only=True, allow_null=True)
     customer_email = serializers.EmailField(source="customer.email", read_only=True)
 
     class Meta:
         model = PartnerEnquiry
         fields = (
-            "id", "partner", "trip_plan_id", "message", "requested_start_date",
-            "requested_end_date", "status", "partner_response", "customer_email",
-            "responded_at", "created_at", "updated_at",
+            "id", "partner", "trip_plan_id", "reservation_request_id", "message",
+            "requested_start_date", "requested_end_date", "status", "partner_response",
+            "customer_email", "responded_at", "created_at", "updated_at",
         )
         read_only_fields = fields
 
