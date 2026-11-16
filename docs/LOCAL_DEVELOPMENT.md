@@ -110,3 +110,10 @@ python manage.py retry_refund_audit_emails
 ```
 
 Apply migration `0011_refund_audit_email.py` with `python manage.py migrate`. Email delivery is an external service dependency: a refund remains successful even if SMTP is unavailable; the audit record captures the failure for later retry.
+
+
+### Development 21 — Customer payment and refund history
+
+The authenticated customer payment history endpoint, `GET /api/v1/partners/payments/`, now includes each payment's refund records. The customer reservation workspace displays payment type, amount/currency, provider, payment state, captured/created timestamp, failure reason where relevant, and refund state, amount, provider reference and confirmation/request timestamp.
+
+The API remains scoped to the authenticated customer. Refund history is read-only; customers cannot alter provider reconciliation records. The endpoint prefetches refund rows to avoid an extra database query per payment.
