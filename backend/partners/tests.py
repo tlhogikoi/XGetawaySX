@@ -616,7 +616,6 @@ class ReservationFoundationTests(TestCase):
                     recipient_email=self.customer.email, recipient_role="customer",
                     subject="Test", body="Test body",
                 )
-                send_reservation_email(delivery.pk)
             delivery.refresh_from_db()
             self.assertEqual(delivery.status, ReservationEmailDelivery.Status.FAILED)
             self.assertEqual(delivery.attempts, 1)
