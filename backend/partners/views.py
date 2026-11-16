@@ -275,10 +275,12 @@ import json
 from urllib.parse import parse_qsl
 from datetime import timedelta
 from django.db import transaction
-from .models import PartnerAvailability, ReservationRequest
+from .models import PartnerAvailability, ReservationRequest, ReservationCancellationRequest, ReservationNotification
 from .serializers import (
     PartnerAvailabilitySerializer, ReservationDecisionSerializer,
     ReservationRequestCreateSerializer, ReservationRequestSerializer,
+    ReservationCancellationRequestSerializer, ReservationCancellationCreateSerializer,
+    ReservationCancellationDecisionSerializer, ReservationNotificationSerializer,
 )
 
 
@@ -406,31 +408,202 @@ class PartnerReservationDecisionView(APIView):
         return Response(ReservationRequestSerializer(item).data)
 
 
+
+def _create_reservation_notification(recipient, reservation, event, title, message, cancellation=None):
+    return ReservationNotification.objects.create(
+        recipient=recipient, reservation=reservation, cancellation_request=cancellation,
+        event=event, title=title, message=message[:500],
+    )
+
+
+def _complete_approved_cancellation(cancellation):
+    """Complete cancellation only after every captured payment has been fully refunded."""
+    with transaction.atomic():
+        item = ReservationCancellationRequest.objects.select_for_update().select_related(
+            "reservation__partner", "reservation__customer", "customer"
+        ).get(pk=cancellation.pk)
+        reservation = ReservationRequest.objects.select_for_update().get(pk=item.reservation_id)
+        if item.status == ReservationCancellationRequest.Status.COMPLETED:
+            return item
+        if item.status != ReservationCancellationRequest.Status.APPROVED:
+            return item
+        reservation.payments.filter(status=ReservationPayment.Status.PENDING).update(
+            status=ReservationPayment.Status.FAILED,
+            failure_reason="Reservation cancellation approved before payment capture.",
+            updated_at=timezone.now(),
+        )
+        if reservation.payments.filter(status=ReservationPayment.Status.CAPTURED).exists():
+            return item
+        if reservation.status == ReservationRequest.Status.CONFIRMED:
+            dates = [
+                reservation.start_date + timedelta(days=offset)
+                for offset in range((reservation.end_date - reservation.start_date).days)
+            ]
+            days = list(PartnerAvailability.objects.select_for_update().filter(
+                partner=reservation.partner, date__in=dates
+            ).order_by("date"))
+            for day in days:
+                day.booked_count = max(0, day.booked_count - reservation.guests)
+                day.save(update_fields=["booked_count", "updated_at"])
+        reservation.status = ReservationRequest.Status.CANCELLED
+        reservation.save(update_fields=["status", "updated_at"])
+        item.status = ReservationCancellationRequest.Status.COMPLETED
+        item.completed_at = timezone.now()
+        item.save(update_fields=["status", "completed_at"])
+        _create_reservation_notification(
+            item.customer, reservation, ReservationNotification.Event.CANCELLATION_COMPLETED,
+            "Cancellation completed",
+            "Your reservation has been cancelled. Any captured payments have been fully refunded.",
+            item,
+        )
+        _create_reservation_notification(
+            reservation.partner.owner, reservation, ReservationNotification.Event.CANCELLATION_COMPLETED,
+            "Reservation cancellation completed",
+            f"Reservation #{reservation.pk} has been cancelled and its capacity released.",
+            item,
+        )
+        return item
+
+
 class CustomerReservationCancelView(APIView):
+    """Customers cancel unconfirmed requests immediately or request cancellation of confirmed bookings."""
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
+        reason = str(request.data.get("reason", "")).strip()
         with transaction.atomic():
             try:
-                item = ReservationRequest.objects.select_for_update().get(pk=pk, customer=request.user)
+                item = ReservationRequest.objects.select_for_update().select_related(
+                    "partner", "partner__owner", "customer"
+                ).get(pk=pk, customer=request.user)
             except ReservationRequest.DoesNotExist:
                 from rest_framework.exceptions import NotFound
                 raise NotFound("Reservation request not found.")
-            if item.status not in (ReservationRequest.Status.PENDING, ReservationRequest.Status.CONFIRMED):
-                raise ValidationError("This reservation can no longer be cancelled.")
-            if item.payments.filter(status=ReservationPayment.Status.CAPTURED).exists():
-                raise ValidationError("This reservation has a captured payment. A refund workflow is required before cancellation.")
-            if item.status == ReservationRequest.Status.CONFIRMED:
-                dates = [item.start_date + timedelta(days=offset) for offset in range((item.end_date - item.start_date).days)]
-                days = list(PartnerAvailability.objects.select_for_update().filter(
-                    partner=item.partner, date__in=dates
-                ).order_by("date"))
-                for day in days:
-                    day.booked_count = max(0, day.booked_count - item.guests)
-                    day.save(update_fields=["booked_count", "updated_at"])
-            item.status = ReservationRequest.Status.CANCELLED
-            item.save(update_fields=["status", "updated_at"])
-        return Response(ReservationRequestSerializer(item).data)
+            if item.status == ReservationRequest.Status.PENDING:
+                item.status = ReservationRequest.Status.CANCELLED
+                item.save(update_fields=["status", "updated_at"])
+                _create_reservation_notification(
+                    item.partner.owner, item, ReservationNotification.Event.CANCELLATION_COMPLETED,
+                    "Reservation request withdrawn",
+                    f"The customer withdrew reservation request #{item.pk}.",
+                )
+                return Response(ReservationRequestSerializer(item).data)
+            if item.status != ReservationRequest.Status.CONFIRMED:
+                raise ValidationError("Only pending or confirmed reservations can be cancelled.")
+            serializer = ReservationCancellationCreateSerializer(data={"reason": reason})
+            serializer.is_valid(raise_exception=True)
+            existing = ReservationCancellationRequest.objects.filter(
+                reservation=item,
+                status__in=(ReservationCancellationRequest.Status.PENDING, ReservationCancellationRequest.Status.APPROVED),
+            ).first()
+            if existing:
+                return Response(ReservationCancellationRequestSerializer(existing).data, status=status.HTTP_200_OK)
+            cancellation = ReservationCancellationRequest.objects.create(
+                reservation=item, customer=request.user, reason=serializer.validated_data["reason"],
+            )
+            _create_reservation_notification(
+                item.partner.owner, item, ReservationNotification.Event.CANCELLATION_REQUESTED,
+                "New cancellation request",
+                f"{request.user.email} requested cancellation of reservation #{item.pk}.",
+                cancellation,
+            )
+            _create_reservation_notification(
+                request.user, item, ReservationNotification.Event.CANCELLATION_REQUESTED,
+                "Cancellation request submitted",
+                "Your cancellation request has been sent to the partner for review.",
+                cancellation,
+            )
+        return Response(ReservationCancellationRequestSerializer(cancellation).data, status=status.HTTP_201_CREATED)
+
+
+class CustomerReservationCancellationListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        items = ReservationCancellationRequest.objects.filter(
+            customer=request.user
+        ).select_related("reservation__partner")
+        return Response(ReservationCancellationRequestSerializer(items, many=True).data)
+
+
+class PartnerReservationCancellationInboxView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        items = ReservationCancellationRequest.objects.filter(
+            reservation__partner__owner=request.user
+        ).select_related("reservation__partner", "customer")
+        return Response(ReservationCancellationRequestSerializer(items, many=True).data)
+
+
+class ReservationCancellationDecisionView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        serializer = ReservationCancellationDecisionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        with transaction.atomic():
+            try:
+                cancellation = ReservationCancellationRequest.objects.select_for_update().select_related(
+                    "reservation__partner", "reservation__partner__owner", "customer"
+                ).get(pk=pk)
+            except ReservationCancellationRequest.DoesNotExist:
+                from rest_framework.exceptions import NotFound
+                raise NotFound("Cancellation request not found.")
+            if not request.user.is_staff and cancellation.reservation.partner.owner_id != request.user.pk:
+                from rest_framework.exceptions import PermissionDenied
+                raise PermissionDenied("You are not authorised to decide this cancellation request.")
+            if cancellation.status != ReservationCancellationRequest.Status.PENDING:
+                raise ValidationError("Only pending cancellation requests can be decided.")
+            decision = serializer.validated_data["status"]
+            cancellation.status = decision
+            cancellation.decision_note = serializer.validated_data["decision_note"]
+            cancellation.decided_by = request.user
+            cancellation.decided_at = timezone.now()
+            cancellation.save(update_fields=["status", "decision_note", "decided_by", "decided_at"])
+            reservation = cancellation.reservation
+            if decision == ReservationCancellationRequest.Status.DECLINED:
+                _create_reservation_notification(
+                    cancellation.customer, reservation, ReservationNotification.Event.CANCELLATION_DECISION,
+                    "Cancellation request declined",
+                    cancellation.decision_note, cancellation,
+                )
+            else:
+                has_captured = reservation.payments.filter(status=ReservationPayment.Status.CAPTURED).exists()
+                if has_captured:
+                    _create_reservation_notification(
+                        cancellation.customer, reservation, ReservationNotification.Event.CANCELLATION_DECISION,
+                        "Cancellation approved — refund in progress",
+                        "Your cancellation has been approved. The reservation will be cancelled after all captured payments are refunded.",
+                        cancellation,
+                    )
+                else:
+                    cancellation = _complete_approved_cancellation(cancellation)
+        return Response(ReservationCancellationRequestSerializer(cancellation).data)
+
+
+class ReservationNotificationInboxView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        items = ReservationNotification.objects.filter(recipient=request.user).select_related(
+            "reservation__partner"
+        )
+        if request.query_params.get("unread") == "true":
+            items = items.filter(read_at__isnull=True)
+        return Response(ReservationNotificationSerializer(items[:100], many=True).data)
+
+
+class ReservationNotificationReadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        item = get_object_or_404(ReservationNotification, pk=pk, recipient=request.user)
+        if item.read_at is None:
+            item.read_at = timezone.now()
+            item.save(update_fields=["read_at"])
+        return Response(ReservationNotificationSerializer(item).data)
+
 
 class PartnerBookingProfileListView(APIView):
     permission_classes = [IsAuthenticated]
