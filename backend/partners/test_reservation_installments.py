@@ -6,7 +6,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from accounts.models import User
-from .models import Partner, ReservationRequest, ReservationQuote, ReservationInstallment, PartnerFinancialSettings
+from .models import Partner, ReservationRequest, ReservationQuote, ReservationInstallment, PartnerFinancialSettings, ReservationPayment
 from .views import _create_reservation_installments
 
 
@@ -80,6 +80,33 @@ class ReservationInstallmentScheduleTests(TestCase):
             sum((item.amount for item in items), Decimal("0.00")),
             Decimal("10000.00"),
         )
+
+
+    def test_checkout_selects_the_next_scheduled_balance_instalment(self):
+        PartnerFinancialSettings.objects.create(
+            partner=self.partner, balance_installment_count=3,
+            balance_installment_interval_days=7,
+        )
+        _create_reservation_installments(self.reservation, self.quote)
+        client = APIClient()
+        client.force_authenticate(self.customer)
+        first = client.post("/api/v1/partners/payments/", {
+            "reservation_id": self.reservation.pk, "idempotency_key": "instalment-first-001",
+        }, format="json")
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(first.data["kind"], ReservationPayment.Kind.DEPOSIT)
+        self.assertEqual(Decimal(first.data["amount"]), Decimal("2500.00"))
+        payment = ReservationPayment.objects.get(pk=first.data["id"])
+        payment.status = ReservationPayment.Status.CAPTURED
+        payment.provider_reference = "test-capture-first"
+        payment.captured_at = timezone.now()
+        payment.save(update_fields=["status", "provider_reference", "captured_at"])
+        second = client.post("/api/v1/partners/payments/", {
+            "reservation_id": self.reservation.pk, "idempotency_key": "instalment-second-002",
+        }, format="json")
+        self.assertEqual(second.status_code, 201)
+        self.assertEqual(second.data["kind"], ReservationPayment.Kind.BALANCE)
+        self.assertEqual(Decimal(second.data["amount"]), Decimal("2500.00"))
 
     def test_schedule_creation_is_idempotent(self):
         _create_reservation_installments(self.reservation, self.quote)
