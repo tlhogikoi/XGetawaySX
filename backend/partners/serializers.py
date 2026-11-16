@@ -230,15 +230,88 @@ class ReservationRequestCreateSerializer(serializers.Serializer):
         return attrs
 
 
+from .models import ReservationQuote, ReservationQuoteItem
+
+
+class ReservationQuoteItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ReservationQuoteItem
+        fields = ("id", "description", "quantity", "unit_price", "line_total")
+        read_only_fields = fields
+
+
+class ReservationQuoteSerializer(serializers.ModelSerializer):
+    items = ReservationQuoteItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ReservationQuote
+        fields = ("id", "version", "status", "currency", "total_amount", "deposit_amount", "terms", "expires_at", "responded_at", "created_at", "items")
+        read_only_fields = fields
+
+
+class ReservationQuoteCreateSerializer(serializers.Serializer):
+    items = serializers.ListField(
+        child=serializers.DictField(), min_length=1, max_length=50
+    )
+    currency = serializers.CharField(min_length=3, max_length=3, default="ZAR")
+    deposit_amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0"))
+    terms = serializers.CharField(required=False, allow_blank=True, max_length=3000)
+    expires_at = serializers.DateTimeField()
+
+    def validate_currency(self, value):
+        value = value.upper()
+        if not value.isalpha():
+            raise serializers.ValidationError("Currency must be a three-letter code.")
+        return value
+
+    def validate(self, attrs):
+        if attrs["expires_at"] <= timezone.now():
+            raise serializers.ValidationError({"expires_at": "Quote expiry must be in the future."})
+        total = Decimal("0.00")
+        clean_items = []
+        for index, item in enumerate(attrs["items"]):
+            description = str(item.get("description", "")).strip()
+            if not description or len(description) > 180:
+                raise serializers.ValidationError({"items": f"Item {index + 1} needs a description (maximum 180 characters)."})
+            try:
+                quantity = Decimal(str(item.get("quantity", "1")))
+                unit_price = Decimal(str(item.get("unit_price")))
+            except Exception:
+                raise serializers.ValidationError({"items": f"Item {index + 1} has an invalid quantity or unit price."})
+            if not quantity.is_finite() or quantity <= 0 or quantity > Decimal("999999.99"):
+                raise serializers.ValidationError({"items": f"Item {index + 1} quantity must be positive."})
+            if not unit_price.is_finite() or unit_price < 0 or unit_price > Decimal("9999999999.99"):
+                raise serializers.ValidationError({"items": f"Item {index + 1} unit price is invalid."})
+            line_total = (quantity * unit_price).quantize(Decimal("0.01"))
+            total += line_total
+            clean_items.append({
+                "description": description, "quantity": quantity,
+                "unit_price": unit_price, "line_total": line_total,
+            })
+        total = total.quantize(Decimal("0.01"))
+        if total <= 0:
+            raise serializers.ValidationError({"items": "Quote total must be greater than zero."})
+        if attrs["deposit_amount"] > total:
+            raise serializers.ValidationError({"deposit_amount": "Deposit cannot exceed the quotation total."})
+        attrs["items"] = clean_items
+        attrs["total_amount"] = total
+        return attrs
+
+
 class ReservationRequestSerializer(serializers.ModelSerializer):
     partner = PublicPartnerSerializer(read_only=True)
     trip_plan_id = serializers.IntegerField(read_only=True)
     customer_email = serializers.EmailField(source="customer.email", read_only=True)
+    latest_quote = serializers.SerializerMethodField()
 
     class Meta:
         model = ReservationRequest
-        fields = ("id", "partner", "customer_email", "trip_plan_id", "start_date", "end_date", "guests", "message", "status", "booking_reference", "partner_response", "responded_at", "created_at", "updated_at")
+        fields = ("id", "partner", "customer_email", "trip_plan_id", "start_date", "end_date", "guests", "message", "status", "booking_reference", "quoted_total", "quoted_deposit", "quoted_currency", "quoted_at", "partner_response", "responded_at", "latest_quote", "created_at", "updated_at")
         read_only_fields = fields
+
+    def get_latest_quote(self, obj):
+        quote = obj.quotes.prefetch_related("items").order_by("-version").first()
+        return ReservationQuoteSerializer(quote).data if quote else None
 
 
 class ReservationDecisionSerializer(serializers.Serializer):
