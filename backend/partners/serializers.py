@@ -288,6 +288,10 @@ class ReservationPaymentCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError({"reservation_id": "Reservation not found."})
         if reservation.status != ReservationRequest.Status.CONFIRMED:
             raise serializers.ValidationError({"reservation_id": "Only confirmed reservations can be paid."})
+        if reservation.cancellation_requests.filter(
+            status__in=(ReservationCancellationRequest.Status.PENDING, ReservationCancellationRequest.Status.APPROVED)
+        ).exists():
+            raise serializers.ValidationError({"reservation_id": "Payment is paused while a cancellation request is under review or refund processing."})
         attrs["reservation"] = reservation
         return attrs
 
