@@ -253,6 +253,54 @@ class ReservationRequest(models.Model):
         return f"Reservation request {self.pk} — {self.partner.name}"
 
 
+class ReservationQuote(models.Model):
+    class Status(models.TextChoices):
+        SENT = "sent", "Sent to customer"
+        ACCEPTED = "accepted", "Accepted by customer"
+        DECLINED = "declined", "Declined by customer"
+        EXPIRED = "expired", "Expired"
+
+    reservation = models.ForeignKey(
+        ReservationRequest, on_delete=models.PROTECT, related_name="quotes"
+    )
+    version = models.PositiveIntegerField()
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.SENT)
+    currency = models.CharField(max_length=3, default="ZAR")
+    total_amount = models.DecimalField(max_digits=12, decimal_places=2)
+    deposit_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    terms = models.TextField(blank=True, max_length=3000)
+    expires_at = models.DateTimeField()
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="issued_reservation_quotes"
+    )
+    responded_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-version",)
+        constraints = [
+            models.UniqueConstraint(fields=("reservation", "version"), name="uniq_res_quote_version"),
+        ]
+        indexes = [models.Index(fields=("reservation", "status"), name="res_quote_status_idx")]
+
+    def __str__(self):
+        return f"Quote v{self.version} — reservation {self.reservation_id}"
+
+
+class ReservationQuoteItem(models.Model):
+    quote = models.ForeignKey(ReservationQuote, on_delete=models.CASCADE, related_name="items")
+    description = models.CharField(max_length=180)
+    quantity = models.DecimalField(max_digits=8, decimal_places=2, default=1)
+    unit_price = models.DecimalField(max_digits=12, decimal_places=2)
+    line_total = models.DecimalField(max_digits=12, decimal_places=2)
+
+    class Meta:
+        ordering = ("id",)
+
+    def __str__(self):
+        return f"{self.description} — quote {self.quote_id}"
+
+
 class ReservationCancellationRequest(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending", "Pending review"
