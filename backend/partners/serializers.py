@@ -332,7 +332,7 @@ class PartnerFinancialSettingsSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PartnerFinancialSettings
-        fields = ("partner_id", "deposit_type", "deposit_value", "commission_rate", "currency", "deposit_due_hours", "balance_due_days_before", "updated_at")
+        fields = ("partner_id", "deposit_type", "deposit_value", "commission_rate", "currency", "deposit_due_hours", "balance_due_days_before", "balance_installment_count", "balance_installment_interval_days", "updated_at")
         read_only_fields = ("partner_id", "commission_rate", "updated_at")
 
     def validate_currency(self, value):
@@ -352,6 +352,12 @@ class PartnerFinancialSettingsSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"deposit_due_hours": "Deposit deadline must be between 1 and 720 hours."})
         if not 0 <= balance_due_days <= 365:
             raise serializers.ValidationError({"balance_due_days_before": "Balance deadline must be between 0 and 365 days before travel."})
+        count = attrs.get("balance_installment_count", getattr(self.instance, "balance_installment_count", 1))
+        interval = attrs.get("balance_installment_interval_days", getattr(self.instance, "balance_installment_interval_days", 7))
+        if not 1 <= count <= 6:
+            raise serializers.ValidationError({"balance_installment_count": "Choose between 1 and 6 balance instalments."})
+        if not 1 <= interval <= 90:
+            raise serializers.ValidationError({"balance_installment_interval_days": "Instalment intervals must be between 1 and 90 days."})
         if deposit_type == PartnerFinancialSettings.DepositType.PERCENTAGE and deposit_value > 100:
             raise serializers.ValidationError({"deposit_value": "Percentage deposits cannot exceed 100%."})
         if deposit_type == PartnerFinancialSettings.DepositType.NONE and deposit_value != 0:
