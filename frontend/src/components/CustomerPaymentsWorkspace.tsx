@@ -7,12 +7,14 @@ type Reservation={id:number;partner:Partner;booking_reference:string|null;start_
 type Gateway="payfast"|"yoco";
 type Payment={id:number;reservation:number;reservation_reference:string|null;partner_name:string;kind:string;status:string;amount:string;currency:string;provider:string;checkout_session_id:string;checkout_url:string;provider_reference:string|null;failure_reason:string;created_at:string;captured_at:string|null};
 type CheckoutResponse={payment:Payment;provider:Gateway;checkout_url:string;form_fields:Record<string,string>|null};
+type Installment={id:number;sequence:number;kind:string;amount:string;paid_amount:string;outstanding_amount:string;currency:string;due_at:string;status:"paid"|"overdue"|"upcoming"};
+type PaymentSchedule={reservation_id:number;booking_reference:string;reservation_status:string;currency:string|null;total_amount:string;outstanding_amount:string;installments:Installment[]};
 const API=(import.meta as ImportMeta & {env:Record<string,string|undefined>}).env.VITE_API_BASE_URL??"";
 
 export default function CustomerPaymentsWorkspace({accessToken}:{accessToken:string}){
  const headers={Authorization:`Bearer ${accessToken}`,"Content-Type":"application/json"};
  const [reservations,setReservations]=useState<Reservation[]>([]);
- const [payments,setPayments]=useState<Payment[]>([]);
+ const [payments,setPayments]=useState<Payment[]>([]);\n const [schedules,setSchedules]=useState<PaymentSchedule[]>([]);
  const [reservationId,setReservationId]=useState("");
  const [gateway,setGateway]=useState<Gateway>("payfast");
  const [busy,setBusy]=useState(false);
@@ -26,7 +28,14 @@ export default function CustomerPaymentsWorkspace({accessToken}:{accessToken:str
    fetch(`${API}/api/v1/partners/payments/`,{headers}),
   ]);
   if(!r.ok||!p.ok)throw new Error("Could not load your reservations and payment records.");
-  setReservations(await r.json());setPayments(await p.json());
+  const reservationData=await r.json() as Reservation[];
+  setReservations(reservationData);setPayments(await p.json());
+  const scheduleResults=await Promise.all(reservationData.filter(item=>item.status==="confirmed").map(async item=>{
+   const response=await fetch(`${API}/api/v1/partners/reservations/${item.id}/payment-schedule/`,{headers});
+   if(!response.ok)return null;
+   return await response.json() as PaymentSchedule;
+  }));
+  setSchedules(scheduleResults.filter((item):item is PaymentSchedule=>item!==null));
  }
  useEffect(()=>{let live=true;load().catch(e=>{if(live)setError(e.message);});return()=>{live=false;};},[accessToken]);
 
@@ -89,6 +98,16 @@ export default function CustomerPaymentsWorkspace({accessToken}:{accessToken:str
    <p className="finance-note">The payment amount is calculated by XGetawaySX from the confirmed reservation quote. Card details are entered only on the provider's hosted checkout page.</p>
   </div>
   <div className="finance-panel">
+   <h3>Payment deadlines & instalments</h3>
+   {schedules.length?schedules.map(schedule=><article className="finance-row" key={schedule.reservation_id}>
+    <strong>Booking {schedule.booking_reference||`#${schedule.reservation_id}`}</strong>
+    <p>Total {schedule.currency} {schedule.total_amount} · Outstanding {schedule.currency} {schedule.outstanding_amount}</p>
+    {schedule.installments.map(item=><div key={item.id}>
+     <p>{item.kind} · {item.currency} {item.amount} · Due {new Date(item.due_at).toLocaleDateString()}</p>
+     <span className={`finance-status ${item.status}`}>{item.status} · outstanding {item.currency} {item.outstanding_amount}</span>
+    </div>)}
+   </article>):<p>Payment schedules appear here after a partner confirms your reservation.</p>}
+   <p className="finance-note">A schedule is a payment plan, not proof of payment. Only verified captured payments reduce the outstanding balance.</p>
    <h3><ReceiptText size={18}/> Payment history</h3>
    {payments.length?payments.map(p=><article className="finance-row" key={p.id}>
     <div><strong>{p.partner_name}</strong><span className={`finance-status ${p.status}`}>{p.status}</span></div>
