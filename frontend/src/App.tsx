@@ -1,4 +1,5 @@
 import GalleryPartnerGrid from "./components/GalleryPartnerGrid";
+import GalleryExplorePage from "./components/GalleryExplorePage";
 import PublicPartnerProfile from "./components/PublicPartnerProfile";
 import GalleryStoryEditor from "./components/GalleryStoryEditor";
 import PartnerDiscovery from "./components/PartnerDiscovery";
@@ -17,6 +18,7 @@ const categories = [
 
 export default function App() {
   const pathname = window.location.pathname;
+  if (pathname === "/gallery" || pathname === "/gallery/") return <GalleryExplorePage />;
   if (pathname === "/account" || pathname === "/account/") return <CustomerAccount />;
   if (pathname === "/partner/gallery" || pathname === "/partner/gallery/") return <GalleryStoryEditor />;
   const destinationMatch = pathname.match(/^\/destinations\/([^/]+)\/?$/);
@@ -30,7 +32,7 @@ export default function App() {
     <main className="site-shell">
       <header className="topbar">
         <a className="wordmark" href="/" aria-label="XGetawaySX home"><span className="wordmark-x">X</span>GETAWAYS<span className="wordmark-x">X</span></a>
-        <nav aria-label="Main navigation"><a href="#about">About</a><a href="#trips">Trips</a><a href="#partner-discovery">Partners</a><a href="#destinations">Destinations</a><a href="#gallery">Gallery</a></nav>
+        <nav aria-label="Main navigation"><a href="#about">About</a><a href="#trips">Trips</a><a href="#partner-discovery">Partners</a><a href="#destinations">Destinations</a><a href="/gallery/">Gallery</a></nav>
         <a className="nav-cta" href="/account">My account <ArrowRight size={16} /></a>
       </header>
       <section className="hero" id="discover">
