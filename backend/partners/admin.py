@@ -76,7 +76,7 @@ class ReservationRequestAdmin(admin.ModelAdmin):
 
 @admin.register(PartnerFinancialSettings)
 class PartnerFinancialSettingsAdmin(admin.ModelAdmin):
-    list_display = ("partner", "deposit_type", "deposit_value", "deposit_due_hours", "balance_due_days_before", "commission_rate", "currency", "updated_at")
+    list_display = ("partner", "deposit_type", "deposit_value", "deposit_due_hours", "balance_due_days_before", "balance_installment_count", "balance_installment_interval_days", "commission_rate", "currency", "updated_at")
     list_filter = ("deposit_type", "currency")
     search_fields = ("partner__name",)
 
