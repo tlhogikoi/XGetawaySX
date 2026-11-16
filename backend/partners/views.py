@@ -829,7 +829,7 @@ class PartnerFinancialSummaryView(APIView):
 
 
 def _finalize_provider_refund(refund, provider_reference="", reconciled_by=None):
-    from .models import ReservationRefund, PartnerCommissionAdjustment
+    from .models import ReservationRefund, PartnerCommissionAdjustment, ReservationNotification, ReservationCancellationRequest
     with transaction.atomic():
         refund = ReservationRefund.objects.select_for_update().select_related("payment", "payment__partner").get(pk=refund.pk)
         payment = ReservationPayment.objects.select_for_update().select_related("partner").get(pk=refund.payment_id)
@@ -875,6 +875,16 @@ def _finalize_provider_refund(refund, provider_reference="", reconciled_by=None)
         if refunded_total + refund.amount == payment.amount:
             payment.status = ReservationPayment.Status.REFUNDED
             payment.save(update_fields=["status", "updated_at"])
+        ReservationNotification.objects.create(
+            recipient=payment.customer, reservation=payment.reservation, event=ReservationNotification.Event.REFUND_UPDATE,
+            title="Refund confirmed",
+            message=f"A refund of {refund.currency} {refund.amount} has been confirmed by the payment provider.",
+        )
+        cancellation = ReservationCancellationRequest.objects.filter(
+            reservation=payment.reservation, status=ReservationCancellationRequest.Status.APPROVED
+        ).first()
+        if cancellation:
+            _complete_approved_cancellation(cancellation)
         return refund
 
 
@@ -1060,6 +1070,17 @@ class AdminPaymentRefundView(APIView):
                 payment.status = ReservationPayment.Status.REFUNDED
                 payment.save(update_fields=["status", "updated_at"])
 
+        ReservationNotification.objects.create(
+            recipient=payment.customer, reservation=payment.reservation,
+            event=ReservationNotification.Event.REFUND_UPDATE,
+            title="Refund reconciled",
+            message=f"A refund of {refund.currency} {refund.amount} has been reconciled by XGetawaySX staff.",
+        )
+        cancellation = ReservationCancellationRequest.objects.filter(
+            reservation=payment.reservation, status=ReservationCancellationRequest.Status.APPROVED
+        ).first()
+        if cancellation:
+            _complete_approved_cancellation(cancellation)
         return Response(ReservationRefundSerializer(refund).data, status=status.HTTP_201_CREATED)
 
 
