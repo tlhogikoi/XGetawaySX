@@ -171,6 +171,10 @@ class PartnerEnquiry(models.Model):
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     partner_response = models.TextField(blank=True)
     responded_at = models.DateTimeField(null=True, blank=True)
+    reservation_request = models.OneToOneField(
+        "ReservationRequest", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="source_enquiry",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
