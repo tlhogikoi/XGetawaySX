@@ -1,6 +1,9 @@
+from django.db.models import Q
+from django.utils import timezone
 from rest_framework import serializers
 
-from .models import GalleryAuditEvent, GalleryMedia, GalleryPartnerNotification, GalleryStory, GalleryStoryRevision
+from partners.models import Partner
+from .models import GalleryAuditEvent, GalleryMedia, GalleryMediaPermissionGrant, GalleryPartnerNotification, GalleryStory, GalleryStoryRevision
 from .validators import validate_gallery_image
 
 
@@ -39,6 +42,8 @@ class PublicGalleryStorySerializer(serializers.ModelSerializer):
 
 class GalleryStoryDraftSerializer(serializers.ModelSerializer):
     editorial_feedback = serializers.SerializerMethodField()
+    publication_checks = serializers.SerializerMethodField()
+    publication_ready = serializers.SerializerMethodField()
     media_status = serializers.CharField(source="media.status", read_only=True)
     partner_gallery_status = serializers.CharField(source="media.partner.gallery_status", read_only=True)
 
@@ -50,6 +55,7 @@ class GalleryStoryDraftSerializer(serializers.ModelSerializer):
             "ai_source_facts", "status", "current_version", "editorial_feedback",
             "owner_approved_version", "editorial_approved_version",
             "owner_approved_at", "editorial_approved_at", "media_status", "partner_gallery_status",
+            "publication_checks", "publication_ready",
         )
         read_only_fields = (
             "status", "owner_history_private", "original_history_public_permission",
@@ -60,6 +66,49 @@ class GalleryStoryDraftSerializer(serializers.ModelSerializer):
     def get_editorial_feedback(self, obj):
         event = obj.audit_events.filter(action="story_changes_requested").order_by("-created_at").first()
         return event.details.get("reason") if event else None
+
+    def get_publication_checks(self, obj):
+        media_items = [obj.media] + [
+            attachment.media
+            for attachment in obj.additional_media.select_related("media").all()
+        ]
+        now = timezone.now()
+        website_permissions = []
+        for media in media_items:
+            grants = media.permission_grants.filter(
+                purpose=GalleryMediaPermissionGrant.Purpose.GALLERY_PROMOTION,
+                review_status=GalleryMediaPermissionGrant.ReviewStatus.APPROVED,
+                revoked_at__isnull=True,
+            ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
+            website_permissions.append(any(
+                isinstance(channels, list) and "website" in channels
+                for channels in grants.values_list("permitted_channels", flat=True)
+            ))
+
+        partner_approved = obj.media.partner.gallery_status == Partner.ApprovalStatus.APPROVED
+        media_approved = all(media.status == GalleryMedia.Status.APPROVED for media in media_items)
+        website_permission = all(website_permissions)
+        summary_valid = 30 <= len(obj.summary.split()) <= 60
+        owner_approved = bool(obj.owner_approved_at and obj.owner_approved_version == obj.current_version)
+        editorial_approved = bool(obj.editorial_approved_at and obj.editorial_approved_version == obj.current_version)
+
+        return [
+            {"key": "partner_approved", "label": "Partner profile approval", "passed": partner_approved,
+             "detail": "Partner profile is approved." if partner_approved else "The partner profile must be approved for Gallery publication."},
+            {"key": "media_approved", "label": "All story images approved", "passed": media_approved,
+             "detail": "Every image is approved." if media_approved else "Every image in this story must pass editorial media approval."},
+            {"key": "website_permission", "label": "Website publication rights", "passed": website_permission,
+             "detail": "Every image has active website permission." if website_permission else "Each image needs an active, approved rights grant that explicitly permits website use."},
+            {"key": "summary_valid", "label": "Public story summary", "passed": summary_valid,
+             "detail": "The summary meets the 30–60 word requirement." if summary_valid else "The public summary must contain 30–60 words."},
+            {"key": "owner_approval", "label": "Current-version owner approval", "passed": owner_approved,
+             "detail": "The current version has owner approval." if owner_approved else "Approve this exact story version in your partner workspace."},
+            {"key": "editorial_approval", "label": "Current-version editorial approval", "passed": editorial_approved,
+             "detail": "The current version has editorial approval." if editorial_approved else "Editorial staff must approve this exact version after completing quality checks."},
+        ]
+
+    def get_publication_ready(self, obj):
+        return all(check["passed"] for check in self.get_publication_checks(obj))
 
     def validate_summary(self, value):
         count = len(value.split())
