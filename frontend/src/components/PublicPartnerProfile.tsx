@@ -47,7 +47,8 @@ export default function PublicPartnerProfile({ slug }: { slug: string }) {
   const stories: GalleryStoryCardProps[] = profile.stories.map(story => ({
     storyId: story.id, imageUrl: story.image, imageAlt: story.alt_text,
     title: story.title, partnerName: story.partner_name, summary: story.summary,
-    partnerUrl: "/#gallery",
+    partnerUrl: `/partners/${encodeURIComponent(story.partner_slug)}/`,
+    storyUrl: `/gallery/stories/${story.id}/`,
   }));
 
   return <main className="public-profile-shell">

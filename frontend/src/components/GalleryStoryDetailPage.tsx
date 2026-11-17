@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, ArrowUpRight, MapPin, CalendarDays, Compass } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, MapPin, CalendarDays, Compass, Share2 } from "lucide-react";
+import GalleryStoryCard, { type GalleryStoryCardProps } from "./GalleryStoryCard";
 import GalleryContentPlaceholder from "./GalleryContentPlaceholder";
 import "./gallery.css";
 
@@ -14,6 +15,8 @@ export default function GalleryStoryDetailPage({ storyId }: { storyId: string })
   const [story, setStory] = useState<GalleryStory | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [relatedStories, setRelatedStories] = useState<GalleryStoryCardProps[]>([]);
+  const [shareFeedback, setShareFeedback] = useState("");
   useEffect(() => {
     const controller = new AbortController();
     fetch(`${API_BASE}/api/v1/gallery/stories/${encodeURIComponent(storyId)}/`, { signal: controller.signal })
@@ -24,10 +27,37 @@ export default function GalleryStoryDetailPage({ storyId }: { storyId: string })
       }).then(setStory).catch(err => {
         if (err instanceof Error && err.name !== "AbortError") setError(err.message);
       }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    fetch(`${API_BASE}/api/v1/gallery/stories/`, { signal: controller.signal })
+      .then(response => response.ok ? response.json() as Promise<GalleryStory[]> : [])
+      .then(items => setRelatedStories(items.filter(item => String(item.id) !== storyId).slice(0, 3).map(item => ({
+        storyId: item.id, imageUrl: item.image, imageAlt: item.alt_text,
+        title: item.title, partnerName: item.partner_name, summary: item.summary,
+        partnerUrl: `/partners/${encodeURIComponent(item.partner_slug)}/`,
+        storyUrl: `/gallery/stories/${item.id}/`,
+      }))))
+      .catch(() => { /* Related stories are optional; keep the main story available. */ });
     return () => controller.abort();
   }, [storyId]);
   if (loading) return <main className="gallery-story-detail-shell"><p role="status">Loading approved story…</p></main>;
   if (error || !story) return <main className="gallery-story-detail-shell"><a className="profile-back" href="/gallery/"><ArrowLeft size={16}/> Back to Gallery</a><GalleryContentPlaceholder eyebrow="XGETAWAYSX GALLERY" title="Story unavailable." message={error || "This story could not be found."} /></main>;
+  const shareStory = async () => {
+    const url = window.location.href;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: story.title, text: `${story.summary} — XGetawaySX`, url });
+        setShareFeedback("Share sheet opened.");
+      } else if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+        setShareFeedback("Story link copied.");
+      } else {
+        setShareFeedback(`Copy this link: ${url}`);
+      }
+    } catch (shareError) {
+      if (!(shareError instanceof Error) || shareError.name !== "AbortError") {
+        setShareFeedback("Sharing is unavailable here. Copy the page address from your browser.");
+      }
+    }
+  };
   const publishedDate = story.published_at ? new Date(story.published_at) : null;
   const validDate = publishedDate && !Number.isNaN(publishedDate.getTime());
   return <main className="gallery-story-detail-shell">
@@ -38,8 +68,9 @@ export default function GalleryStoryDetailPage({ storyId }: { storyId: string })
       </section>
       <section className="gallery-story-detail-body"><p className="eyebrow">THE STORY BEHIND THE PLACE</p><h2>Discover the experience.</h2><p className="gallery-story-detail-summary">{story.summary}</p>
         {story.owner_original_history && <div className="gallery-owner-history"><p className="eyebrow">SHARED BY THE PARTNER</p><h3>The story from the people behind it.</h3><p>{story.owner_original_history}</p></div>}
-        <div className="gallery-story-detail-cta"><div><Compass size={22}/><div><strong>Inspired to experience it?</strong><span>Explore the partner or start planning your next getaway.</span></div></div><a className="primary-button" href={`/partners/${encodeURIComponent(story.partner_slug)}/`}>Explore partner <ArrowUpRight size={16}/></a><a className="gallery-plan-link" href="/account">Plan a getaway <ArrowUpRight size={15}/></a></div>
+        <div className="gallery-story-detail-cta"><div><Compass size={22}/><div><strong>Inspired to experience it?</strong><span>Explore the partner or start planning your next getaway.</span></div></div><a className="primary-button" href={`/partners/${encodeURIComponent(story.partner_slug)}/`}>Explore partner <ArrowUpRight size={16}/></a><a className="gallery-plan-link" href="/account">Plan a getaway <ArrowUpRight size={15}/></a><button className="gallery-share-button" type="button" onClick={shareStory}><Share2 size={16}/> Share story</button>{shareFeedback && <p className="gallery-share-feedback" role="status">{shareFeedback}</p>}</div>
       </section>
+      {relatedStories.length > 0 && <section className="gallery-related-stories" aria-labelledby="gallery-related-title"><p className="eyebrow">KEEP EXPLORING</p><h2 id="gallery-related-title">More stories to discover.</h2><div className="gallery-partner-grid">{relatedStories.map(item => <GalleryStoryCard key={item.storyId} {...item}/>)}</div></section>}
     </article>
     <footer className="gallery-explore-footer"><span>© {new Date().getFullYear()} XGetawaySX</span><strong>TRAVEL THROUGH US.</strong><a href="/gallery/">Discover more stories</a></footer>
   </main>;

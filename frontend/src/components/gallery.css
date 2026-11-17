@@ -57,3 +57,12 @@
 .gallery-story-detail-cta .primary-button{display:inline-flex;align-items:center;gap:8px;padding:12px 16px;border-radius:4px;background:#176b68;color:#fff;font-size:12px;font-weight:800}
 .gallery-plan-link{display:inline-flex;align-items:center;gap:5px;color:#168e88;font-size:12px;font-weight:800}
 @media(max-width:760px){.gallery-story-detail-hero{grid-template-columns:1fr;gap:28px;padding:50px 7%}.gallery-story-detail-image img{max-height:360px}.gallery-story-detail-body{padding:48px 7% 60px}.gallery-story-detail-image figcaption{flex-wrap:wrap}}
+
+/* Dev 35: story sharing and related discovery */
+.gallery-share-button{display:inline-flex;align-items:center;gap:7px;padding:11px 14px;border:1px solid #c8d9d4;border-radius:4px;background:#fff;color:#176b68;font-size:12px;font-weight:800;cursor:pointer}
+.gallery-share-button:hover{background:#edf7f4}
+.gallery-share-feedback{flex-basis:100%;margin:0;color:#176b68;font-size:12px;overflow-wrap:anywhere}
+.gallery-related-stories{max-width:1180px;margin:0 auto;padding:0 7% 76px}
+.gallery-related-stories>.eyebrow{color:#168e88}
+.gallery-related-stories h2{margin:0 0 24px;color:#173047;font-size:clamp(25px,3vw,34px)}
+@media(max-width:760px){.gallery-related-stories{padding:0 7% 54px}}
