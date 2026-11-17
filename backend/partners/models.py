@@ -619,3 +619,67 @@ class PaymentProviderEvent(models.Model):
 
     def __str__(self):
         return f"{self.provider} event {self.event_id}"
+
+
+
+class PartnerVerificationSubmission(models.Model):
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        SUBMITTED = "submitted", "Submitted for review"
+        CHANGES_REQUESTED = "changes_requested", "Changes requested"
+        APPROVED = "approved", "Verified"
+        REJECTED = "rejected", "Rejected"
+
+    partner = models.OneToOneField(
+        Partner, on_delete=models.PROTECT, related_name="verification_submission"
+    )
+    legal_business_name = models.CharField(max_length=180, blank=True)
+    registration_number = models.CharField(max_length=80, blank=True)
+    is_sole_proprietor = models.BooleanField(default=False)
+    tax_number = models.CharField(max_length=80, blank=True)
+    contact_person = models.CharField(max_length=160, blank=True)
+    contact_email = models.EmailField(blank=True)
+    contact_phone = models.CharField(max_length=40, blank=True)
+    physical_address = models.TextField(blank=True, max_length=1000)
+    document_checklist = models.JSONField(default=list, blank=True)
+    status = models.CharField(max_length=24, choices=Status.choices, default=Status.DRAFT)
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT,
+        related_name="partner_verifications_reviewed",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    review_notes = models.TextField(blank=True, max_length=2000)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-updated_at",)
+        indexes = [
+            models.Index(fields=("status", "submitted_at"), name="partner_verify_queue_idx"),
+        ]
+
+    def __str__(self):
+        return f"Verification — {self.partner.name} ({self.status})"
+
+
+class PartnerVerificationEvent(models.Model):
+    submission = models.ForeignKey(
+        PartnerVerificationSubmission, on_delete=models.PROTECT, related_name="events"
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, on_delete=models.PROTECT,
+        related_name="partner_verification_events",
+    )
+    event_type = models.CharField(max_length=40)
+    details = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(fields=("submission", "created_at"), name="partner_verify_event_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.event_type} — verification {self.submission_id}"
