@@ -844,6 +844,33 @@ class GalleryPartnerActivityTests(TestCase):
         self.assertEqual(response.status_code, 401)
 
 
+    def test_partner_can_view_current_submission_status_without_internal_review_notes(self):
+        from .models import GalleryMediaPermissionGrant
+        GalleryMediaPermissionGrant.objects.create(
+            media=self.media, rights_holder="Owner", permitted_channels=["website"],
+            evidence_reference="evidence-ref", granted_by=self.owner,
+            granted_at=timezone.now(), review_status=GalleryMediaPermissionGrant.ReviewStatus.REJECTED,
+            reviewed_by=User.objects.create_superuser(email="submission-editor@example.com", password="test-password"),
+            reviewed_at=timezone.now(), review_notes="CONFIDENTIAL INTERNAL REVIEW NOTE",
+        )
+        self.client.force_authenticate(self.owner)
+        response = self.client.get(f"/api/v1/gallery/partners/{self.partner.id}/submissions/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        item = response.data[0]
+        self.assertEqual(item["media_id"], self.media.id)
+        self.assertEqual(item["media_status"], GalleryMedia.Status.DRAFT)
+        self.assertEqual(item["rights_status"], GalleryMediaPermissionGrant.ReviewStatus.REJECTED)
+        self.assertEqual(item["story_id"], self.story.id)
+        self.assertNotIn("review_notes", item)
+        self.assertNotIn("CONFIDENTIAL INTERNAL REVIEW NOTE", str(response.data))
+
+    def test_another_partner_owner_cannot_view_submission_status(self):
+        self.client.force_authenticate(self.other)
+        response = self.client.get(f"/api/v1/gallery/partners/{self.partner.id}/submissions/")
+        self.assertEqual(response.status_code, 403)
+
+
 class GalleryStoryEditorialQualityReviewTests(TestCase):
     def setUp(self):
         self.client = APIClient()
