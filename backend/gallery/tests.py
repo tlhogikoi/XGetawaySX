@@ -1128,3 +1128,89 @@ class GalleryMultiImageExperienceTests(TestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertFalse(GalleryStoryMedia.objects.filter(story=self.story, media=other_media).exists())
+
+
+class GalleryPublicationReadinessTests(TestCase):
+    def setUp(self):
+        self.private_storage_dir = tempfile.mkdtemp(prefix="xgetawaysx-readiness-tests-")
+        self.storage_settings = override_settings(PRIVATE_GALLERY_STORAGE_ROOT=self.private_storage_dir)
+        self.storage_settings.enable()
+        self.client = APIClient()
+        self.owner = User.objects.create_user(email="readiness-owner@example.com", password="test-password")
+        self.editor = User.objects.create_superuser(email="readiness-editor@example.com", password="test-password")
+        self.partner = Partner.objects.create(
+            owner=self.owner,
+            name="Readiness Lodge",
+            category=Partner.Category.ACCOMMODATION,
+            gallery_status=Partner.ApprovalStatus.APPROVED,
+        )
+        self.cover = GalleryMedia.objects.create(
+            partner=self.partner,
+            title="Readiness cover",
+            image="https://images.example.test/readiness-cover.jpg",
+            alt_text="A lodge beside a mountain",
+            rights_holder="Readiness Lodge",
+            status=GalleryMedia.Status.APPROVED,
+            submitted_by=self.owner,
+        )
+        self.cover_grant = GalleryMediaPermissionGrant.objects.create(
+            media=self.cover,
+            rights_holder="Readiness Lodge",
+            permitted_channels=["website"],
+            evidence_file=SimpleUploadedFile("cover-rights.pdf", b"%PDF-1.4 cover rights"),
+            granted_by=self.owner,
+            granted_at=timezone.now(),
+            review_status=GalleryMediaPermissionGrant.ReviewStatus.APPROVED,
+            reviewed_by=self.editor,
+            reviewed_at=timezone.now(),
+        )
+
+    def tearDown(self):
+        self.storage_settings.disable()
+        shutil.rmtree(self.private_storage_dir, ignore_errors=True)
+
+    def test_partner_draft_explains_each_publication_gate_and_checks_every_story_image(self):
+        story = GalleryStory.objects.create(
+            media=self.cover,
+            owner_original_history="Private owner notes must never be included in public readiness diagnostics.",
+            summary=" ".join(["A verified short story describing the lodge, its surroundings and guest experience."] * 5),
+            status=GalleryStory.Status.OWNER_REVIEW,
+        )
+        additional = GalleryMedia.objects.create(
+            partner=self.partner,
+            title="Social-only additional image",
+            image="https://images.example.test/social-only.jpg",
+            alt_text="A second image for social channels",
+            rights_holder="Readiness Lodge",
+            status=GalleryMedia.Status.APPROVED,
+            submitted_by=self.owner,
+        )
+        GalleryMediaPermissionGrant.objects.create(
+            media=additional,
+            rights_holder="Readiness Lodge",
+            permitted_channels=["social_media"],
+            evidence_file=SimpleUploadedFile("social-rights.pdf", b"%PDF-1.4 social rights"),
+            granted_by=self.owner,
+            granted_at=timezone.now(),
+            review_status=GalleryMediaPermissionGrant.ReviewStatus.APPROVED,
+            reviewed_by=self.editor,
+            reviewed_at=timezone.now(),
+        )
+        GalleryStoryMedia.objects.create(story=story, media=additional, position=1)
+
+        self.client.force_authenticate(self.owner)
+        response = self.client.get("/api/v1/gallery/stories/drafts/")
+        self.assertEqual(response.status_code, 200)
+        payload = next(item for item in response.data if item["id"] == story.id)
+        checks = {item["key"]: item for item in payload["publication_checks"]}
+
+        self.assertFalse(payload["publication_ready"])
+        self.assertTrue(checks["partner_approved"]["passed"])
+        self.assertTrue(checks["media_approved"]["passed"])
+        self.assertFalse(checks["website_permission"]["passed"])
+        self.assertIn("website use", checks["website_permission"]["detail"])
+        self.assertTrue(checks["summary_valid"]["passed"])
+        self.assertFalse(checks["owner_approval"]["passed"])
+        self.assertFalse(checks["editorial_approval"]["passed"])
+        self.assertNotIn("reviewer_notes", payload)
+        self.assertNotIn("ai_source_facts", payload)
