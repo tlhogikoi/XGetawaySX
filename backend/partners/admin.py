@@ -255,3 +255,37 @@ class ReservationInstallmentAdmin(admin.ModelAdmin):
     list_filter = ("kind", "currency", "due_at")
     search_fields = ("reservation__booking_reference", "reservation__partner__name", "reservation__customer__email")
     readonly_fields = ("reservation", "sequence", "kind", "amount", "currency", "due_at", "created_at")
+
+
+from .models import PartnerVerificationSubmission, PartnerVerificationEvent
+
+
+@admin.register(PartnerVerificationSubmission)
+class PartnerVerificationSubmissionAdmin(admin.ModelAdmin):
+    list_display = ("partner", "legal_business_name", "status", "submitted_at", "reviewed_by", "reviewed_at")
+    list_filter = ("status", "is_sole_proprietor", "submitted_at")
+    search_fields = ("partner__name", "legal_business_name", "registration_number", "contact_email", "partner__owner__email")
+    readonly_fields = ("partner", "submitted_at", "reviewed_by", "reviewed_at", "created_at", "updated_at")
+    fields = (
+        "partner", "legal_business_name", "registration_number", "is_sole_proprietor",
+        "tax_number", "contact_person", "contact_email", "contact_phone",
+        "physical_address", "document_checklist", "status", "submitted_at",
+        "reviewed_by", "reviewed_at", "review_notes", "created_at", "updated_at",
+    )
+
+
+@admin.register(PartnerVerificationEvent)
+class PartnerVerificationEventAdmin(admin.ModelAdmin):
+    list_display = ("submission", "event_type", "actor", "created_at")
+    list_filter = ("event_type", "created_at")
+    search_fields = ("submission__partner__name", "actor__email", "event_type")
+    readonly_fields = ("submission", "actor", "event_type", "details", "created_at")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
