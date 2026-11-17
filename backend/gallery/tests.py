@@ -1,4 +1,5 @@
 from django.test import TestCase
+from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 import base64
@@ -1287,13 +1288,13 @@ class GalleryEditorialAuditReportingTests(TestCase):
 
     def test_audit_events_cannot_be_updated_or_deleted(self):
         self.submitted.action = "rewritten_event"
-        with self.assertRaises(Exception):
+        with self.assertRaises(ValidationError):
             self.submitted.save()
-        with self.assertRaises(Exception):
+        with self.assertRaises(ValidationError):
             self.submitted.delete()
-        with self.assertRaises(Exception):
+        with self.assertRaises(ValidationError):
             GalleryAuditEvent.objects.filter(pk=self.submitted.pk).update(action="rewritten_event")
-        with self.assertRaises(Exception):
+        with self.assertRaises(ValidationError):
             GalleryAuditEvent.objects.filter(pk=self.submitted.pk).delete()
         self.submitted.refresh_from_db()
         self.assertEqual(self.submitted.action, "story_submitted")

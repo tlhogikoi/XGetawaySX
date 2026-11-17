@@ -302,9 +302,19 @@ class GalleryAuditEvent(models.Model):
     details = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    objects = GalleryAuditEventManager()
+
     class Meta:
         ordering = ("-created_at",)
         indexes = [models.Index(fields=("action", "created_at"), name="gal_audit_action_date_idx")]
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk).exists():
+            raise ValidationError("Gallery audit events are append-only and cannot be updated.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Gallery audit events are append-only and cannot be deleted.")
 
 
 class GalleryMediaPermissionGrant(models.Model):
