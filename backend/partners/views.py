@@ -1739,3 +1739,184 @@ class MarketingUnsubscribeView(APIView):
             "marketing_opt_in": False,
             "essential_transactional_emails": True,
         })
+
+
+# Partner business verification and onboarding workflow.
+from .models import PartnerVerificationSubmission, PartnerVerificationEvent
+
+
+class PartnerVerificationOnboardingView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    editable_fields = (
+        "legal_business_name", "registration_number", "is_sole_proprietor",
+        "tax_number", "contact_person", "contact_email", "contact_phone",
+        "physical_address", "document_checklist",
+    )
+    allowed_documents = {
+        "business_registration", "proof_of_address", "owner_identity",
+        "tax_certificate", "operating_licence",
+    }
+
+    def _get_owned_partner(self, request, partner_id):
+        try:
+            return Partner.objects.get(pk=partner_id, owner=request.user)
+        except Partner.DoesNotExist:
+            from rest_framework.exceptions import NotFound
+            raise NotFound("Partner profile not found.")
+
+    def _payload(self, submission):
+        return {
+            "id": submission.pk,
+            "partner_id": submission.partner_id,
+            "partner_name": submission.partner.name,
+            "legal_business_name": submission.legal_business_name,
+            "registration_number": submission.registration_number,
+            "is_sole_proprietor": submission.is_sole_proprietor,
+            "tax_number": submission.tax_number,
+            "contact_person": submission.contact_person,
+            "contact_email": submission.contact_email,
+            "contact_phone": submission.contact_phone,
+            "physical_address": submission.physical_address,
+            "document_checklist": submission.document_checklist,
+            "status": submission.status,
+            "submitted_at": submission.submitted_at,
+            "reviewed_at": submission.reviewed_at,
+            "review_notes": submission.review_notes,
+            "events": [
+                {"event_type": event.event_type, "details": event.details, "created_at": event.created_at}
+                for event in submission.events.all()[:20]
+            ],
+            "updated_at": submission.updated_at,
+        }
+
+    def get(self, request):
+        partner_id = request.query_params.get("partner_id")
+        if not partner_id:
+            return Response({"partner_id": "This query parameter is required."}, status=status.HTTP_400_BAD_REQUEST)
+        partner = self._get_owned_partner(request, partner_id)
+        try:
+            submission = PartnerVerificationSubmission.objects.get(partner=partner)
+        except PartnerVerificationSubmission.DoesNotExist:
+            return Response({"detail": "No onboarding submission exists yet.", "partner_id": partner.pk}, status=status.HTTP_404_NOT_FOUND)
+        return Response(self._payload(submission))
+
+    def post(self, request):
+        partner_id = request.data.get("partner_id")
+        if not partner_id:
+            return Response({"partner_id": "This field is required."}, status=status.HTTP_400_BAD_REQUEST)
+        partner = self._get_owned_partner(request, partner_id)
+        submission, created = PartnerVerificationSubmission.objects.get_or_create(partner=partner)
+        if submission.status in (PartnerVerificationSubmission.Status.SUBMITTED, PartnerVerificationSubmission.Status.APPROVED, PartnerVerificationSubmission.Status.REJECTED):
+            return Response({"detail": "This submission is locked. A submitted review must be returned for changes before editing."}, status=status.HTTP_409_CONFLICT)
+
+        changed = []
+        for field in self.editable_fields:
+            if field in request.data:
+                value = request.data[field]
+                if field == "document_checklist":
+                    if not isinstance(value, list) or any(item not in self.allowed_documents for item in value):
+                        return Response({"document_checklist": "Use a list of supported document type identifiers."}, status=status.HTTP_400_BAD_REQUEST)
+                if field == "is_sole_proprietor" and not isinstance(value, bool):
+                    return Response({"is_sole_proprietor": "Provide true or false."}, status=status.HTTP_400_BAD_REQUEST)
+                setattr(submission, field, value)
+                changed.append(field)
+
+        if request.data.get("submit") is True:
+            missing = []
+            if not submission.legal_business_name.strip():
+                missing.append("legal_business_name")
+            if not submission.is_sole_proprietor and not submission.registration_number.strip():
+                missing.append("registration_number or is_sole_proprietor")
+            if not submission.contact_person.strip():
+                missing.append("contact_person")
+            if not submission.contact_email.strip():
+                missing.append("contact_email")
+            if not submission.contact_phone.strip():
+                missing.append("contact_phone")
+            if not submission.physical_address.strip():
+                missing.append("physical_address")
+            if not submission.document_checklist:
+                missing.append("document_checklist")
+            if missing:
+                return Response({"missing_fields": missing}, status=status.HTTP_400_BAD_REQUEST)
+            submission.status = PartnerVerificationSubmission.Status.SUBMITTED
+            submission.submitted_at = timezone.now()
+            submission.reviewed_by = None
+            submission.reviewed_at = None
+            submission.review_notes = ""
+            changed.extend(["status", "submitted_at", "reviewed_by", "reviewed_at", "review_notes"])
+
+        submission.save()
+        event_type = "submitted" if request.data.get("submit") is True else ("created" if created else "updated")
+        PartnerVerificationEvent.objects.create(
+            submission=submission, actor=request.user, event_type=event_type,
+            details={"changed_fields": sorted(set(changed))},
+        )
+        return Response(self._payload(submission), status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+
+class PartnerVerificationQueueView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not request.user.is_staff:
+            raise PermissionDenied("Only verification staff can access the onboarding queue.")
+        submissions = PartnerVerificationSubmission.objects.filter(
+            status=PartnerVerificationSubmission.Status.SUBMITTED
+        ).select_related("partner", "partner__owner").order_by("submitted_at")
+        return Response([{
+            "id": item.pk,
+            "partner_id": item.partner_id,
+            "partner_name": item.partner.name,
+            "partner_owner_email": item.partner.owner.email,
+            "legal_business_name": item.legal_business_name,
+            "registration_number": item.registration_number,
+            "is_sole_proprietor": item.is_sole_proprietor,
+            "contact_person": item.contact_person,
+            "contact_email": item.contact_email,
+            "contact_phone": item.contact_phone,
+            "physical_address": item.physical_address,
+            "document_checklist": item.document_checklist,
+            "submitted_at": item.submitted_at,
+        } for item in submissions])
+
+
+class PartnerVerificationReviewView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        if not request.user.is_staff:
+            raise PermissionDenied("Only verification staff can review onboarding submissions.")
+        try:
+            submission = PartnerVerificationSubmission.objects.select_related("partner").get(pk=pk)
+        except PartnerVerificationSubmission.DoesNotExist:
+            from rest_framework.exceptions import NotFound
+            raise NotFound("Verification submission not found.")
+        if submission.status != PartnerVerificationSubmission.Status.SUBMITTED:
+            return Response({"detail": "Only submitted applications can be reviewed."}, status=status.HTTP_409_CONFLICT)
+        decision = request.data.get("decision")
+        allowed = {
+            PartnerVerificationSubmission.Status.APPROVED,
+            PartnerVerificationSubmission.Status.CHANGES_REQUESTED,
+            PartnerVerificationSubmission.Status.REJECTED,
+        }
+        if decision not in allowed:
+            return Response({"decision": "Choose approved, changes_requested, or rejected."}, status=status.HTTP_400_BAD_REQUEST)
+        notes = str(request.data.get("review_notes", "")).strip()
+        if decision in (PartnerVerificationSubmission.Status.CHANGES_REQUESTED, PartnerVerificationSubmission.Status.REJECTED) and not notes:
+            return Response({"review_notes": "A reason is required for this decision."}, status=status.HTTP_400_BAD_REQUEST)
+        submission.status = decision
+        submission.reviewed_by = request.user
+        submission.reviewed_at = timezone.now()
+        submission.review_notes = notes
+        submission.save(update_fields=["status", "reviewed_by", "reviewed_at", "review_notes", "updated_at"])
+        PartnerVerificationEvent.objects.create(
+            submission=submission, actor=request.user, event_type=decision,
+            details={"review_notes": notes},
+        )
+        return Response({
+            "id": submission.pk, "partner_id": submission.partner_id,
+            "status": submission.status, "reviewed_at": submission.reviewed_at,
+            "reviewed_by": request.user.email, "review_notes": submission.review_notes,
+        })
