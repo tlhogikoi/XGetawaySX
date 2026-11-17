@@ -735,14 +735,21 @@ def gallery_audit_filtered_queryset(request):
         except ValueError:
             raise ValidationError({"partner_id": "Provide a valid partner ID."})
     if search:
-        queryset = queryset.filter(
+        search_filter = (
             Q(action__icontains=search)
             | Q(actor__email__icontains=search)
             | Q(partner__name__icontains=search)
             | Q(media__title__icontains=search)
             | Q(story__media__title__icontains=search)
-            | Q(story_id__icontains=search)
         )
+        if search.isdecimal():
+            numeric_search = int(search)
+            search_filter |= (
+                Q(story_id=numeric_search)
+                | Q(media_id=numeric_search)
+                | Q(partner_id=numeric_search)
+            )
+        queryset = queryset.filter(search_filter)
 
     def boundary(value, upper=False):
         if not value:
