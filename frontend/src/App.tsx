@@ -3,6 +3,7 @@ import GalleryExplorePage from "./components/GalleryExplorePage";
 import GalleryStoryDetailPage from "./components/GalleryStoryDetailPage";
 import PublicPartnerProfile from "./components/PublicPartnerProfile";
 import GalleryStoryEditor from "./components/GalleryStoryEditor";
+import GalleryEditorialDashboard from "./components/GalleryEditorialDashboard";
 import PartnerDiscovery from "./components/PartnerDiscovery";
 import DestinationExplorer from "./components/DestinationExplorer";
 import CustomerAccount from "./components/CustomerAccount";
@@ -20,6 +21,7 @@ const categories = [
 export default function App() {
   const pathname = window.location.pathname;
   if (pathname === "/gallery" || pathname === "/gallery/") return <GalleryExplorePage />;
+  if (pathname === "/staff/gallery/editorial" || pathname === "/staff/gallery/editorial/") return <GalleryEditorialDashboard />;
   const galleryStoryMatch = pathname.match(/^\/gallery\/stories\/(\d+)\/?$/);
   if (galleryStoryMatch) return <GalleryStoryDetailPage storyId={galleryStoryMatch[1]} />;
   if (pathname === "/account" || pathname === "/account/") return <CustomerAccount />;
