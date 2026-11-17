@@ -988,6 +988,14 @@ class GalleryMultiImageExperienceTests(TestCase):
     def test_owner_can_add_image_and_image_change_creates_new_approval_version(self):
         self.story.status = GalleryStory.Status.OWNER_REVIEW
         self.story.save(update_fields=("status",))
+        GalleryStoryRevision.objects.create(
+            story=self.story,
+            version=self.story.current_version,
+            summary=self.story.summary,
+            media_snapshot=[self.cover.id],
+            changed_by=self.owner,
+            change_reason="Initial story version",
+        )
         self.client.force_authenticate(self.owner)
         response = self.client.post(
             f"/api/v1/gallery/stories/{self.story.id}/media/",
