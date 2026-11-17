@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertCircle, CheckCircle2, FileImage, FileText, LoaderCircle, RefreshCw, ShieldCheck, UploadCloud } from "lucide-react";
+import { AlertCircle, ArrowDown, ArrowUp, CheckCircle2, FileImage, FileText, LoaderCircle, RefreshCw, ShieldCheck, Trash2, UploadCloud } from "lucide-react";
 import "./partner-gallery.css";
 
 type DraftStory = {
@@ -22,6 +22,8 @@ type ApiError = { detail?: string; [key: string]: unknown };
 type PartnerNotification = { id: number; story_id: number; kind: "story_published" | "story_changes_requested"; title: string; message: string; read_at: string | null; created_at: string };
 type PartnerActivity = { id: number; event_type: string; label: string; media_id: number | null; media_title: string | null; story_id: number | null; story_version: number | null; occurred_at: string };
 type StoryRevision = { id: number; version: number; summary: string; owner_history_private: boolean; ai_assisted: boolean; change_reason: string; changed_by: string | null; created_at: string };
+type StoryImage = { id: number; title: string; alt_text: string; caption: string; media_credit: string; position: number; is_cover: boolean; media_status: string; rights_review_status: string; permitted_channels: string[]; website_permission_active: boolean };
+type StoryImageLibrary = { story_id: number; story_version: number; status: string; images: StoryImage[] };
 
 type Props = {
   accessToken: string;
@@ -94,6 +96,8 @@ export default function PartnerGalleryWorkspace({
   const [storyId, setStoryId] = useState<number | null>(null);
   const [attachStoryId, setAttachStoryId] = useState<number | null>(null);
   const [imageManagerBusy, setImageManagerBusy] = useState(false);
+  const [imageLibraryStoryId, setImageLibraryStoryId] = useState<number | null>(null);
+  const [imageLibrary, setImageLibrary] = useState<Record<number, StoryImageLibrary>>({});
   const [drafts, setDrafts] = useState<DraftStory[]>([]);
   const [notifications, setNotifications] = useState<PartnerNotification[]>([]);
   const [activity, setActivity] = useState<PartnerActivity[]>([]);
@@ -191,6 +195,63 @@ export default function PartnerGalleryWorkspace({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Rights evidence submission failed.");
     } finally { setBusy(null); }
+  }
+
+  async function loadImageLibrary(id: number) {
+    if (imageLibraryStoryId === id) { setImageLibraryStoryId(null); return; }
+    setImageManagerBusy(true); setError("");
+    try {
+      const result = await request<StoryImageLibrary>(`${api}/stories/${id}/media/`, accessToken);
+      setImageLibrary(current => ({ ...current, [id]: result }));
+      setImageLibraryStoryId(id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load this story's image library.");
+    } finally { setImageManagerBusy(false); }
+  }
+
+  async function saveImageOrder(storyId: number, orderedIds: number[]) {
+    setImageManagerBusy(true); setError(""); setNotice("");
+    try {
+      const result = await request<{ story_version: number; ordered_media_ids: number[] }>(
+        `${api}/stories/${storyId}/media/`, accessToken,
+        { method: "PATCH", body: JSON.stringify({ ordered_media_ids: orderedIds }) },
+      );
+      const current = imageLibrary[storyId];
+      if (current) {
+        const byId = new Map(current.images.map(image => [image.id, image]));
+        const ordered = orderedIds.map((id, index) => ({ ...byId.get(id)!, position: index + 1 }));
+        setImageLibrary(value => ({ ...value, [storyId]: { ...current, story_version: result.story_version, status: "owner_review", images: [current.images[0], ...ordered] } }));
+      }
+      setNotice(`Photo order saved as story version ${result.story_version}. Owner and editorial approvals must be completed again.`);
+      await loadDrafts(); await loadActivity();
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not save photo order."); }
+    finally { setImageManagerBusy(false); }
+  }
+
+  async function moveStoryImage(storyId: number, mediaId: number, direction: -1 | 1) {
+    const library = imageLibrary[storyId];
+    if (!library) return;
+    const ids = library.images.filter(image => !image.is_cover).map(image => image.id);
+    const index = ids.indexOf(mediaId);
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= ids.length) return;
+    [ids[index], ids[target]] = [ids[target], ids[index]];
+    await saveImageOrder(storyId, ids);
+  }
+
+  async function removeStoryImage(storyId: number, mediaId: number) {
+    setImageManagerBusy(true); setError(""); setNotice("");
+    try {
+      const result = await request<{ story_version: number }>(
+        `${api}/stories/${storyId}/media/?media_id=${mediaId}`, accessToken,
+        { method: "DELETE" },
+      );
+      const refreshed = await request<StoryImageLibrary>(`${api}/stories/${storyId}/media/`, accessToken);
+      setImageLibrary(current => ({ ...current, [storyId]: refreshed }));
+      setNotice(`Photo removed. Story version ${result.story_version} requires fresh owner and editorial approval.`);
+      await loadDrafts(); await loadActivity();
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not remove this photo."); }
+    finally { setImageManagerBusy(false); }
   }
 
   async function attachUploadedImage() {
@@ -377,8 +438,8 @@ export default function PartnerGalleryWorkspace({
       <section className="pgw-drafts">
         <div className="pgw-drafts-heading"><div><p className="pgw-eyebrow">CONTENT STATUS</p><h2>Your submitted stories</h2></div><button className="pgw-refresh" type="button" onClick={refresh} disabled={busy !== null}><RefreshCw size={16} className={busy === "refresh" ? "pgw-spin" : ""} />Refresh</button></div>
         {drafts.length === 0 ? <p className="pgw-empty">No story submissions yet. Your saved stories will appear here.</p> : <div className="pgw-draft-list">{drafts.map((draft) => <article className="pgw-draft-row" key={draft.id}><div><strong>Story #{draft.id} · Image #{draft.media}</strong><p>{draft.summary || "Summary not added yet"}</p>{draft.editorial_feedback && draft.status === "rejected" && <div className="pgw-editorial-feedback"><strong>Editorial changes requested</strong><p>{draft.editorial_feedback}</p></div>}
-        {editingStoryId === draft.id ? <div className="pgw-story-editor"><label>Revised public summary<textarea rows={5} value={editSummary} onChange={(e) => setEditSummary(e.target.value)} maxLength={600}/><small>{wordCount(editSummary)} words · 30–60 required</small></label><label>Owner's original history <span className="pgw-private-label"><ShieldCheck size={12}/> Private by default</span><textarea rows={4} value={editHistory} onChange={(e) => setEditHistory(e.target.value)} /></label><div className="pgw-edit-actions"><button type="button" className="pgw-button pgw-button--secondary" onClick={() => setEditingStoryId(null)}>Cancel</button><button type="button" className="pgw-button" disabled={busy !== null} onClick={() => saveStoryEdit(draft.id)}>{busy === "refresh" ? "Saving…" : "Save new version"}</button></div></div> : <div className="pgw-draft-tools"><button type="button" className="pgw-refresh" onClick={() => beginEdit(draft)} disabled={draft.status === "published" || draft.status === "withdrawn"}>Edit / respond to review</button><button type="button" className="pgw-refresh" onClick={() => loadRevisions(draft.id)} disabled={busy !== null}> {revisionStoryId === draft.id ? "Hide version history" : "Version history"} </button></div>}
-        {revisionStoryId === draft.id && <div className="pgw-version-list"><strong>Recorded versions</strong>{(revisions[draft.id] ?? []).map((revision) => <div key={revision.id}><span>Version {revision.version}</span><small>{new Date(revision.created_at).toLocaleString()} · {revision.change_reason || "Content revision"}</small><p>{revision.summary}</p></div>)}</div>}
+        {editingStoryId === draft.id ? <div className="pgw-story-editor"><label>Revised public summary<textarea rows={5} value={editSummary} onChange={(e) => setEditSummary(e.target.value)} maxLength={600}/><small>{wordCount(editSummary)} words · 30–60 required</small></label><label>Owner's original history <span className="pgw-private-label"><ShieldCheck size={12}/> Private by default</span><textarea rows={4} value={editHistory} onChange={(e) => setEditHistory(e.target.value)} /></label><div className="pgw-edit-actions"><button type="button" className="pgw-button pgw-button--secondary" onClick={() => setEditingStoryId(null)}>Cancel</button><button type="button" className="pgw-button" disabled={busy !== null} onClick={() => saveStoryEdit(draft.id)}>{busy === "refresh" ? "Saving…" : "Save new version"}</button></div></div> : <div className="pgw-draft-tools"><button type="button" className="pgw-refresh" onClick={() => beginEdit(draft)} disabled={draft.status === "published" || draft.status === "withdrawn"}>Edit / respond to review</button><button type="button" className="pgw-refresh" onClick={() => loadRevisions(draft.id)} disabled={busy !== null}> {revisionStoryId === draft.id ? "Hide version history" : "Version history"} </button><button type="button" className="pgw-refresh" onClick={() => loadImageLibrary(draft.id)} disabled={imageManagerBusy || draft.status === "published" || draft.status === "withdrawn"}>{imageLibraryStoryId === draft.id ? "Hide photo manager" : "Manage photos"}</button></div>}
+        {imageLibraryStoryId === draft.id && imageLibrary[draft.id] && <div className="pgw-image-library"><div className="pgw-image-library-heading"><strong>Story photo library · version {imageLibrary[draft.id].story_version}</strong><small>Cover image stays first. Additional photos can be reordered or removed.</small></div>{imageLibrary[draft.id].images.map((photo, index) => <div className="pgw-image-library-row" key={photo.id}><div className="pgw-image-library-info"><strong>{photo.is_cover ? "Cover" : `Photo ${index}`} · {photo.title}</strong><small>Media: {photo.media_status.replaceAll("_", " ")} · Rights: {photo.rights_review_status.replaceAll("_", " ")}</small><small>Website permission: {photo.website_permission_active ? "Active" : "Not approved"}</small></div>{!photo.is_cover && <div className="pgw-image-library-actions"><button type="button" className="pgw-refresh" aria-label={`Move ${photo.title} up`} title="Move up" disabled={imageManagerBusy || index === 1} onClick={() => moveStoryImage(draft.id, photo.id, -1)}><ArrowUp size={15}/></button><button type="button" className="pgw-refresh" aria-label={`Move ${photo.title} down`} title="Move down" disabled={imageManagerBusy || index === imageLibrary[draft.id].images.length - 1} onClick={() => moveStoryImage(draft.id, photo.id, 1)}><ArrowDown size={15}/></button><button type="button" className="pgw-refresh" aria-label={`Remove ${photo.title}`} disabled={imageManagerBusy} onClick={() => removeStoryImage(draft.id, photo.id)}><Trash2 size={15}/>Remove</button></div>}</div>)}<p>Removing or reordering photos creates a new story version and resets prior approvals. Images without active website rights remain unpublished.</p></div>}{revisionStoryId === draft.id && <div className="pgw-version-list"><strong>Recorded versions</strong>{(revisions[draft.id] ?? []).map((revision) => <div key={revision.id}><span>Version {revision.version}</span><small>{new Date(revision.created_at).toLocaleString()} · {revision.change_reason || "Content revision"}</small><p>{revision.summary}</p></div>)}</div>}
         </div><div className="pgw-draft-actions"><span className="pgw-status">{statusLabel[draft.status] ?? draft.status}</span>{draft.status === "owner_review" && draft.media_status === "approved" && draft.partner_gallery_status === "approved" && <button type="button" className="pgw-approve" onClick={() => approveStory(draft.id)} disabled={busy !== null}>{busy === "approve" ? "Saving…" : "Approve this version"}</button>}{draft.status === "owner_review" && (draft.media_status !== "approved" || draft.partner_gallery_status !== "approved") && <small className="pgw-waiting">Waiting for partner and media approval</small>}</div></article>)}</div>}
       </section>
     </section>
