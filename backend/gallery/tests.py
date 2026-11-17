@@ -1012,6 +1012,61 @@ class GalleryMultiImageExperienceTests(TestCase):
         revision = self.story.revisions.get(version=2)
         self.assertEqual(revision.media_snapshot, [self.cover.id, self.additional.id])
 
+    def test_partner_can_view_image_library_with_per_image_rights_status(self):
+        GalleryStoryMedia.objects.create(story=self.story, media=self.additional, position=1)
+        self.client.force_authenticate(self.owner)
+        response = self.client.get(f"/api/v1/gallery/stories/{self.story.id}/media/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item["id"] for item in response.data["images"]], [self.cover.id, self.additional.id])
+        self.assertTrue(response.data["images"][0]["is_cover"])
+        self.assertFalse(response.data["images"][1]["is_cover"])
+        self.assertTrue(response.data["images"][1]["website_permission_active"])
+        self.assertEqual(response.data["images"][1]["rights_review_status"], GalleryMediaPermissionGrant.ReviewStatus.APPROVED)
+
+    def test_other_partner_cannot_view_image_library(self):
+        other = User.objects.create_user(email="multi-image-library-other@example.com", password="test-password")
+        self.client.force_authenticate(other)
+        response = self.client.get(f"/api/v1/gallery/stories/{self.story.id}/media/")
+        self.assertEqual(response.status_code, 403)
+
+    def test_owner_can_reorder_all_additional_images_and_approvals_reset(self):
+        third = self.create_media("Pool image", "website")
+        GalleryStoryMedia.objects.create(story=self.story, media=self.additional, position=1)
+        GalleryStoryMedia.objects.create(story=self.story, media=third, position=2)
+        self.story.status = GalleryStory.Status.OWNER_REVIEW
+        self.story.save(update_fields=("status",))
+        GalleryStoryRevision.objects.create(
+            story=self.story, version=self.story.current_version, summary=self.story.summary,
+            media_snapshot=[self.cover.id, self.additional.id, third.id],
+            changed_by=self.owner, change_reason="Initial story version",
+        )
+        self.client.force_authenticate(self.owner)
+        response = self.client.patch(
+            f"/api/v1/gallery/stories/{self.story.id}/media/",
+            {"ordered_media_ids": [third.id, self.additional.id]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["ordered_media_ids"], [third.id, self.additional.id])
+        self.story.refresh_from_db()
+        self.assertEqual(self.story.current_version, 2)
+        self.assertEqual(self.story.status, GalleryStory.Status.OWNER_REVIEW)
+        self.assertIsNone(self.story.owner_approved_version)
+        self.assertEqual(list(self.story.additional_media.values_list("media_id", flat=True)), [third.id, self.additional.id])
+        self.assertEqual(self.story.revisions.get(version=2).media_snapshot, [self.cover.id, third.id, self.additional.id])
+
+    def test_reorder_rejects_missing_or_duplicate_image_ids(self):
+        GalleryStoryMedia.objects.create(story=self.story, media=self.additional, position=1)
+        self.story.status = GalleryStory.Status.OWNER_REVIEW
+        self.story.save(update_fields=("status",))
+        self.client.force_authenticate(self.owner)
+        response = self.client.patch(
+            f"/api/v1/gallery/stories/{self.story.id}/media/",
+            {"ordered_media_ids": []},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+
     def test_owner_cannot_attach_another_partners_image(self):
         other_owner = User.objects.create_user(email="multi-image-other@example.com", password="test-password")
         other_partner = Partner.objects.create(
