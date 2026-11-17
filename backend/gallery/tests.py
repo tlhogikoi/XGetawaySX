@@ -9,7 +9,7 @@ from django.utils import timezone
 
 from accounts.models import User
 from partners.models import Partner
-from .models import GalleryAuditEvent, GalleryHistoryPublicationConsent, GalleryMedia, GalleryMediaPermissionGrant, GalleryStory, GalleryStoryRevision
+from .models import GalleryAuditEvent, GalleryHistoryPublicationConsent, GalleryMedia, GalleryMediaPermissionGrant, GalleryStory, GalleryStoryMedia, GalleryStoryRevision
 
 
 class GalleryPublicationTests(TestCase):
@@ -905,3 +905,127 @@ class GalleryAIDraftingSafetyTests(TestCase):
             with self.assertRaises(ValidationError):
                 draft_story_summary(Story())
 
+
+
+class GalleryMultiImageExperienceTests(TestCase):
+    PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC")
+    SUMMARY = "A carefully verified account of this partner experience, using details supplied by the owner and reviewed by the editorial team before publication for visitors."
+
+    def setUp(self):
+        self.private_storage_dir = tempfile.mkdtemp(prefix="xgetawaysx-gallery-multi-image-")
+        self.storage_settings = override_settings(PRIVATE_GALLERY_STORAGE_ROOT=self.private_storage_dir)
+        self.storage_settings.enable()
+        self.client = APIClient()
+        self.owner = User.objects.create_user(email="multi-image-owner@example.com", password="test-password")
+        self.editor = User.objects.create_superuser(email="multi-image-editor@example.com", password="test-password")
+        self.partner = Partner.objects.create(
+            owner=self.owner,
+            name="Multi Image Lodge",
+            category=Partner.Category.ACCOMMODATION,
+            gallery_status=Partner.ApprovalStatus.APPROVED,
+        )
+        self.cover = self.create_media("Cover image", "website")
+        self.additional = self.create_media("Garden image", "website")
+        self.story = GalleryStory.objects.create(
+            media=self.cover,
+            summary=self.SUMMARY,
+            status=GalleryStory.Status.PUBLISHED,
+            owner_approved_by=self.owner,
+            owner_approved_at=timezone.now(),
+            owner_approved_version=1,
+            editorial_approved_by=self.editor,
+            editorial_approved_at=timezone.now(),
+            editorial_approved_version=1,
+            published_at=timezone.now(),
+        )
+
+    def tearDown(self):
+        self.storage_settings.disable()
+        shutil.rmtree(self.private_storage_dir, ignore_errors=True)
+
+    def create_media(self, title, channel):
+        media = GalleryMedia.objects.create(
+            partner=self.partner,
+            title=title,
+            image_file=SimpleUploadedFile(f"{title.lower().replace(' ', '-')}.png", self.PNG, content_type="image/png"),
+            alt_text=f"Photograph: {title}",
+            caption=f"Caption for {title}",
+            media_credit=f"Credit for {title}",
+            rights_holder="Multi Image Lodge",
+            status=GalleryMedia.Status.APPROVED,
+            submitted_by=self.owner,
+        )
+        GalleryMediaPermissionGrant.objects.create(
+            media=media,
+            rights_holder="Multi Image Lodge",
+            permitted_channels=[channel],
+            evidence_file=SimpleUploadedFile("rights.pdf", b"%PDF-1.4 signed image permission"),
+            granted_by=self.owner,
+            granted_at=timezone.now(),
+            review_status=GalleryMediaPermissionGrant.ReviewStatus.APPROVED,
+            reviewed_by=self.editor,
+            reviewed_at=timezone.now(),
+        )
+        return media
+
+    def test_public_story_detail_returns_ordered_images_with_individual_credits(self):
+        GalleryStoryMedia.objects.create(story=self.story, media=self.additional, position=1)
+        response = self.client.get(f"/api/v1/gallery/stories/{self.story.id}/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item["id"] for item in response.data["images"]], [self.cover.id, self.additional.id])
+        self.assertEqual(response.data["images"][1]["caption"], "Caption for Garden image")
+        self.assertEqual(response.data["images"][1]["media_credit"], "Credit for Garden image")
+        self.assertTrue(response.data["images"][1]["image"].endswith(f"/gallery/media/{self.additional.id}/image/"))
+
+    def test_each_additional_image_is_independently_checked_for_website_permission(self):
+        social_only = self.create_media("Social only image", "social_media")
+        GalleryStoryMedia.objects.create(story=self.story, media=social_only, position=1)
+        detail = self.client.get(f"/api/v1/gallery/stories/{self.story.id}/")
+        image = self.client.get(f"/api/v1/gallery/media/{social_only.id}/image/")
+        self.assertEqual(detail.status_code, 404)
+        self.assertEqual(image.status_code, 404)
+
+    def test_owner_can_add_image_and_image_change_creates_new_approval_version(self):
+        self.story.status = GalleryStory.Status.OWNER_REVIEW
+        self.story.save(update_fields=("status",))
+        self.client.force_authenticate(self.owner)
+        response = self.client.post(
+            f"/api/v1/gallery/stories/{self.story.id}/media/",
+            {"media_id": self.additional.id},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        self.story.refresh_from_db()
+        self.assertEqual(self.story.current_version, 2)
+        self.assertEqual(self.story.status, GalleryStory.Status.OWNER_REVIEW)
+        self.assertIsNone(self.story.owner_approved_version)
+        self.assertTrue(GalleryStoryMedia.objects.filter(story=self.story, media=self.additional).exists())
+        revision = self.story.revisions.get(version=2)
+        self.assertEqual(revision.media_snapshot, [self.cover.id, self.additional.id])
+
+    def test_owner_cannot_attach_another_partners_image(self):
+        other_owner = User.objects.create_user(email="multi-image-other@example.com", password="test-password")
+        other_partner = Partner.objects.create(
+            owner=other_owner,
+            name="Other Partner",
+            category=Partner.Category.ACCOMMODATION,
+            gallery_status=Partner.ApprovalStatus.APPROVED,
+        )
+        other_media = GalleryMedia.objects.create(
+            partner=other_partner,
+            title="Other partner image",
+            image="https://images.example.test/other.jpg",
+            alt_text="Other partner photograph",
+            rights_holder="Other Partner",
+            submitted_by=other_owner,
+        )
+        self.story.status = GalleryStory.Status.OWNER_REVIEW
+        self.story.save(update_fields=("status",))
+        self.client.force_authenticate(self.owner)
+        response = self.client.post(
+            f"/api/v1/gallery/stories/{self.story.id}/media/",
+            {"media_id": other_media.id},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(GalleryStoryMedia.objects.filter(story=self.story, media=other_media).exists())

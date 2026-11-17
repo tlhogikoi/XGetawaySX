@@ -126,21 +126,67 @@ class GalleryStory(models.Model):
                 raise ValidationError("The current story version must have owner approval.")
             if not (self.editorial_approved_at and self.editorial_approved_version == self.current_version):
                 raise ValidationError("The current story version must have editorial approval.")
-            if self.media.status != GalleryMedia.Status.APPROVED:
-                raise ValidationError("The associated media must be approved.")
             if self.media.partner.gallery_status != Partner.ApprovalStatus.APPROVED:
                 raise ValidationError("The partner must be approved for Gallery publication.")
+            media_items = [self.media]
+            if self.pk:
+                media_items.extend(
+                    attachment.media
+                    for attachment in self.additional_media.select_related("media").all()
+                )
             now = timezone.now()
-            has_active_permission = self.media.permission_grants.filter(
-                purpose=GalleryMediaPermissionGrant.Purpose.GALLERY_PROMOTION,
-                review_status=GalleryMediaPermissionGrant.ReviewStatus.APPROVED,
-                revoked_at__isnull=True,
-            ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now)).exists()
-            if not has_active_permission:
-                raise ValidationError("An active, evidence-backed Gallery media permission grant is required.")
+            for item in media_items:
+                if item.partner_id != self.media.partner_id:
+                    raise ValidationError("Every Gallery image must belong to the story's partner.")
+                if item.status != GalleryMedia.Status.APPROVED:
+                    raise ValidationError("Every Gallery image must be editorially approved.")
+                grants = item.permission_grants.filter(
+                    purpose=GalleryMediaPermissionGrant.Purpose.GALLERY_PROMOTION,
+                    review_status=GalleryMediaPermissionGrant.ReviewStatus.APPROVED,
+                    revoked_at__isnull=True,
+                ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
+                if not any(
+                    isinstance(channels, list) and "website" in channels
+                    for channels in grants.values_list("permitted_channels", flat=True)
+                ):
+                    raise ValidationError("Every Gallery image requires an active website publication permission.")
 
     def __str__(self):
         return f"Story for {self.media.title}"
+
+
+class GalleryStoryMedia(models.Model):
+    """An additional image in a story; rights and editorial status remain media-specific."""
+
+    story = models.ForeignKey(
+        GalleryStory, on_delete=models.CASCADE, related_name="additional_media"
+    )
+    media = models.OneToOneField(
+        GalleryMedia, on_delete=models.PROTECT, related_name="story_attachment"
+    )
+    position = models.PositiveSmallIntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("position", "created_at")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("story", "position"), name="gal_story_media_position_unique"
+            ),
+        ]
+
+    def clean(self):
+        if not self.story_id or not self.media_id:
+            return
+        if self.story.media_id == self.media_id:
+            raise ValidationError({"media": "The cover image is already part of this story."})
+        if self.story.media.partner_id != self.media.partner_id:
+            raise ValidationError({"media": "Every story image must belong to the same partner."})
+        if GalleryStory.objects.filter(media_id=self.media_id).exists():
+            raise ValidationError({"media": "This image is already the cover of another story."})
+
+    def __str__(self):
+        return f"{self.story_id}: {self.media.title} (image {self.position})"
 
 
 class GalleryHistoryPublicationConsent(models.Model):
@@ -177,6 +223,7 @@ class GalleryStoryRevision(models.Model):
     original_history_public_permission = models.BooleanField(default=False)
     ai_assisted = models.BooleanField(default=False)
     ai_source_facts_snapshot = models.JSONField(default=list, blank=True)
+    media_snapshot = models.JSONField(default=list, blank=True)
     changed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.PROTECT, related_name="gallery_story_revisions")
     change_reason = models.CharField(max_length=250, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -223,6 +270,10 @@ class GalleryStoryRevision(models.Model):
             original_history_public_permission=locked_story.original_history_public_permission,
             ai_assisted=locked_story.ai_assisted,
             ai_source_facts_snapshot=locked_story.ai_source_facts,
+            media_snapshot=[
+                locked_story.media_id,
+                *locked_story.additional_media.order_by("position").values_list("media_id", flat=True),
+            ],
             changed_by=actor,
             change_reason=reason,
         )

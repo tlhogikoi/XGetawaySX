@@ -66,3 +66,12 @@
 .gallery-related-stories>.eyebrow{color:#168e88}
 .gallery-related-stories h2{margin:0 0 24px;color:#173047;font-size:clamp(25px,3vw,34px)}
 @media(max-width:760px){.gallery-related-stories{padding:0 7% 54px}}
+
+
+/* Dev 36: multi-image story viewer */
+.gallery-story-image-viewer{min-width:0}
+.gallery-image-navigation{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;color:#d5e5e7;font-size:11px}
+.gallery-image-navigation button{display:inline-flex;align-items:center;gap:5px;padding:8px 10px;border:1px solid rgba(255,255,255,.3);border-radius:4px;background:rgba(255,255,255,.08);color:#fff;font:inherit;font-weight:800;cursor:pointer}
+.gallery-image-navigation button:disabled{opacity:.4;cursor:not-allowed}
+.gallery-image-navigation button:focus-visible{outline:2px solid #f2b35e;outline-offset:2px}
+@media(max-width:760px){.gallery-image-navigation{margin-top:8px}}

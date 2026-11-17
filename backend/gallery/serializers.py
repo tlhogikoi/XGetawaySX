@@ -128,6 +128,30 @@ class GalleryPartnerNotificationSerializer(serializers.ModelSerializer):
 class PublicGalleryStoryDetailSerializer(PublicGalleryStorySerializer):
     caption = serializers.CharField(source="media.caption", read_only=True)
     media_credit = serializers.CharField(source="media.media_credit", read_only=True)
+    images = serializers.SerializerMethodField()
+
+    def get_images(self, obj):
+        request = self.context.get("request")
+        media_items = [(obj.media, 0)] + [
+            (attachment.media, attachment.position)
+            for attachment in obj.additional_media.all()
+        ]
+        result = []
+        for media, position in media_items:
+            if media.image_file:
+                path = f"/api/v1/gallery/media/{media.pk}/image/"
+                image_url = request.build_absolute_uri(path) if request else path
+            else:
+                image_url = media.image
+            result.append({
+                "id": media.pk,
+                "position": position,
+                "image": image_url,
+                "alt_text": media.alt_text,
+                "caption": media.caption,
+                "media_credit": media.media_credit,
+            })
+        return result
 
     class Meta(PublicGalleryStorySerializer.Meta):
-        fields = PublicGalleryStorySerializer.Meta.fields + ("caption", "media_credit")
+        fields = PublicGalleryStorySerializer.Meta.fields + ("caption", "media_credit", "images")

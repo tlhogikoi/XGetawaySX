@@ -13,7 +13,7 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.views import APIView
 
 from partners.models import Partner
-from .models import GalleryAuditEvent, GalleryHistoryPublicationConsent, GalleryMedia, GalleryMediaPermissionGrant, GalleryPartnerNotification, GalleryStory, GalleryStoryEditorialReview, GalleryStoryRevision
+from .models import GalleryAuditEvent, GalleryHistoryPublicationConsent, GalleryMedia, GalleryMediaPermissionGrant, GalleryPartnerNotification, GalleryStory, GalleryStoryMedia, GalleryStoryEditorialReview, GalleryStoryRevision
 from .validators import gallery_image_content_type
 from .story_drafting import draft_story_summary
 from .serializers import GalleryAuditEventSerializer, GalleryMediaDraftSerializer, GalleryPartnerNotificationSerializer, GalleryStoryDraftSerializer, GalleryStoryRevisionSerializer, PublicGalleryStorySerializer, PublicGalleryStoryDetailSerializer
@@ -54,6 +54,53 @@ def has_active_gallery_media_permission(media, channel=None):
     )
 
 
+
+def story_media_items(story):
+    return [story.media] + [
+        attachment.media
+        for attachment in story.additional_media.select_related("media").all()
+    ]
+
+
+def story_has_active_website_media_permissions(story):
+    for media in story_media_items(story):
+        if (
+            media.partner_id != story.media.partner_id
+            or media.status != GalleryMedia.Status.APPROVED
+            or media.partner.gallery_status != Partner.ApprovalStatus.APPROVED
+            or not has_active_gallery_media_permission(media, channel="website")
+        ):
+            return False
+    return True
+
+
+def public_gallery_story_queryset():
+    website_grant_ids = active_gallery_permission_grant_ids("website")
+    if not website_grant_ids:
+        return GalleryStory.objects.none()
+    website_approved_media_ids = GalleryMedia.objects.filter(
+        status=GalleryMedia.Status.APPROVED,
+        partner__gallery_status=Partner.ApprovalStatus.APPROVED,
+        permission_grants__id__in=website_grant_ids,
+    ).values("pk")
+    stories_with_invalid_additional_media = GalleryStoryMedia.objects.exclude(
+        media_id__in=website_approved_media_ids
+    ).values("story_id")
+    return GalleryStory.objects.filter(
+        status=GalleryStory.Status.PUBLISHED,
+        media__status=GalleryMedia.Status.APPROVED,
+        media__partner__gallery_status=Partner.ApprovalStatus.APPROVED,
+        media__permission_grants__id__in=website_grant_ids,
+        owner_approved_version=F("current_version"),
+        owner_approved_at__isnull=False,
+        editorial_approved_version=F("current_version"),
+        editorial_approved_at__isnull=False,
+        published_at__isnull=False,
+    ).exclude(
+        pk__in=stories_with_invalid_additional_media
+    ).select_related("media", "media__partner").prefetch_related(
+        "history_publication_consents", "additional_media__media"
+    ).distinct()
 
 
 def create_partner_story_notification(story, kind, title, message):
@@ -144,20 +191,7 @@ class PublicGalleryStoryDetailView(generics.RetrieveAPIView):
     permission_classes = [AllowAny]
 
     def get_queryset(self):
-        website_grant_ids = active_gallery_permission_grant_ids("website")
-        if not website_grant_ids:
-            return GalleryStory.objects.none()
-        return GalleryStory.objects.filter(
-            status=GalleryStory.Status.PUBLISHED,
-            media__status=GalleryMedia.Status.APPROVED,
-            media__partner__gallery_status=Partner.ApprovalStatus.APPROVED,
-            media__permission_grants__id__in=website_grant_ids,
-            owner_approved_version=F("current_version"),
-            owner_approved_at__isnull=False,
-            editorial_approved_version=F("current_version"),
-            editorial_approved_at__isnull=False,
-            published_at__isnull=False,
-        ).select_related("media", "media__partner").prefetch_related("history_publication_consents").distinct()
+        return public_gallery_story_queryset()
 
 
 class PublicGalleryStoriesView(generics.ListAPIView):
@@ -165,22 +199,7 @@ class PublicGalleryStoriesView(generics.ListAPIView):
     permission_classes = [AllowAny]
 
     def get_queryset(self):
-        website_grant_ids = active_gallery_permission_grant_ids("website")
-        if not website_grant_ids:
-            return GalleryStory.objects.none()
-        return GalleryStory.objects.filter(
-            status=GalleryStory.Status.PUBLISHED,
-            media__status=GalleryMedia.Status.APPROVED,
-            media__partner__gallery_status=Partner.ApprovalStatus.APPROVED,
-            media__permission_grants__id__in=website_grant_ids,
-            owner_approved_version=F("current_version"),
-            owner_approved_at__isnull=False,
-            editorial_approved_version=F("current_version"),
-            editorial_approved_at__isnull=False,
-            published_at__isnull=False,
-        ).select_related("media", "media__partner").prefetch_related(
-            "history_publication_consents"
-        ).distinct()
+        return public_gallery_story_queryset()
 
 
 class GalleryMediaCreateView(generics.CreateAPIView):
@@ -212,6 +231,100 @@ class GalleryStoryCreateView(generics.CreateAPIView):
             actor=self.request.user, partner=media.partner, media=media,
             story=story, action="story_submitted",
         )
+
+
+class GalleryStoryMediaView(APIView):
+    """Attach or remove partner images before approval; every change creates a new story version."""
+
+    permission_classes = [IsAuthenticated]
+    editable_statuses = (
+        GalleryStory.Status.DRAFT,
+        GalleryStory.Status.OWNER_REVIEW,
+        GalleryStory.Status.EDITORIAL_REVIEW,
+        GalleryStory.Status.REJECTED,
+    )
+
+    def get_story(self, pk):
+        story = generics.get_object_or_404(
+            GalleryStory.objects.select_for_update().select_related("media", "media__partner"),
+            pk=pk,
+        )
+        if not self.request.user.is_staff and story.media.partner.owner_id != self.request.user.id:
+            raise PermissionDenied("You can only manage images for your own partner stories.")
+        if story.status not in self.editable_statuses:
+            raise ValidationError("Images can only be changed while a story is in an editable review state.")
+        return story
+
+    def record_media_change(self, story, media, action):
+        story.status = GalleryStory.Status.OWNER_REVIEW
+        story.save(update_fields=("status", "updated_at"))
+        revision = GalleryStoryRevision.capture(
+            story, self.request.user, "Story image collection changed; prior approvals reset"
+        )
+        GalleryAuditEvent.objects.create(
+            actor=self.request.user,
+            partner=story.media.partner,
+            media=media,
+            story=story,
+            action=action,
+            details={"story_version": revision.version, "media_id": media.pk},
+        )
+        return revision
+
+    @transaction.atomic
+    def post(self, request, pk):
+        story = self.get_story(pk)
+        try:
+            media_id = int(request.data.get("media_id"))
+        except (TypeError, ValueError):
+            raise ValidationError({"media_id": "A valid Gallery media ID is required."})
+        media = generics.get_object_or_404(
+            GalleryMedia.objects.select_related("partner"), pk=media_id
+        )
+        if media.partner_id != story.media.partner_id:
+            raise ValidationError({"media_id": "All images in a story must belong to the same partner."})
+        if media.pk == story.media_id:
+            raise ValidationError({"media_id": "The cover image is already part of this story."})
+        if GalleryStory.objects.filter(media_id=media.pk).exists():
+            raise ValidationError({"media_id": "This image is already the cover of another story."})
+        if GalleryStoryMedia.objects.filter(media_id=media.pk).exists():
+            raise ValidationError({"media_id": "This image is already attached to another story."})
+        last_position = story.additional_media.order_by("-position").values_list("position", flat=True).first() or 0
+        attachment = GalleryStoryMedia(story=story, media=media, position=last_position + 1)
+        attachment.full_clean()
+        attachment.save()
+        revision = self.record_media_change(story, media, "story_media_added")
+        return Response({
+            "story_id": story.pk,
+            "media_id": media.pk,
+            "position": attachment.position,
+            "image_count": 1 + story.additional_media.count(),
+            "story_version": revision.version,
+            "status": story.status,
+        }, status=status.HTTP_201_CREATED)
+
+    @transaction.atomic
+    def delete(self, request, pk):
+        story = self.get_story(pk)
+        try:
+            media_id = int(request.data.get("media_id") or request.query_params.get("media_id"))
+        except (TypeError, ValueError):
+            raise ValidationError({"media_id": "A valid additional media ID is required."})
+        attachment = generics.get_object_or_404(
+            GalleryStoryMedia.objects.select_for_update().select_related("media"),
+            story=story,
+            media_id=media_id,
+        )
+        media = attachment.media
+        attachment.delete()
+        revision = self.record_media_change(story, media, "story_media_removed")
+        return Response({
+            "story_id": story.pk,
+            "media_id": media.pk,
+            "image_count": 1 + story.additional_media.count(),
+            "story_version": revision.version,
+            "status": story.status,
+        })
 
 
 class GalleryStoryOwnerApprovalView(APIView):
@@ -279,12 +392,10 @@ class GalleryStoryEditorialApprovalView(APIView):
             or story.owner_approved_version != story.current_version
         ):
             raise ValidationError("Owner approval of the current story version is required before editorial approval.")
-        if story.media.status != GalleryMedia.Status.APPROVED:
-            raise ValidationError("Media must be editorially approved first.")
         if story.media.partner.gallery_status != Partner.ApprovalStatus.APPROVED:
             raise ValidationError("Partner must be approved for Gallery advertising.")
-        if not has_active_gallery_media_permission(story.media):
-            raise ValidationError("An active, evidence-backed Gallery media permission grant is required.")
+        if not story_has_active_website_media_permissions(story):
+            raise ValidationError("Every image must be approved and have active website publication permission.")
         quality_review = story.editorial_quality_reviews.filter(
             story_version=story.current_version, claims_verified=True,
             source_facts_checked=True, unsupported_claims_resolved=True,
@@ -794,15 +905,10 @@ class GalleryMediaImageView(APIView):
             or not has_active_gallery_media_permission(media, channel="website")
         ):
             raise Http404
-        story = getattr(media, "story", None)
-        if not story or (
-            story.status != GalleryStory.Status.PUBLISHED
-            or story.owner_approved_version != story.current_version
-            or story.editorial_approved_version != story.current_version
-            or not story.owner_approved_at
-            or not story.editorial_approved_at
-            or not story.published_at
-        ):
+        story = public_gallery_story_queryset().filter(
+            Q(media_id=media.pk) | Q(additional_media__media_id=media.pk)
+        ).first()
+        if not story:
             raise Http404
         if not media.image_file:
             raise Http404
