@@ -192,7 +192,8 @@ export default function GalleryEditorialDashboard() {
       <nav className="ged-tabs" aria-label="Editorial review categories">
         <button className={tab === "stories" ? "is-active" : ""} onClick={() => setTab("stories")}>Stories ({totals.stories})</button>
         <button className={tab === "rights" ? "is-active" : ""} onClick={() => setTab("rights")}>Rights ({totals.rights})</button>
-        <button className={tab === "media" ? "is-active" : ""} onClick={() => setTab("media")}>Images ({totals.media})</button>\n        <button className={tab === "audit" ? "is-active" : ""} onClick={() => { setTab("audit"); void loadAudit(); }}>Audit ({auditCount})</button>
+        <button className={tab === "media" ? "is-active" : ""} onClick={() => setTab("media")}>Images ({totals.media})</button>
+        <button className={tab === "audit" ? "is-active" : ""} onClick={() => { setTab("audit"); void loadAudit(); }}>Audit ({auditCount})</button>
       </nav>
 
       {tab === "stories" && <section className="ged-list">
@@ -254,7 +255,7 @@ export default function GalleryEditorialDashboard() {
             <thead><tr><th>Timestamp</th><th>Event</th><th>Reviewer / actor</th><th>Partner</th><th>Asset</th><th>Story version</th></tr></thead>
             <tbody>{auditEvents.map(event => <tr key={event.id}>
               <td>{new Date(event.created_at).toLocaleString()}</td>
-              <td><strong>{event.action.replaceAll("_", " ")}</strong></td>
+              <td><strong>{event.action.replace(/_/g, " ")}</strong></td>
               <td>{event.actor_email || "System"}</td>
               <td>{event.partner_name || "—"}</td>
               <td>{event.media_title || "—"}{event.story_id ? <small>Story #{event.story_id}</small> : null}</td>
@@ -262,7 +263,8 @@ export default function GalleryEditorialDashboard() {
             </tr>)}</tbody>
           </table></div>}
       </section>}
-\n      {tab === "media" && <section className="ged-list">
+
+      {tab === "media" && <section className="ged-list">
         {queue.media_reviews.length === 0 && <div className="ged-empty"><FileImage size={25}/><strong>No images awaiting media approval</strong><span>Eligible partner images will appear here after rights review.</span></div>}
         {queue.media_reviews.map(item => <article className="ged-card ged-media-card" key={item.id}>
           <div className="ged-card-heading"><div><span className="ged-kicker">IMAGE #{item.id}</span><h2>{item.title}</h2><p>{item.partner_name}</p></div><span className="ged-status">{item.status}</span></div>
