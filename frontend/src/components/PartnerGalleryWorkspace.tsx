@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, ArrowDown, ArrowUp, CheckCircle2, Download, Eye, FileImage, FileText, LoaderCircle, RefreshCw, ShieldCheck, Trash2, UploadCloud } from "lucide-react";
 import "./partner-gallery.css";
 
@@ -101,6 +101,7 @@ export default function PartnerGalleryWorkspace({
   const [imageLibraryStoryId, setImageLibraryStoryId] = useState<number | null>(null);
   const [imageLibrary, setImageLibrary] = useState<Record<number, StoryImageLibrary>>({});
   const [privatePreviews, setPrivatePreviews] = useState<Record<number, string>>({});
+  const previewUrls = useRef(new Set<string>());
   const [rightsDetails, setRightsDetails] = useState<Record<number, RightsResponse>>({});
   const [rightsExpandedMediaId, setRightsExpandedMediaId] = useState<number | null>(null);
   const [drafts, setDrafts] = useState<DraftStory[]>([]);
@@ -220,8 +221,9 @@ export default function PartnerGalleryWorkspace({
       const response = await fetch(`${api}/media/${mediaId}/private-preview/`, { headers: { Authorization: `Bearer ${accessToken}` } });
       if (!response.ok) throw new Error(`Preview unavailable (${response.status}).`);
       const url = URL.createObjectURL(await response.blob());
+      previewUrls.current.add(url);
       setPrivatePreviews(current => {
-        if (current[mediaId]) URL.revokeObjectURL(current[mediaId]);
+        if (current[mediaId]) { URL.revokeObjectURL(current[mediaId]); previewUrls.current.delete(current[mediaId]); }
         return { ...current, [mediaId]: url };
       });
     } catch (err) { setError(err instanceof Error ? err.message : "Could not load private image preview."); }
@@ -253,7 +255,7 @@ export default function PartnerGalleryWorkspace({
     finally { setImageManagerBusy(false); }
   }
 
-  useEffect(() => () => { Object.values(privatePreviews).forEach(url => URL.revokeObjectURL(url)); }, [privatePreviews]);
+  useEffect(() => () => { previewUrls.current.forEach(url => URL.revokeObjectURL(url)); previewUrls.current.clear(); }, []);
 
   async function saveImageOrder(storyId: number, orderedIds: number[]) {
     setImageManagerBusy(true); setError(""); setNotice("");
