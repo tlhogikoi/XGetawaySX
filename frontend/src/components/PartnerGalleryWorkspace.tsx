@@ -92,6 +92,8 @@ export default function PartnerGalleryWorkspace({
   const [mediaId, setMediaId] = useState<number | null>(null);
   const [grantId, setGrantId] = useState<number | null>(null);
   const [storyId, setStoryId] = useState<number | null>(null);
+  const [attachStoryId, setAttachStoryId] = useState<number | null>(null);
+  const [imageManagerBusy, setImageManagerBusy] = useState(false);
   const [drafts, setDrafts] = useState<DraftStory[]>([]);
   const [notifications, setNotifications] = useState<PartnerNotification[]>([]);
   const [activity, setActivity] = useState<PartnerActivity[]>([]);
@@ -189,6 +191,26 @@ export default function PartnerGalleryWorkspace({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Rights evidence submission failed.");
     } finally { setBusy(null); }
+  }
+
+  async function attachUploadedImage() {
+    if (!mediaId || !grantId || !attachStoryId) {
+      setError("Upload an image, submit its rights evidence and choose a story before attaching it.");
+      return;
+    }
+    setImageManagerBusy(true); setError(""); setNotice("");
+    try {
+      const result = await request<{ story_id: number; media_id: number; position: number; image_count: number; story_version: number }>(
+        `${api}/stories/${attachStoryId}/media/`, accessToken,
+        { method: "POST", body: JSON.stringify({ media_id: mediaId }) },
+      );
+      setNotice(`Image #${result.media_id} attached as photo ${result.position + 1}. Story version ${result.story_version} now requires fresh owner and editorial approval.`);
+      setMediaId(null); setGrantId(null); setImageFile(null); setEvidenceFile(null);
+      setTitle(""); setAltText(""); setRightsHolder(""); setAttachStoryId(null);
+      await loadDrafts(); await loadActivity();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not attach this image to the story.");
+    } finally { setImageManagerBusy(false); }
   }
 
   async function createStory() {
@@ -309,7 +331,16 @@ export default function PartnerGalleryWorkspace({
             <label>Rights holder<input value={rightsHolder} onChange={(e) => setRightsHolder(e.target.value)} maxLength={180} placeholder="Person or organisation holding image rights" /></label>
             <label className="pgw-file-input"><FileImage size={19} /><span><strong>{imageFile?.name ?? "Choose image"}</strong><small>JPEG, PNG or WebP · maximum 10 MB</small></span><input type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => setImageFile(e.target.files?.[0] ?? null)} /></label>
             <button className="pgw-button" type="button" onClick={submitMedia} disabled={busy !== null || mediaId !== null}>{busy === "media" ? <LoaderCircle className="pgw-spin" size={17} /> : <UploadCloud size={17} />}{mediaId ? "Image uploaded privately" : "Upload image privately"}</button>
-            {mediaId && <p className="pgw-complete"><CheckCircle2 size={15} /> Image record #{mediaId} created</p>}
+            {mediaId && <p className="pgw-complete"><CheckCircle2 size={15} /> Image record #{mediaId} created privately</p>}
+            {mediaId && grantId && drafts.length > 0 && <div className="pgw-image-attach">
+              <label htmlFor="pgw-attach-story">Add this approved-rights submission to an existing story</label>
+              <select id="pgw-attach-story" value={attachStoryId ?? ""} onChange={event => setAttachStoryId(event.target.value ? Number(event.target.value) : null)}>
+                <option value="">Choose a story</option>
+                {drafts.filter(draft => ["draft", "owner_review", "editorial_review", "rejected"].includes(draft.status)).map(draft => <option key={draft.id} value={draft.id}>Story #{draft.id} · {statusLabel[draft.status] ?? draft.status}</option>)}
+              </select>
+              <p>Attaching an image creates a new story version and resets previous approvals. The image must separately pass rights and editorial review before publication.</p>
+              <button className="pgw-button pgw-button--secondary" type="button" onClick={attachUploadedImage} disabled={imageManagerBusy || !attachStoryId}>{imageManagerBusy ? <LoaderCircle className="pgw-spin" size={17}/> : <FileImage size={17}/>}Attach image to selected story</button>
+            </div>}
           </article>
 
           <article className="pgw-panel">

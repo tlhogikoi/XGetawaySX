@@ -20,3 +20,5 @@
 .pgw-activity-marker{position:relative;z-index:1;width:14px;height:14px;margin-top:3px;border:3px solid var(--pgw-accent,#64748b);border-radius:50%;background:var(--pgw-surface,#fff)}
 .pgw-activity-list li p{margin:.25rem 0;color:var(--pgw-text,#344054);font-size:.92rem}
 .pgw-activity-list li small{color:var(--pgw-muted,#667085);font-size:.8rem}
+
+.pgw-image-attach{display:grid;gap:10px;margin-top:16px;padding:16px;border:1px solid #b9d7d1;border-radius:7px;background:#f2f8f6}.pgw-image-attach label{color:#173b42;font-size:12px;font-weight:800}.pgw-image-attach select{width:100%;padding:11px;border:1px solid #cbdad7;border-radius:5px;background:#fff;color:#173047;font:inherit}.pgw-image-attach p{margin:0;color:#60747d;font-size:11px;line-height:1.6}.pgw-image-attach button{justify-self:start}
