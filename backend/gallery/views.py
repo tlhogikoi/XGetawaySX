@@ -782,9 +782,59 @@ class GalleryStoryHistoryConsentView(APIView):
         }, status=status.HTTP_200_OK)
 
 
+class GalleryMediaPrivatePreviewView(APIView):
+    """Private partner preview; pending assets never bypass public publication gates."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        media = generics.get_object_or_404(
+            GalleryMedia.objects.select_related("partner"), pk=pk
+        )
+        if not request.user.is_staff and media.partner.owner_id != request.user.id:
+            raise PermissionDenied("Only the owning partner or authorised editorial staff may preview this image.")
+        if not media.image_file:
+            raise Http404
+        image_handle = media.image_file.open("rb")
+        response = FileResponse(image_handle, content_type=gallery_image_content_type(image_handle))
+        response["Content-Disposition"] = 'inline; filename="partner-gallery-preview"'
+        response["X-Content-Type-Options"] = "nosniff"
+        response["Cache-Control"] = "private, no-store"
+        GalleryAuditEvent.objects.create(
+            actor=request.user, partner=media.partner, media=media,
+            action="media_private_previewed",
+        )
+        return response
+
+
 class GalleryMediaPermissionGrantView(APIView):
     """Only the partner owner can record a rights holder's Gallery permission."""
     permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        media = generics.get_object_or_404(
+            GalleryMedia.objects.select_related("partner").prefetch_related("permission_grants"),
+            pk=pk,
+        )
+        if not request.user.is_staff and media.partner.owner_id != request.user.id:
+            raise PermissionDenied("Only the partner owner or authorised editorial staff may view rights submissions.")
+        results = []
+        for grant in media.permission_grants.all():
+            results.append({
+                "id": grant.pk,
+                "rights_holder": grant.rights_holder,
+                "permitted_channels": grant.permitted_channels,
+                "evidence_reference": grant.evidence_reference,
+                "evidence_available": bool(grant.evidence_file),
+                "evidence_url": f"/api/v1/gallery/media/{media.pk}/permissions/{grant.pk}/evidence/" if grant.evidence_file else None,
+                "granted_at": grant.granted_at,
+                "expires_at": grant.expires_at,
+                "revoked_at": grant.revoked_at,
+                "review_status": grant.review_status,
+                "review_notes": grant.review_notes,
+                "reviewed_at": grant.reviewed_at,
+                "active": grant.is_active,
+            })
+        return Response({"media_id": media.pk, "media_status": media.status, "permissions": results})
 
     @transaction.atomic
     def post(self, request, pk):
