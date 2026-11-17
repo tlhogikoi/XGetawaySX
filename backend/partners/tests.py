@@ -1445,3 +1445,121 @@ class DualGatewayIntegrationTests(TestCase):
         self.assertEqual(outgoing.get_header("Authorization"), "Bearer sk_test_example")
         self.assertEqual(outgoing.get_header("Idempotency-key"), "yoco-refund-adapter-001")
         self.assertEqual(json.loads(outgoing.data)["amount"], 1000)
+
+
+class PartnerVerificationOnboardingTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.owner = User.objects.create_user(
+            email="onboarding-owner@example.com", password="test-password",
+            role=User.Role.PARTNER,
+        )
+        self.other_owner = User.objects.create_user(
+            email="onboarding-other@example.com", password="test-password",
+            role=User.Role.PARTNER,
+        )
+        self.staff = User.objects.create_superuser(
+            email="verification-staff@example.com", password="test-password",
+        )
+        self.partner = Partner.objects.create(
+            owner=self.owner, name="Onboarding Lodge",
+            category=Partner.Category.ACCOMMODATION,
+        )
+        self.other_partner = Partner.objects.create(
+            owner=self.other_owner, name="Other Lodge",
+            category=Partner.Category.ACCOMMODATION,
+        )
+        self.url = "/api/v1/partners/partner/onboarding/"
+
+    def valid_submission(self):
+        return {
+            "partner_id": self.partner.pk,
+            "legal_business_name": "Onboarding Lodge Proprietary Limited",
+            "registration_number": "2026/123456/07",
+            "contact_person": "Business Owner",
+            "contact_email": "owner@onboarding.example",
+            "contact_phone": "+27110000000",
+            "physical_address": "10 Example Road, Johannesburg, Gauteng",
+            "document_checklist": ["business_registration", "proof_of_address", "owner_identity"],
+            "submit": True,
+        }
+
+    def test_partner_owner_can_submit_verification_application(self):
+        from .models import PartnerVerificationSubmission, PartnerVerificationEvent
+        self.client.force_authenticate(self.owner)
+        response = self.client.post(self.url, self.valid_submission(), format="json")
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["status"], PartnerVerificationSubmission.Status.SUBMITTED)
+        self.assertIsNotNone(response.data["submitted_at"])
+        self.assertEqual(PartnerVerificationEvent.objects.filter(submission_id=response.data["id"], event_type="submitted").count(), 1)
+
+    def test_submission_requires_business_and_contact_details(self):
+        self.client.force_authenticate(self.owner)
+        response = self.client.post(
+            self.url, {"partner_id": self.partner.pk, "submit": True}, format="json"
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("legal_business_name", response.data["missing_fields"])
+
+    def test_partner_owner_cannot_submit_for_another_partner(self):
+        self.client.force_authenticate(self.owner)
+        response = self.client.post(
+            self.url, {"partner_id": self.other_partner.pk}, format="json"
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_submitted_application_is_locked_until_staff_requests_changes(self):
+        self.client.force_authenticate(self.owner)
+        submitted = self.client.post(self.url, self.valid_submission(), format="json")
+        self.assertEqual(submitted.status_code, 201)
+        locked = self.client.post(
+            self.url, {"partner_id": self.partner.pk, "contact_phone": "+27119999999"},
+            format="json",
+        )
+        self.assertEqual(locked.status_code, 409)
+
+    def test_only_staff_can_view_queue_and_review_submission(self):
+        self.client.force_authenticate(self.owner)
+        submitted = self.client.post(self.url, self.valid_submission(), format="json")
+        submission_id = submitted.data["id"]
+        self.assertEqual(
+            self.client.get("/api/v1/partners/partner/onboarding/queue/").status_code,
+            403,
+        )
+        self.assertEqual(
+            self.client.post(
+                f"/api/v1/partners/partner/onboarding/{submission_id}/review/",
+                {"decision": "approved"}, format="json",
+            ).status_code,
+            403,
+        )
+        self.client.force_authenticate(self.staff)
+        queue = self.client.get("/api/v1/partners/partner/onboarding/queue/")
+        self.assertEqual(queue.status_code, 200)
+        self.assertEqual([item["id"] for item in queue.data], [submission_id])
+        reviewed = self.client.post(
+            f"/api/v1/partners/partner/onboarding/{submission_id}/review/",
+            {"decision": "approved"}, format="json",
+        )
+        self.assertEqual(reviewed.status_code, 200)
+        self.assertEqual(reviewed.data["status"], "approved")
+
+    def test_staff_must_explain_change_request_or_rejection(self):
+        self.client.force_authenticate(self.owner)
+        submitted = self.client.post(self.url, self.valid_submission(), format="json")
+        self.client.force_authenticate(self.staff)
+        response = self.client.post(
+            f"/api/v1/partners/partner/onboarding/{submitted.data['id']}/review/",
+            {"decision": "changes_requested"}, format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("review_notes", response.data)
+
+    def test_document_checklist_rejects_unknown_document_types(self):
+        self.client.force_authenticate(self.owner)
+        response = self.client.post(
+            self.url,
+            {"partner_id": self.partner.pk, "document_checklist": ["passport_scan"]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
