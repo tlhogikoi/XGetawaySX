@@ -279,6 +279,20 @@ class GalleryStoryRevision(models.Model):
         )
 
 
+class GalleryAuditEventQuerySet(models.QuerySet):
+    """Prevent ordinary ORM updates/deletes from rewriting the audit trail."""
+
+    def update(self, **kwargs):
+        raise ValidationError("Gallery audit events are append-only and cannot be updated.")
+
+    def delete(self):
+        raise ValidationError("Gallery audit events are append-only and cannot be deleted.")
+
+
+class GalleryAuditEventManager(models.Manager.from_queryset(GalleryAuditEventQuerySet)):
+    pass
+
+
 class GalleryAuditEvent(models.Model):
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.PROTECT, related_name="gallery_audit_events")
     partner = models.ForeignKey(Partner, null=True, on_delete=models.PROTECT, related_name="gallery_audit_events")

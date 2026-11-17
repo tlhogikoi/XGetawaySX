@@ -1,10 +1,10 @@
 import json
 
 from django.db import transaction
-from django.http import FileResponse, Http404
+from django.http import FileResponse, Http404, HttpResponse
 from django.db.models import F, Q
 from django.utils import timezone
-from django.utils.dateparse import parse_datetime
+from django.utils.dateparse import parse_date, parse_datetime
 from rest_framework import generics, status
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -711,14 +711,137 @@ class GalleryEditorialQueueView(APIView):
         })
 
 
-class GalleryAuditEventListView(generics.ListAPIView):
-    permission_classes = [IsAuthenticated]
-    serializer_class = GalleryAuditEventSerializer
+def gallery_audit_filtered_queryset(request):
+    if not request.user.is_staff:
+        raise PermissionDenied("Gallery audit records are restricted to authorised editorial staff.")
 
-    def get_queryset(self):
-        if not self.request.user.is_staff:
-            raise PermissionDenied("Gallery audit records are restricted to authorised editorial staff.")
-        return GalleryAuditEvent.objects.select_related("actor", "partner", "media", "story")
+    queryset = GalleryAuditEvent.objects.select_related(
+        "actor", "partner", "media", "story", "story__media"
+    )
+    action = request.query_params.get("action", "").strip()
+    actor = request.query_params.get("actor", "").strip()
+    partner_id = request.query_params.get("partner_id", "").strip()
+    search = request.query_params.get("q", "").strip()
+    start_value = request.query_params.get("start", "").strip()
+    end_value = request.query_params.get("end", "").strip()
+
+    if action:
+        queryset = queryset.filter(action=action)
+    if actor:
+        queryset = queryset.filter(actor__email__icontains=actor)
+    if partner_id:
+        try:
+            queryset = queryset.filter(partner_id=int(partner_id))
+        except ValueError:
+            raise ValidationError({"partner_id": "Provide a valid partner ID."})
+    if search:
+        queryset = queryset.filter(
+            Q(action__icontains=search)
+            | Q(actor__email__icontains=search)
+            | Q(partner__name__icontains=search)
+            | Q(media__title__icontains=search)
+            | Q(story__media__title__icontains=search)
+            | Q(story_id__icontains=search)
+        )
+
+    def boundary(value, upper=False):
+        if not value:
+            return None
+        parsed = parse_datetime(value)
+        if parsed is None:
+            day = parse_date(value)
+            if day is not None:
+                parsed = datetime.combine(day, time.max if upper else time.min)
+        if parsed is None:
+            raise ValidationError({"date": "Use YYYY-MM-DD or an ISO-8601 date-time for date filters."})
+        if timezone.is_naive(parsed):
+            parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
+        return parsed
+
+    start = boundary(start_value)
+    end = boundary(end_value, upper=True)
+    if start:
+        queryset = queryset.filter(created_at__gte=start)
+    if end:
+        queryset = queryset.filter(created_at__lte=end)
+    return queryset.order_by("-created_at", "-pk")
+
+
+class GalleryAuditEventListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        queryset = gallery_audit_filtered_queryset(request)
+        try:
+            limit = min(max(int(request.query_params.get("limit", 50)), 1), 200)
+            offset = max(int(request.query_params.get("offset", 0)), 0)
+        except ValueError:
+            raise ValidationError({"pagination": "Limit and offset must be whole numbers."})
+        total = queryset.count()
+        events = queryset[offset:offset + limit]
+        return Response({
+            "count": total,
+            "limit": limit,
+            "offset": offset,
+            "results": GalleryAuditEventSerializer(events, many=True).data,
+        })
+
+
+class GalleryAuditReportView(APIView):
+    """Staff-only CSV export with reviewer decisions and story-cycle turnaround."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        queryset = gallery_audit_filtered_queryset(request)
+        events = list(queryset[:10000])
+        story_ids = {event.story_id for event in events if event.story_id}
+        cycle_events = GalleryAuditEvent.objects.filter(
+            story_id__in=story_ids,
+            action__in=("story_submitted", "story_edited", "story_published", "story_changes_requested"),
+        ).order_by("created_at", "pk")
+
+        cycle_starts = {}
+        turnaround_hours = {}
+        for event in cycle_events:
+            if event.action in ("story_submitted", "story_edited"):
+                cycle_starts[event.story_id] = event.created_at
+            elif event.action in ("story_published", "story_changes_requested"):
+                started_at = cycle_starts.get(event.story_id)
+                if started_at:
+                    turnaround_hours[event.pk] = max(
+                        0.0, (event.created_at - started_at).total_seconds() / 3600
+                    )
+
+        response = HttpResponse(content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = 'attachment; filename="xgetawaysx-gallery-editorial-audit.csv"'
+        response["X-Report-Truncated"] = "true" if queryset.count() > 10000 else "false"
+        writer = csv.writer(response)
+        writer.writerow([
+            "event_id", "timestamp_utc", "action", "reviewer_email",
+            "partner_id", "partner_name", "media_id", "media_title",
+            "story_id", "story_version", "turnaround_hours",
+        ])
+        for event in events:
+            details = event.details if isinstance(event.details, dict) else {}
+            media_title = event.media.title if event.media_id else (
+                event.story.media.title if event.story_id else ""
+            )
+            turnaround = turnaround_hours.get(event.pk)
+            writer.writerow([
+                event.pk,
+                event.created_at.isoformat(),
+                event.action,
+                event.actor.email if event.actor_id else "",
+                event.partner_id or "",
+                event.partner.name if event.partner_id else "",
+                event.media_id or "",
+                media_title,
+                event.story_id or "",
+                details.get("story_version", ""),
+                f"{turnaround:.2f}" if turnaround is not None else "",
+            ])
+        return response
 
 
 class GalleryStoryHistoryConsentView(APIView):

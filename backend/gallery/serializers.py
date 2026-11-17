@@ -159,10 +159,36 @@ class GalleryStoryRevisionSerializer(serializers.ModelSerializer):
 
 class GalleryAuditEventSerializer(serializers.ModelSerializer):
     actor_email = serializers.EmailField(source="actor.email", read_only=True, allow_null=True)
+    partner_id = serializers.IntegerField(read_only=True, allow_null=True)
     partner_name = serializers.CharField(source="partner.name", read_only=True, allow_null=True)
+    media_id = serializers.IntegerField(read_only=True, allow_null=True)
+    media_title = serializers.SerializerMethodField()
+    story_id = serializers.IntegerField(read_only=True, allow_null=True)
+    story_version = serializers.SerializerMethodField()
+    safe_details = serializers.SerializerMethodField()
+
+    def get_media_title(self, obj):
+        if obj.media_id:
+            return obj.media.title
+        if obj.story_id:
+            return obj.story.media.title
+        return ""
+
+    def get_story_version(self, obj):
+        details = obj.details if isinstance(obj.details, dict) else {}
+        return details.get("story_version")
+
+    def get_safe_details(self, obj):
+        details = obj.details if isinstance(obj.details, dict) else {}
+        allowed = ("story_version", "permission_id", "quality_review_id", "media_id", "purpose")
+        return {key: details[key] for key in allowed if key in details}
+
     class Meta:
         model = GalleryAuditEvent
-        fields = ("id", "actor_email", "partner_name", "action", "details", "created_at")
+        fields = (
+            "id", "actor_email", "partner_id", "partner_name", "media_id",
+            "media_title", "story_id", "story_version", "action", "safe_details", "created_at",
+        )
         read_only_fields = fields
 
 

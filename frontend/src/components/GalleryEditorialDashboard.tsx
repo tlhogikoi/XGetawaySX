@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, ClipboardCheck, Download, FileImage, FileText, RefreshCw, ShieldCheck, XCircle } from "lucide-react";
+import { CheckCircle2, ClipboardCheck, Download, FileImage, FileText, RefreshCw, ShieldCheck, XCircle, Search } from "lucide-react";
 import "./gallery-editorial-dashboard.css";
 
 type RightsReview = {
@@ -16,7 +16,12 @@ type StoryReview = {
   quality_review_version: number | null;
 };
 type Queue = { rights_reviews: RightsReview[]; media_reviews: MediaReview[]; story_reviews: StoryReview[] };
-type Tab = "stories" | "rights" | "media";
+type AuditEvent = {
+  id: number; actor_email: string | null; partner_id: number | null; partner_name: string | null;
+  media_id: number | null; media_title: string; story_id: number | null; story_version: number | null;
+  action: string; safe_details: Record<string, unknown>; created_at: string;
+};
+type Tab = "stories" | "rights" | "media" | "audit";
 const API_BASE = (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env.VITE_API_BASE_URL ?? "";
 
 const emptyQueue: Queue = { rights_reviews: [], media_reviews: [], story_reviews: [] };
@@ -33,6 +38,10 @@ export default function GalleryEditorialDashboard() {
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [checks, setChecks] = useState<Record<number, Record<string, boolean>>>({});
   const [preview, setPreview] = useState<{ title: string; url: string } | null>(null);
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
+  const [auditCount, setAuditCount] = useState(0);
+  const [auditSearch, setAuditSearch] = useState("");
+  const [auditAction, setAuditAction] = useState("");
 
   const totals = useMemo(() => ({
     stories: queue.story_reviews.length,
@@ -70,6 +79,46 @@ export default function GalleryEditorialDashboard() {
     } catch (err) {
       setAuthenticated(false);
       setError(err instanceof Error ? err.message : "Unable to load the editorial queue.");
+    } finally { setBusy(false); }
+  }
+
+  function auditQuery() {
+    const params = new URLSearchParams();
+    if (auditSearch.trim()) params.set("q", auditSearch.trim());
+    if (auditAction) params.set("action", auditAction);
+    params.set("limit", "100");
+    return params.toString();
+  }
+
+  async function loadAudit() {
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const data = await request(`/api/v1/gallery/audit/?${auditQuery()}`);
+      setAuditEvents(Array.isArray(data.results) ? data.results : []);
+      setAuditCount(Number(data.count) || 0);
+      setNotice("Editorial audit history refreshed.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to load audit history.");
+    } finally { setBusy(false); }
+  }
+
+  async function exportAuditReport() {
+    setBusy(true); setError("");
+    try {
+      const response = await fetch(`${API_BASE}/api/v1/gallery/audit/report/?${auditQuery()}`, {
+        headers: { Authorization: `Basic ${btoa(`${email.trim()}:${password}`)}` },
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.detail || "The audit report could not be exported.");
+      }
+      const url = URL.createObjectURL(await response.blob());
+      const anchor = document.createElement("a");
+      anchor.href = url; anchor.download = "xgetawaysx-gallery-editorial-audit.csv";
+      anchor.click(); URL.revokeObjectURL(url);
+      setNotice("Audit report exported.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to export audit report.");
     } finally { setBusy(false); }
   }
 
@@ -143,7 +192,7 @@ export default function GalleryEditorialDashboard() {
       <nav className="ged-tabs" aria-label="Editorial review categories">
         <button className={tab === "stories" ? "is-active" : ""} onClick={() => setTab("stories")}>Stories ({totals.stories})</button>
         <button className={tab === "rights" ? "is-active" : ""} onClick={() => setTab("rights")}>Rights ({totals.rights})</button>
-        <button className={tab === "media" ? "is-active" : ""} onClick={() => setTab("media")}>Images ({totals.media})</button>
+        <button className={tab === "media" ? "is-active" : ""} onClick={() => setTab("media")}>Images ({totals.media})</button>\n        <button className={tab === "audit" ? "is-active" : ""} onClick={() => { setTab("audit"); void loadAudit(); }}>Audit ({auditCount})</button>
       </nav>
 
       {tab === "stories" && <section className="ged-list">
@@ -183,7 +232,37 @@ export default function GalleryEditorialDashboard() {
         </article>)}
       </section>}
 
-      {tab === "media" && <section className="ged-list">
+
+      {tab === "audit" && <section className="ged-audit">
+        <div className="ged-audit-toolbar">
+          <label><span>Search history</span><div><Search size={15}/><input value={auditSearch} onChange={e => setAuditSearch(e.target.value)} onKeyDown={e => { if (e.key === "Enter") void loadAudit(); }} placeholder="Reviewer, partner, media, story ID or action"/></div></label>
+          <label><span>Decision / event</span><select value={auditAction} onChange={e => setAuditAction(e.target.value)}>
+            <option value="">All events</option>
+            <option value="story_published">Story published</option>
+            <option value="story_changes_requested">Changes requested</option>
+            <option value="media_permission_approved">Rights approved</option>
+            <option value="media_permission_rejected">Rights rejected</option>
+            <option value="media_editorially_approved">Image approved</option>
+            <option value="media_private_previewed">Private preview opened</option>
+          </select></label>
+          <button className="ged-refresh" disabled={busy} onClick={loadAudit}><Search size={15}/> Search</button>
+          <button className="ged-refresh" disabled={busy} onClick={exportAuditReport}><Download size={15}/> Export CSV</button>
+        </div>
+        <p className="ged-audit-count">Showing {auditEvents.length} of {auditCount} matching audit events. The report includes decision timestamps and available story-cycle turnaround times.</p>
+        {auditEvents.length === 0 ? <div className="ged-empty"><FileText size={25}/><strong>No matching audit events</strong><span>Try a broader search or clear the event filter.</span></div> :
+          <div className="ged-audit-table-wrap"><table className="ged-audit-table">
+            <thead><tr><th>Timestamp</th><th>Event</th><th>Reviewer / actor</th><th>Partner</th><th>Asset</th><th>Story version</th></tr></thead>
+            <tbody>{auditEvents.map(event => <tr key={event.id}>
+              <td>{new Date(event.created_at).toLocaleString()}</td>
+              <td><strong>{event.action.replaceAll("_", " ")}</strong></td>
+              <td>{event.actor_email || "System"}</td>
+              <td>{event.partner_name || "—"}</td>
+              <td>{event.media_title || "—"}{event.story_id ? <small>Story #{event.story_id}</small> : null}</td>
+              <td>{event.story_version ?? "—"}</td>
+            </tr>)}</tbody>
+          </table></div>}
+      </section>}
+\n      {tab === "media" && <section className="ged-list">
         {queue.media_reviews.length === 0 && <div className="ged-empty"><FileImage size={25}/><strong>No images awaiting media approval</strong><span>Eligible partner images will appear here after rights review.</span></div>}
         {queue.media_reviews.map(item => <article className="ged-card ged-media-card" key={item.id}>
           <div className="ged-card-heading"><div><span className="ged-kicker">IMAGE #{item.id}</span><h2>{item.title}</h2><p>{item.partner_name}</p></div><span className="ged-status">{item.status}</span></div>

@@ -1214,3 +1214,86 @@ class GalleryPublicationReadinessTests(TestCase):
         self.assertFalse(checks["editorial_approval"]["passed"])
         self.assertNotIn("reviewer_notes", payload)
         self.assertTrue(all("ai_source_facts" not in check for check in payload["publication_checks"]))
+
+
+
+class GalleryEditorialAuditReportingTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.owner = User.objects.create_user(email="audit-owner@example.com", password="test-password")
+        self.editor = User.objects.create_superuser(email="audit-reviewer@example.com", password="test-password")
+        self.partner = Partner.objects.create(
+            owner=self.owner, name="Audit Trail Lodge",
+            category=Partner.Category.ACCOMMODATION,
+            gallery_status=Partner.ApprovalStatus.APPROVED,
+        )
+        self.media = GalleryMedia.objects.create(
+            partner=self.partner, title="Audit garden image",
+            image="https://images.example.test/audit.jpg", alt_text="A garden",
+            rights_holder="Photographer", submitted_by=self.owner,
+        )
+        self.story = GalleryStory.objects.create(
+            media=self.media,
+            owner_original_history="PRIVATE OWNER HISTORY MUST NOT APPEAR IN AUDIT REPORTS",
+            summary="A verified description of the property garden and nearby landscape for travellers considering a visit.",
+            status=GalleryStory.Status.EDITORIAL_REVIEW,
+        )
+        self.submitted = GalleryAuditEvent.objects.create(
+            actor=self.owner, partner=self.partner, media=self.media, story=self.story,
+            action="story_submitted", details={"story_version": 1},
+        )
+        self.decision = GalleryAuditEvent.objects.create(
+            actor=self.editor, partner=self.partner, media=self.media, story=self.story,
+            action="story_changes_requested",
+            details={"story_version": 1, "reason": "PRIVATE REVIEW NOTES SHOULD NOT BE EXPORTED"},
+        )
+
+    def test_audit_history_is_staff_only(self):
+        self.client.force_authenticate(self.owner)
+        response = self.client.get("/api/v1/gallery/audit/")
+        self.assertEqual(response.status_code, 403)
+        report = self.client.get("/api/v1/gallery/audit/report/")
+        self.assertEqual(report.status_code, 403)
+
+    def test_staff_can_search_audit_history_and_get_reviewer_context(self):
+        self.client.force_authenticate(self.editor)
+        response = self.client.get("/api/v1/gallery/audit/?q=audit-reviewer")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 1)
+        event = response.data["results"][0]
+        self.assertEqual(event["actor_email"], self.editor.email)
+        self.assertEqual(event["partner_name"], self.partner.name)
+        self.assertEqual(event["media_title"], self.media.title)
+        self.assertEqual(event["story_id"], self.story.id)
+        self.assertEqual(event["story_version"], 1)
+        self.assertNotIn("reason", event["safe_details"])
+
+    def test_staff_can_filter_by_action_and_export_csv_without_private_fields(self):
+        self.client.force_authenticate(self.editor)
+        response = self.client.get("/api/v1/gallery/audit/?action=story_changes_requested")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 1)
+
+        report = self.client.get("/api/v1/gallery/audit/report/")
+        self.assertEqual(report.status_code, 200)
+        self.assertIn("text/csv", report["Content-Type"])
+        csv_text = report.content.decode("utf-8")
+        self.assertIn("story_changes_requested", csv_text)
+        self.assertIn(self.editor.email, csv_text)
+        self.assertIn("turnaround_hours", csv_text)
+        self.assertNotIn("PRIVATE OWNER HISTORY", csv_text)
+        self.assertNotIn("PRIVATE REVIEW NOTES", csv_text)
+        self.assertNotIn("evidence_file", csv_text)
+
+    def test_audit_events_cannot_be_updated_or_deleted(self):
+        self.submitted.action = "rewritten_event"
+        with self.assertRaises(Exception):
+            self.submitted.save()
+        with self.assertRaises(Exception):
+            self.submitted.delete()
+        with self.assertRaises(Exception):
+            GalleryAuditEvent.objects.filter(pk=self.submitted.pk).update(action="rewritten_event")
+        with self.assertRaises(Exception):
+            GalleryAuditEvent.objects.filter(pk=self.submitted.pk).delete()
+        self.submitted.refresh_from_db()
+        self.assertEqual(self.submitted.action, "story_submitted")
