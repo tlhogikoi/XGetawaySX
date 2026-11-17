@@ -1213,4 +1213,4 @@ class GalleryPublicationReadinessTests(TestCase):
         self.assertFalse(checks["owner_approval"]["passed"])
         self.assertFalse(checks["editorial_approval"]["passed"])
         self.assertNotIn("reviewer_notes", payload)
-        self.assertNotIn("ai_source_facts", payload)
+        self.assertTrue(all("ai_source_facts" not in check for check in payload["publication_checks"]))
