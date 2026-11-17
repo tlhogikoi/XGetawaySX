@@ -188,6 +188,47 @@ class GalleryPartnerActivityView(APIView):
         } for event in events])
 
 
+class GalleryPartnerSubmissionListView(APIView):
+    """Return current partner-owned media/story submissions without editorial-only notes."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, partner_id):
+        partner = generics.get_object_or_404(Partner, pk=partner_id)
+        if not request.user.is_staff and partner.owner_id != request.user.id:
+            raise PermissionDenied("You can only view submissions for your own partner profile.")
+
+        media_items = GalleryMedia.objects.filter(partner=partner).order_by("-created_at")
+        stories = {
+            story.media_id: story
+            for story in GalleryStory.objects.filter(media__partner=partner).order_by("-updated_at")
+        }
+        results = []
+        for media in media_items:
+            grant = media.permission_grants.order_by("-created_at").first()
+            story = stories.get(media.pk)
+            feedback = None
+            if story:
+                event = story.audit_events.filter(action="story_changes_requested").order_by("-created_at").first()
+                details = event.details if event and isinstance(event.details, dict) else {}
+                feedback = details.get("reason") if isinstance(details.get("reason"), str) else None
+            results.append({
+                "media_id": media.pk,
+                "title": media.title,
+                "media_status": media.status,
+                "submitted_at": media.created_at,
+                "updated_at": media.updated_at,
+                "rights_status": grant.review_status if grant else "not_submitted",
+                "rights_submitted_at": grant.created_at if grant else None,
+                "story_id": story.pk if story else None,
+                "story_status": story.status if story else None,
+                "story_version": story.current_version if story else None,
+                "story_updated_at": story.updated_at if story else None,
+                "partner_feedback": feedback,
+                "published_at": story.published_at if story else None,
+            })
+        return Response(results)
+
+
 class PublicGalleryStoryDetailView(generics.RetrieveAPIView):
     serializer_class = PublicGalleryStoryDetailSerializer
     permission_classes = [AllowAny]
