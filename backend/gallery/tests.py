@@ -968,6 +968,41 @@ class GalleryMultiImageExperienceTests(TestCase):
         )
         return media
 
+    def test_owner_can_preview_private_unapproved_image(self):
+        pending = self.create_media("Private preview image", "website")
+        pending.status = GalleryMedia.Status.OWNER_REVIEW
+        pending.save(update_fields=("status",))
+        self.client.force_authenticate(self.owner)
+        response = self.client.get(f"/api/v1/gallery/media/{pending.id}/private-preview/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Cache-Control"], "private, no-store")
+        self.assertEqual(b"".join(response.streaming_content)[:8], self.PNG[:8])
+        self.assertTrue(GalleryAuditEvent.objects.filter(
+            media=pending, actor=self.owner, action="media_private_previewed"
+        ).exists())
+
+    def test_other_partner_cannot_preview_private_image(self):
+        other = User.objects.create_user(email="private-preview-other@example.com", password="test-password")
+        self.client.force_authenticate(other)
+        response = self.client.get(f"/api/v1/gallery/media/{self.additional.id}/private-preview/")
+        self.assertEqual(response.status_code, 403)
+
+    def test_owner_can_review_rights_submission_status_without_exposing_evidence_file(self):
+        self.client.force_authenticate(self.owner)
+        response = self.client.get(f"/api/v1/gallery/media/{self.additional.id}/permissions/")
+        self.assertEqual(response.status_code, 200)
+        grant = response.data["permissions"][0]
+        self.assertEqual(grant["review_status"], GalleryMediaPermissionGrant.ReviewStatus.APPROVED)
+        self.assertTrue(grant["evidence_available"])
+        self.assertIn(f"/api/v1/gallery/media/{self.additional.id}/permissions/{grant['id']}/evidence/", grant["evidence_url"])
+        self.assertNotIn("evidence_file", grant)
+
+    def test_other_partner_cannot_view_rights_submission_status(self):
+        other = User.objects.create_user(email="rights-status-other@example.com", password="test-password")
+        self.client.force_authenticate(other)
+        response = self.client.get(f"/api/v1/gallery/media/{self.additional.id}/permissions/")
+        self.assertEqual(response.status_code, 403)
+
     def test_public_story_detail_returns_ordered_images_with_individual_credits(self):
         GalleryStoryMedia.objects.create(story=self.story, media=self.additional, position=1)
         response = self.client.get(f"/api/v1/gallery/stories/{self.story.id}/")
