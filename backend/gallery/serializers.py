@@ -104,7 +104,7 @@ class GalleryStoryRevisionSerializer(serializers.ModelSerializer):
     changed_by = serializers.EmailField(source="changed_by.email", read_only=True, allow_null=True)
     class Meta:
         model = GalleryStoryRevision
-        fields = ("id", "story", "version", "summary", "owner_history_private", "ai_assisted", "change_reason", "changed_by", "created_at")
+        fields = ("id", "story", "version", "summary", "owner_history_private", "ai_assisted", "media_snapshot", "change_reason", "changed_by", "created_at")
         read_only_fields = fields
 
 

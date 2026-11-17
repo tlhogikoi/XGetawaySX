@@ -996,6 +996,7 @@ class GalleryMultiImageExperienceTests(TestCase):
         )
         self.assertEqual(response.status_code, 201)
         self.story.refresh_from_db()
+        self.assertEqual(response.data["story_version"], 2)
         self.assertEqual(self.story.current_version, 2)
         self.assertEqual(self.story.status, GalleryStory.Status.OWNER_REVIEW)
         self.assertIsNone(self.story.owner_approved_version)
