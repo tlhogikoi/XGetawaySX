@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertCircle, ArrowDown, ArrowUp, CheckCircle2, FileImage, FileText, LoaderCircle, RefreshCw, ShieldCheck, Trash2, UploadCloud } from "lucide-react";
+import { AlertCircle, ArrowDown, ArrowUp, CheckCircle2, Download, Eye, FileImage, FileText, LoaderCircle, RefreshCw, ShieldCheck, Trash2, UploadCloud } from "lucide-react";
 import "./partner-gallery.css";
 
 type DraftStory = {
@@ -24,6 +24,8 @@ type PartnerActivity = { id: number; event_type: string; label: string; media_id
 type StoryRevision = { id: number; version: number; summary: string; owner_history_private: boolean; ai_assisted: boolean; change_reason: string; changed_by: string | null; created_at: string };
 type StoryImage = { id: number; title: string; alt_text: string; caption: string; media_credit: string; position: number; is_cover: boolean; media_status: string; rights_review_status: string; permitted_channels: string[]; website_permission_active: boolean };
 type StoryImageLibrary = { story_id: number; story_version: number; status: string; images: StoryImage[] };
+type RightsGrant = { id: number; rights_holder: string; permitted_channels: string[]; evidence_reference: string; evidence_available: boolean; evidence_url: string | null; granted_at: string; expires_at: string | null; revoked_at: string | null; review_status: string; review_notes: string; reviewed_at: string | null; active: boolean };
+type RightsResponse = { media_id: number; media_status: string; permissions: RightsGrant[] };
 
 type Props = {
   accessToken: string;
@@ -98,6 +100,9 @@ export default function PartnerGalleryWorkspace({
   const [imageManagerBusy, setImageManagerBusy] = useState(false);
   const [imageLibraryStoryId, setImageLibraryStoryId] = useState<number | null>(null);
   const [imageLibrary, setImageLibrary] = useState<Record<number, StoryImageLibrary>>({});
+  const [privatePreviews, setPrivatePreviews] = useState<Record<number, string>>({});
+  const [rightsDetails, setRightsDetails] = useState<Record<number, RightsResponse>>({});
+  const [rightsExpandedMediaId, setRightsExpandedMediaId] = useState<number | null>(null);
   const [drafts, setDrafts] = useState<DraftStory[]>([]);
   const [notifications, setNotifications] = useState<PartnerNotification[]>([]);
   const [activity, setActivity] = useState<PartnerActivity[]>([]);
@@ -208,6 +213,47 @@ export default function PartnerGalleryWorkspace({
       setError(err instanceof Error ? err.message : "Could not load this story's image library.");
     } finally { setImageManagerBusy(false); }
   }
+
+  async function loadPrivatePreview(mediaId: number) {
+    setImageManagerBusy(true); setError("");
+    try {
+      const response = await fetch(`${api}/media/${mediaId}/private-preview/`, { headers: { Authorization: `Bearer ${accessToken}` } });
+      if (!response.ok) throw new Error(`Preview unavailable (${response.status}).`);
+      const url = URL.createObjectURL(await response.blob());
+      setPrivatePreviews(current => {
+        if (current[mediaId]) URL.revokeObjectURL(current[mediaId]);
+        return { ...current, [mediaId]: url };
+      });
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not load private image preview."); }
+    finally { setImageManagerBusy(false); }
+  }
+
+  async function loadRightsDetails(mediaId: number) {
+    if (rightsExpandedMediaId === mediaId) { setRightsExpandedMediaId(null); return; }
+    setImageManagerBusy(true); setError("");
+    try {
+      const result = await request<RightsResponse>(`${api}/media/${mediaId}/permissions/`, accessToken);
+      setRightsDetails(current => ({ ...current, [mediaId]: result }));
+      setRightsExpandedMediaId(mediaId);
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not load rights details."); }
+    finally { setImageManagerBusy(false); }
+  }
+
+  async function downloadRightsEvidence(mediaId: number, grant: RightsGrant) {
+    if (!grant.evidence_available) return;
+    setImageManagerBusy(true); setError("");
+    try {
+      const response = await fetch(`${api}/media/${mediaId}/permissions/${grant.id}/evidence/`, { headers: { Authorization: `Bearer ${accessToken}` } });
+      if (!response.ok) throw new Error(`Evidence download unavailable (${response.status}).`);
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = url; link.download = "gallery-rights-evidence"; document.body.appendChild(link); link.click(); link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not download rights evidence."); }
+    finally { setImageManagerBusy(false); }
+  }
+
+  useEffect(() => () => { Object.values(privatePreviews).forEach(url => URL.revokeObjectURL(url)); }, [privatePreviews]);
 
   async function saveImageOrder(storyId: number, orderedIds: number[]) {
     setImageManagerBusy(true); setError(""); setNotice("");
@@ -439,7 +485,7 @@ export default function PartnerGalleryWorkspace({
         <div className="pgw-drafts-heading"><div><p className="pgw-eyebrow">CONTENT STATUS</p><h2>Your submitted stories</h2></div><button className="pgw-refresh" type="button" onClick={refresh} disabled={busy !== null}><RefreshCw size={16} className={busy === "refresh" ? "pgw-spin" : ""} />Refresh</button></div>
         {drafts.length === 0 ? <p className="pgw-empty">No story submissions yet. Your saved stories will appear here.</p> : <div className="pgw-draft-list">{drafts.map((draft) => <article className="pgw-draft-row" key={draft.id}><div><strong>Story #{draft.id} · Image #{draft.media}</strong><p>{draft.summary || "Summary not added yet"}</p>{draft.editorial_feedback && draft.status === "rejected" && <div className="pgw-editorial-feedback"><strong>Editorial changes requested</strong><p>{draft.editorial_feedback}</p></div>}
         {editingStoryId === draft.id ? <div className="pgw-story-editor"><label>Revised public summary<textarea rows={5} value={editSummary} onChange={(e) => setEditSummary(e.target.value)} maxLength={600}/><small>{wordCount(editSummary)} words · 30–60 required</small></label><label>Owner's original history <span className="pgw-private-label"><ShieldCheck size={12}/> Private by default</span><textarea rows={4} value={editHistory} onChange={(e) => setEditHistory(e.target.value)} /></label><div className="pgw-edit-actions"><button type="button" className="pgw-button pgw-button--secondary" onClick={() => setEditingStoryId(null)}>Cancel</button><button type="button" className="pgw-button" disabled={busy !== null} onClick={() => saveStoryEdit(draft.id)}>{busy === "refresh" ? "Saving…" : "Save new version"}</button></div></div> : <div className="pgw-draft-tools"><button type="button" className="pgw-refresh" onClick={() => beginEdit(draft)} disabled={draft.status === "published" || draft.status === "withdrawn"}>Edit / respond to review</button><button type="button" className="pgw-refresh" onClick={() => loadRevisions(draft.id)} disabled={busy !== null}> {revisionStoryId === draft.id ? "Hide version history" : "Version history"} </button><button type="button" className="pgw-refresh" onClick={() => loadImageLibrary(draft.id)} disabled={imageManagerBusy || draft.status === "published" || draft.status === "withdrawn"}>{imageLibraryStoryId === draft.id ? "Hide photo manager" : "Manage photos"}</button></div>}
-        {imageLibraryStoryId === draft.id && imageLibrary[draft.id] && <div className="pgw-image-library"><div className="pgw-image-library-heading"><strong>Story photo library · version {imageLibrary[draft.id].story_version}</strong><small>Cover image stays first. Additional photos can be reordered or removed.</small></div>{imageLibrary[draft.id].images.map((photo, index) => <div className="pgw-image-library-row" key={photo.id}><div className="pgw-image-library-info"><strong>{photo.is_cover ? "Cover" : `Photo ${index}`} · {photo.title}</strong><small>Media: {photo.media_status.replaceAll("_", " ")} · Rights: {photo.rights_review_status.replaceAll("_", " ")}</small><small>Website permission: {photo.website_permission_active ? "Active" : "Not approved"}</small></div>{!photo.is_cover && <div className="pgw-image-library-actions"><button type="button" className="pgw-refresh" aria-label={`Move ${photo.title} up`} title="Move up" disabled={imageManagerBusy || index === 1} onClick={() => moveStoryImage(draft.id, photo.id, -1)}><ArrowUp size={15}/></button><button type="button" className="pgw-refresh" aria-label={`Move ${photo.title} down`} title="Move down" disabled={imageManagerBusy || index === imageLibrary[draft.id].images.length - 1} onClick={() => moveStoryImage(draft.id, photo.id, 1)}><ArrowDown size={15}/></button><button type="button" className="pgw-refresh" aria-label={`Remove ${photo.title}`} disabled={imageManagerBusy} onClick={() => removeStoryImage(draft.id, photo.id)}><Trash2 size={15}/>Remove</button></div>}</div>)}<p>Removing or reordering photos creates a new story version and resets prior approvals. Images without active website rights remain unpublished.</p></div>}{revisionStoryId === draft.id && <div className="pgw-version-list"><strong>Recorded versions</strong>{(revisions[draft.id] ?? []).map((revision) => <div key={revision.id}><span>Version {revision.version}</span><small>{new Date(revision.created_at).toLocaleString()} · {revision.change_reason || "Content revision"}</small><p>{revision.summary}</p></div>)}</div>}
+        {imageLibraryStoryId === draft.id && imageLibrary[draft.id] && <div className="pgw-image-library"><div className="pgw-image-library-heading"><strong>Story photo library · version {imageLibrary[draft.id].story_version}</strong><small>Cover image stays first. Additional photos can be reordered or removed.</small></div>{imageLibrary[draft.id].images.map((photo, index) => <div className="pgw-image-library-row" key={photo.id}><div className="pgw-image-library-info"><strong>{photo.is_cover ? "Cover" : `Photo ${index}`} · {photo.title}</strong><small>Media: {photo.media_status.replaceAll("_", " ")} · Rights: {photo.rights_review_status.replaceAll("_", " ")}</small><small>Website permission: {photo.website_permission_active ? "Active" : "Not approved"}</small><div className="pgw-image-library-actions"><button type="button" className="pgw-refresh" onClick={() => loadPrivatePreview(photo.id)} disabled={imageManagerBusy}><Eye size={14}/>Preview</button><button type="button" className="pgw-refresh" onClick={() => loadRightsDetails(photo.id)} disabled={imageManagerBusy}>Rights details</button></div>{privatePreviews[photo.id] && <img className="pgw-private-preview" src={privatePreviews[photo.id]} alt={photo.alt_text || photo.title}/ >}{rightsExpandedMediaId === photo.id && rightsDetails[photo.id] && <div className="pgw-rights-details">{rightsDetails[photo.id].permissions.length === 0 ? <small>No rights submission recorded.</small> : rightsDetails[photo.id].permissions.map(grant => <div key={grant.id}><strong>{grant.rights_holder} · {grant.review_status.replaceAll("_", " ")}</strong><small>Channels: {grant.permitted_channels.join(", ") || "None listed"}</small><small>Granted: {new Date(grant.granted_at).toLocaleDateString()} · Expires: {grant.expires_at ? new Date(grant.expires_at).toLocaleDateString() : "No expiry recorded"}</small>{grant.review_notes && <small>Editorial note: {grant.review_notes}</small>}{grant.evidence_available && <button type="button" className="pgw-refresh" onClick={() => downloadRightsEvidence(photo.id, grant)} disabled={imageManagerBusy}><Download size={14}/>Download evidence</button>}</div>)}</div>}</div>{!photo.is_cover && <div className="pgw-image-library-actions"><button type="button" className="pgw-refresh" aria-label={`Move ${photo.title} up`} title="Move up" disabled={imageManagerBusy || index === 1} onClick={() => moveStoryImage(draft.id, photo.id, -1)}><ArrowUp size={15}/></button><button type="button" className="pgw-refresh" aria-label={`Move ${photo.title} down`} title="Move down" disabled={imageManagerBusy || index === imageLibrary[draft.id].images.length - 1} onClick={() => moveStoryImage(draft.id, photo.id, 1)}><ArrowDown size={15}/></button><button type="button" className="pgw-refresh" aria-label={`Remove ${photo.title}`} disabled={imageManagerBusy} onClick={() => removeStoryImage(draft.id, photo.id)}><Trash2 size={15}/>Remove</button></div>}</div>)}<p>Removing or reordering photos creates a new story version and resets prior approvals. Images without active website rights remain unpublished.</p></div>}{revisionStoryId === draft.id && <div className="pgw-version-list"><strong>Recorded versions</strong>{(revisions[draft.id] ?? []).map((revision) => <div key={revision.id}><span>Version {revision.version}</span><small>{new Date(revision.created_at).toLocaleString()} · {revision.change_reason || "Content revision"}</small><p>{revision.summary}</p></div>)}</div>}
         </div><div className="pgw-draft-actions"><span className="pgw-status">{statusLabel[draft.status] ?? draft.status}</span>{draft.status === "owner_review" && draft.media_status === "approved" && draft.partner_gallery_status === "approved" && <button type="button" className="pgw-approve" onClick={() => approveStory(draft.id)} disabled={busy !== null}>{busy === "approve" ? "Saving…" : "Approve this version"}</button>}{draft.status === "owner_review" && (draft.media_status !== "approved" || draft.partner_gallery_status !== "approved") && <small className="pgw-waiting">Waiting for partner and media approval</small>}</div></article>)}</div>}
       </section>
     </section>
