@@ -271,6 +271,69 @@ class GalleryStoryMediaView(APIView):
         )
         return revision
 
+    def get(self, request, pk):
+        story = generics.get_object_or_404(
+            GalleryStory.objects.select_related("media", "media__partner").prefetch_related(
+                "additional_media__media__permission_grants"
+            ), pk=pk,
+        )
+        if not request.user.is_staff and story.media.partner.owner_id != request.user.id:
+            raise PermissionDenied("You can only manage images for your own partner stories.")
+        items = []
+        for position, media in enumerate([story.media] + [item.media for item in story.additional_media.all()]):
+            grants = list(media.permission_grants.all())
+            latest = max(grants, key=lambda grant: grant.created_at) if grants else None
+            items.append({
+                "id": media.pk,
+                "title": media.title,
+                "alt_text": media.alt_text,
+                "caption": media.caption,
+                "media_credit": media.media_credit,
+                "position": position,
+                "is_cover": position == 0,
+                "media_status": media.status,
+                "rights_review_status": latest.review_status if latest else "missing",
+                "permitted_channels": latest.permitted_channels if latest else [],
+                "website_permission_active": has_active_gallery_media_permission(media, channel="website"),
+            })
+        return Response({
+            "story_id": story.pk,
+            "story_version": story.current_version,
+            "status": story.status,
+            "images": items,
+        })
+
+    @transaction.atomic
+    def patch(self, request, pk):
+        story = self.get_story(pk)
+        ordered_ids = request.data.get("ordered_media_ids")
+        if not isinstance(ordered_ids, list) or any(not isinstance(value, int) or isinstance(value, bool) for value in ordered_ids):
+            raise ValidationError({"ordered_media_ids": "Provide an ordered list of additional image IDs."})
+        attachments = list(
+            GalleryStoryMedia.objects.select_for_update().select_related("media").filter(story=story)
+        )
+        by_id = {item.media_id: item for item in attachments}
+        if len(ordered_ids) != len(set(ordered_ids)) or set(ordered_ids) != set(by_id):
+            raise ValidationError({"ordered_media_ids": "The list must contain every attached additional image exactly once."})
+        if not ordered_ids:
+            return Response({"story_id": story.pk, "story_version": story.current_version, "ordered_media_ids": []})
+        offset = len(attachments) + 100
+        for index, media_id in enumerate(ordered_ids):
+            attachment = by_id[media_id]
+            attachment.position = offset + index
+            attachment.save(update_fields=("position",))
+        for position, media_id in enumerate(ordered_ids, start=1):
+            attachment = by_id[media_id]
+            attachment.position = position
+            attachment.save(update_fields=("position",))
+        revision = self.record_media_change(story, by_id[ordered_ids[0]].media, "story_media_reordered")
+        return Response({
+            "story_id": story.pk,
+            "story_version": revision.version,
+            "ordered_media_ids": ordered_ids,
+            "status": story.status,
+        })
+
     @transaction.atomic
     def post(self, request, pk):
         story = self.get_story(pk)
