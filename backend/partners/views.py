@@ -1,5 +1,6 @@
 from datetime import datetime
 from django.conf import settings
+from django.core.mail import send_mail
 from django.core.exceptions import ImproperlyConfigured
 from django.shortcuts import get_object_or_404
 from django.db.models import Q
@@ -1902,6 +1903,33 @@ class PartnerVerificationQueueView(APIView):
         } for item in submissions])
 
 
+def send_partner_verification_review_notice(submission):
+    """Notify the partner owner without making email delivery a condition of review."""
+    owner_email = submission.partner.owner.email
+    if not owner_email:
+        return
+    status_labels = {
+        PartnerVerificationSubmission.Status.APPROVED: "approved",
+        PartnerVerificationSubmission.Status.CHANGES_REQUESTED: "returned for changes",
+        PartnerVerificationSubmission.Status.REJECTED: "not approved",
+    }
+    decision_label = status_labels.get(submission.status, submission.status.replace("_", " "))
+    subject = f"XGetawaySX partner verification: {decision_label}"
+    message = (
+        f"Hello {submission.partner.owner.get_full_name() or submission.partner.name},\n\n"
+        f"The verification review for {submission.legal_business_name or submission.partner.name} "
+        f"has been completed. Your application is {decision_label}.\n\n"
+        f"Review notes: {submission.review_notes or 'No additional notes were provided.'}\n\n"
+        "Sign in to your XGetawaySX partner account and open Partner Onboarding to view "
+        "your application status and any next steps.\n\n"
+        "This is an automated notification from XGetawaySX."
+    )
+    send_mail(
+        subject, message, settings.DEFAULT_FROM_EMAIL, [owner_email],
+        fail_silently=True,
+    )
+
+
 class PartnerVerificationReviewView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -1935,6 +1963,7 @@ class PartnerVerificationReviewView(APIView):
             submission=submission, actor=request.user, event_type=decision,
             details={"review_notes": notes},
         )
+        send_partner_verification_review_notice(submission)
         return Response({
             "id": submission.pk, "partner_id": submission.partner_id,
             "status": submission.status, "reviewed_at": submission.reviewed_at,
