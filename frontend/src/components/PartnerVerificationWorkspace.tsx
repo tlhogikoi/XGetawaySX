@@ -27,15 +27,38 @@ type QueueItem = {
   physical_address: string; document_checklist: string[]; submitted_at: string;
 };
 
-async function api<T>(token: string, path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${API}${path}`, {
+async function authenticatedFetch(token: string, path: string, options: RequestInit = {}): Promise<Response> {
+  const buildRequest = (access: string) => fetch(`${API}${path}`, {
     ...options,
     headers: {
-      Authorization: `Bearer ${token}`,
       ...(options.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
       ...options.headers,
+      Authorization: `Bearer ${access}`,
     },
   });
+  const currentAccess = sessionStorage.getItem("xgs_access") || token;
+  let response = await buildRequest(currentAccess);
+  if (response.status !== 401) return response;
+
+  const refresh = sessionStorage.getItem("xgs_refresh");
+  if (!refresh) return response;
+  const refreshResponse = await fetch(`${API}/api/v1/accounts/token/refresh/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refresh }),
+  });
+  const refreshed = await refreshResponse.json();
+  if (!refreshResponse.ok || !refreshed.access) return response;
+  const nextAccess = refreshed.access as string;
+  const nextRefresh = (refreshed.refresh as string | undefined) || refresh;
+  sessionStorage.setItem("xgs_access", nextAccess);
+  sessionStorage.setItem("xgs_refresh", nextRefresh);
+  response = await buildRequest(nextAccess);
+  return response;
+}
+
+async function api<T>(token: string, path: string, options: RequestInit = {}): Promise<T> {
+  const response = await authenticatedFetch(token, path, options);
   if (response.status === 204) return undefined as T;
   const contentType = response.headers.get("content-type") || "";
   const data = contentType.includes("application/json") ? await response.json() : await response.text();
@@ -170,9 +193,10 @@ export default function PartnerVerificationWorkspace({ accessToken, staffMode = 
 
   async function downloadEvidence(item: Evidence) {
     try {
-      const response = await fetch(`${API}${item.download_url || `/api/v1/partners/partner/onboarding/documents/${item.id}/`}`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
+      const response = await authenticatedFetch(
+        accessToken,
+        item.download_url || `/api/v1/partners/partner/onboarding/documents/${item.id}/`,
+      );
       if (!response.ok) throw new Error("Evidence download was denied.");
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
