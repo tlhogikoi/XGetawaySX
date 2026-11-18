@@ -1484,10 +1484,29 @@ class PartnerVerificationOnboardingTests(TestCase):
             "submit": True,
         }
 
+    def submit_valid_application(self):
+        payload = self.valid_submission()
+        payload.pop("submit")
+        draft = self.client.post(self.url, payload, format="json")
+        self.assertIn(draft.status_code, (200, 201))
+        upload = SimpleUploadedFile(
+            "registration.pdf", b"%PDF-1.4\\nverification evidence",
+            content_type="application/pdf",
+        )
+        evidence = self.client.post(
+            f"/api/v1/partners/partner/onboarding/{draft.data['id']}/documents/",
+            {"document_type": "business_registration", "file": upload},
+            format="multipart",
+        )
+        self.assertEqual(evidence.status_code, 201)
+        return self.client.post(
+            self.url, {"partner_id": self.partner.pk, "submit": True}, format="json"
+        )
+
     def test_partner_owner_can_submit_verification_application(self):
         from .models import PartnerVerificationSubmission, PartnerVerificationEvent
         self.client.force_authenticate(self.owner)
-        response = self.client.post(self.url, self.valid_submission(), format="json")
+        response = self.submit_valid_application()
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data["status"], PartnerVerificationSubmission.Status.SUBMITTED)
         self.assertIsNotNone(response.data["submitted_at"])
