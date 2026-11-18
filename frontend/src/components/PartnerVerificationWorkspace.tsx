@@ -46,13 +46,6 @@ async function api<T>(token: string, path: string, options: RequestInit = {}): P
   return data as T;
 }
 
-const emptyApplication = (partnerId: number, partnerName: string): Application => ({
-  id: 0, partner_id: partnerId, partner_name: partnerName, legal_business_name: partnerName,
-  registration_number: "", is_sole_proprietor: false, tax_number: "", contact_person: "",
-  contact_email: "", contact_phone: "", physical_address: "", document_checklist: [],
-  status: "draft", submitted_at: null, review_notes: "", documents: [],
-});
-
 export default function PartnerVerificationWorkspace({ accessToken, staffMode = false }: { accessToken: string; staffMode?: boolean }) {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [partnerId, setPartnerId] = useState("");
