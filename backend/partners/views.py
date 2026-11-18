@@ -1785,6 +1785,11 @@ class PartnerVerificationOnboardingView(APIView):
             "submitted_at": submission.submitted_at,
             "reviewed_at": submission.reviewed_at,
             "review_notes": submission.review_notes,
+            "documents": [
+                {"id": item.pk, "document_type": item.document_type,
+                 "original_filename": item.original_filename, "uploaded_at": item.uploaded_at}
+                for item in submission.documents.all()
+            ],
             "events": [
                 {"event_type": event.event_type, "details": event.details, "created_at": event.created_at}
                 for event in submission.events.all()[:20]
@@ -1840,6 +1845,10 @@ class PartnerVerificationOnboardingView(APIView):
                 missing.append("physical_address")
             if not submission.document_checklist:
                 missing.append("document_checklist")
+            uploaded_types = set(submission.documents.values_list("document_type", flat=True))
+            missing_documents = sorted(set(submission.document_checklist) - uploaded_types)
+            if missing_documents:
+                missing.append({"documents_not_uploaded": missing_documents})
             if missing:
                 return Response({"missing_fields": missing}, status=status.HTTP_400_BAD_REQUEST)
             submission.status = PartnerVerificationSubmission.Status.SUBMITTED
