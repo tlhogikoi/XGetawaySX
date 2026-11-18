@@ -7,6 +7,8 @@ from rest_framework.generics import ListAPIView
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.parsers import FormParser, MultiPartParser
+from django.http import FileResponse, Http404
 
 from gallery.serializers import PublicGalleryStorySerializer
 from gallery.views import PublicGalleryStoriesView
@@ -1742,7 +1744,7 @@ class MarketingUnsubscribeView(APIView):
 
 
 # Partner business verification and onboarding workflow.
-from .models import PartnerVerificationSubmission, PartnerVerificationEvent
+from .models import PartnerVerificationSubmission, PartnerVerificationEvent, PartnerVerificationDocument
 
 
 class PartnerVerificationOnboardingView(APIView):
@@ -1920,3 +1922,95 @@ class PartnerVerificationReviewView(APIView):
             "status": submission.status, "reviewed_at": submission.reviewed_at,
             "reviewed_by": request.user.email, "review_notes": submission.review_notes,
         })
+
+
+class PartnerVerificationDocumentView(APIView):
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def _submission(self, request, submission_id):
+        try:
+            submission = PartnerVerificationSubmission.objects.select_related("partner").get(pk=submission_id)
+        except PartnerVerificationSubmission.DoesNotExist:
+            from rest_framework.exceptions import NotFound
+            raise NotFound("Verification submission not found.")
+        if not request.user.is_staff and submission.partner.owner_id != request.user.id:
+            raise PermissionDenied("You can only access documents for your own partner verification.")
+        return submission
+
+    def get(self, request, submission_id):
+        submission = self._submission(request, submission_id)
+        documents = submission.documents.select_related("uploaded_by")
+        return Response([{
+            "id": item.pk,
+            "document_type": item.document_type,
+            "original_filename": item.original_filename,
+            "uploaded_at": item.uploaded_at,
+            "uploaded_by": item.uploaded_by.email,
+            "download_url": f"/api/v1/partners/partner/onboarding/documents/{item.pk}/",
+        } for item in documents])
+
+    def post(self, request, submission_id):
+        submission = self._submission(request, submission_id)
+        if request.user.is_staff:
+            raise PermissionDenied("Verification evidence must be uploaded by the partner owner.")
+        if submission.status not in (
+            PartnerVerificationSubmission.Status.DRAFT,
+            PartnerVerificationSubmission.Status.CHANGES_REQUESTED,
+        ):
+            return Response({"detail": "Documents can only be uploaded to a draft or returned application."}, status=status.HTTP_409_CONFLICT)
+        document_type = str(request.data.get("document_type", "")).strip()
+        allowed = dict(PartnerVerificationDocument._meta.get_field("document_type").choices)
+        if document_type not in allowed:
+            return Response({"document_type": "Choose a supported document type."}, status=status.HTTP_400_BAD_REQUEST)
+        upload = request.FILES.get("file")
+        if upload is None:
+            return Response({"file": "Attach a PDF, JPEG, PNG or WebP file."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            document = PartnerVerificationDocument(
+                submission=submission, document_type=document_type,
+                file=upload, original_filename=upload.name[:255],
+                uploaded_by=request.user,
+            )
+            document.full_clean()
+            document.save()
+        except Exception as exc:
+            from django.core.exceptions import ValidationError as DjangoValidationError
+            if isinstance(exc, DjangoValidationError):
+                return Response({"file": exc.message_dict if hasattr(exc, "message_dict") else exc.messages}, status=status.HTTP_400_BAD_REQUEST)
+            raise
+        checklist = list(submission.document_checklist or [])
+        if document_type not in checklist:
+            checklist.append(document_type)
+            submission.document_checklist = checklist
+            submission.save(update_fields=["document_checklist", "updated_at"])
+        PartnerVerificationEvent.objects.create(
+            submission=submission, actor=request.user, event_type="document_uploaded",
+            details={"document_type": document_type, "document_id": document.pk},
+        )
+        return Response({
+            "id": document.pk, "document_type": document.document_type,
+            "original_filename": document.original_filename,
+            "uploaded_at": document.uploaded_at,
+        }, status=status.HTTP_201_CREATED)
+
+
+class PartnerVerificationDocumentDownloadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, document_id):
+        try:
+            document = PartnerVerificationDocument.objects.select_related(
+                "submission__partner", "uploaded_by"
+            ).get(pk=document_id)
+        except PartnerVerificationDocument.DoesNotExist:
+            raise Http404("Verification document not found.")
+        if not request.user.is_staff and document.submission.partner.owner_id != request.user.id:
+            raise PermissionDenied("You cannot access this verification document.")
+        response = FileResponse(
+            document.file.open("rb"), as_attachment=True,
+            filename=document.original_filename,
+        )
+        response["Cache-Control"] = "private, no-store"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
