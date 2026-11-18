@@ -1618,6 +1618,45 @@ class PartnerVerificationOnboardingTests(TestCase):
         self.assertEqual(response.status_code, 400)
 
 
+    def test_review_decision_emails_partner_owner(self):
+        from django.core import mail
+        from django.test import override_settings
+
+        self.client.force_authenticate(self.owner)
+        submitted = self.submit_valid_application()
+        self.assertEqual(submitted.status_code, 200)
+        self.client.force_authenticate(self.staff)
+        with override_settings(
+            EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+            DEFAULT_FROM_EMAIL="notifications@xgetawaysx.example",
+        ):
+            response = self.client.post(
+                f"/api/v1/partners/partner/onboarding/{submitted.data['id']}/review/",
+                {"decision": "changes_requested", "review_notes": "Please upload a clearer registration certificate."},
+                format="json",
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, [self.owner.email])
+        self.assertIn("returned for changes", mail.outbox[0].subject)
+        self.assertIn("clearer registration certificate", mail.outbox[0].body)
+
+    def test_review_email_failure_does_not_undo_staff_decision(self):
+        from unittest.mock import patch
+
+        self.client.force_authenticate(self.owner)
+        submitted = self.submit_valid_application()
+        self.assertEqual(submitted.status_code, 200)
+        self.client.force_authenticate(self.staff)
+        with patch("partners.views.send_mail", side_effect=RuntimeError("SMTP unavailable")):
+            response = self.client.post(
+                f"/api/v1/partners/partner/onboarding/{submitted.data['id']}/review/",
+                {"decision": "approved"}, format="json",
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["status"], "approved")
+
+
 class PartnerVerificationPrivateDocumentTests(TestCase):
     def setUp(self):
         from .models import PartnerVerificationSubmission
