@@ -683,3 +683,48 @@ class PartnerVerificationEvent(models.Model):
 
     def __str__(self):
         return f"{self.event_type} — verification {self.submission_id}"
+
+
+from gallery.storage import PrivateGalleryStorage
+from gallery.validators import validate_gallery_evidence
+from django.utils import timezone
+
+private_partner_verification_storage = PrivateGalleryStorage()
+
+
+def partner_verification_upload_path(instance, filename):
+    suffix = Path(filename).suffix.lower()
+    return f"partners/verification/{timezone.now():%Y/%m}/{uuid.uuid4().hex}{suffix}"
+
+
+class PartnerVerificationDocument(models.Model):
+    submission = models.ForeignKey(
+        PartnerVerificationSubmission, on_delete=models.PROTECT, related_name="documents"
+    )
+    document_type = models.CharField(max_length=40, choices=[
+        ("business_registration", "Business registration"),
+        ("proof_of_address", "Proof of address"),
+        ("owner_identity", "Owner identity"),
+        ("tax_certificate", "Tax certificate"),
+        ("operating_licence", "Operating licence"),
+    ])
+    file = models.FileField(
+        storage=private_partner_verification_storage,
+        upload_to=partner_verification_upload_path,
+        validators=[validate_gallery_evidence],
+    )
+    original_filename = models.CharField(max_length=255)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+        related_name="partner_verification_documents",
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("document_type", "-uploaded_at")
+        indexes = [
+            models.Index(fields=("submission", "document_type"), name="partner_verify_doc_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.get_document_type_display()} — verification {self.submission_id}"
