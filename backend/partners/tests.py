@@ -1563,3 +1563,106 @@ class PartnerVerificationOnboardingTests(TestCase):
             format="json",
         )
         self.assertEqual(response.status_code, 400)
+
+
+class PartnerVerificationPrivateDocumentTests(TestCase):
+    def setUp(self):
+        from .models import PartnerVerificationSubmission
+        self.client = APIClient()
+        self.owner = User.objects.create_user(
+            email="private-doc-owner@example.com", password="test-password",
+            role=User.Role.PARTNER,
+        )
+        self.other = User.objects.create_user(
+            email="private-doc-other@example.com", password="test-password",
+            role=User.Role.PARTNER,
+        )
+        self.partner = Partner.objects.create(
+            owner=self.owner, name="Private Evidence Lodge",
+            category=Partner.Category.ACCOMMODATION,
+        )
+        self.submission = PartnerVerificationSubmission.objects.create(
+            partner=self.partner, legal_business_name="Private Evidence Lodge",
+        )
+        self.other_partner = Partner.objects.create(
+            owner=self.other, name="Other Private Lodge",
+            category=Partner.Category.ACCOMMODATION,
+        )
+
+    def pdf_upload(self, name="registration.pdf"):
+        return SimpleUploadedFile(
+            name, b"%PDF-1.4\n% partner verification evidence\n",
+            content_type="application/pdf",
+        )
+
+    def test_owner_can_upload_and_list_private_evidence(self):
+        self.client.force_authenticate(self.owner)
+        response = self.client.post(
+            f"/api/v1/partners/partner/onboarding/{self.submission.pk}/documents/",
+            {"document_type": "business_registration", "file": self.pdf_upload()},
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, 201)
+        listing = self.client.get(
+            f"/api/v1/partners/partner/onboarding/{self.submission.pk}/documents/"
+        )
+        self.assertEqual(listing.status_code, 200)
+        self.assertEqual(listing.data[0]["document_type"], "business_registration")
+        self.assertNotIn("file", listing.data[0])
+        self.submission.refresh_from_db()
+        self.assertIn("business_registration", self.submission.document_checklist)
+
+    def test_other_partner_owner_cannot_list_or_download_evidence(self):
+        from .models import PartnerVerificationDocument
+        document = PartnerVerificationDocument.objects.create(
+            submission=self.submission, document_type="business_registration",
+            file=self.pdf_upload(), original_filename="registration.pdf",
+            uploaded_by=self.owner,
+        )
+        self.client.force_authenticate(self.other)
+        self.assertEqual(
+            self.client.get(
+                f"/api/v1/partners/partner/onboarding/{self.submission.pk}/documents/"
+            ).status_code, 403,
+        )
+        self.assertEqual(
+            self.client.get(
+                f"/api/v1/partners/partner/onboarding/documents/{document.pk}/"
+            ).status_code, 403,
+        )
+
+    def test_staff_can_download_evidence_and_owner_cannot_upload_after_submission(self):
+        from .models import PartnerVerificationDocument, PartnerVerificationSubmission
+        staff = User.objects.create_superuser(
+            email="private-doc-staff@example.com", password="test-password",
+        )
+        document = PartnerVerificationDocument.objects.create(
+            submission=self.submission, document_type="business_registration",
+            file=self.pdf_upload(), original_filename="registration.pdf",
+            uploaded_by=self.owner,
+        )
+        self.client.force_authenticate(staff)
+        download = self.client.get(
+            f"/api/v1/partners/partner/onboarding/documents/{document.pk}/"
+        )
+        self.assertEqual(download.status_code, 200)
+        self.assertEqual(download["Cache-Control"], "private, no-store")
+        self.submission.status = PartnerVerificationSubmission.Status.SUBMITTED
+        self.submission.save()
+        self.client.force_authenticate(self.owner)
+        locked = self.client.post(
+            f"/api/v1/partners/partner/onboarding/{self.submission.pk}/documents/",
+            {"document_type": "proof_of_address", "file": self.pdf_upload("address.pdf")},
+            format="multipart",
+        )
+        self.assertEqual(locked.status_code, 409)
+
+    def test_invalid_file_signature_is_rejected(self):
+        self.client.force_authenticate(self.owner)
+        response = self.client.post(
+            f"/api/v1/partners/partner/onboarding/{self.submission.pk}/documents/",
+            {"document_type": "owner_identity",
+             "file": SimpleUploadedFile("identity.pdf", b"not a PDF", content_type="application/pdf")},
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, 400)
