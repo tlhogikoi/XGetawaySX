@@ -18,7 +18,7 @@ _EVIDENCE_SIGNATURES = _IMAGE_SIGNATURES + (
 
 def _signature(upload, allowed, max_bytes, field_name):
     if upload.size <= 0 or upload.size > max_bytes:
-        raise ValidationError({field_name: f"File must be between 1 byte and {max_bytes // (1024 * 1024)} MB."})
+        raise ValidationError(f"File must be between 1 byte and {max_bytes // (1024 * 1024)} MB.")
     position = upload.tell()
     upload.seek(0)
     header = upload.read(12)
@@ -28,7 +28,7 @@ def _signature(upload, allowed, max_bytes, field_name):
             if mime == "image/webp" and header[8:12] != b"WEBP":
                 continue
             return mime
-    raise ValidationError({field_name: "Unsupported or invalid file content. Use JPEG, PNG, WebP" + (", or PDF." if field_name == "evidence_file" else ".")})
+    raise ValidationError("Unsupported or invalid file content. Use JPEG, PNG, WebP" + (", or PDF." if field_name == "evidence_file" else "."))
 
 
 def validate_gallery_image(upload):
@@ -38,10 +38,10 @@ def validate_gallery_image(upload):
         upload.seek(0)
         with Image.open(upload) as image:
             if image.width * image.height > MAX_IMAGE_PIXELS:
-                raise ValidationError({"image_file": "Image dimensions exceed the 40-megapixel safety limit."})
+                raise ValidationError("Image dimensions exceed the 40-megapixel safety limit.")
             image.verify()
     except (UnidentifiedImageError, OSError, SyntaxError, Image.DecompressionBombError):
-        raise ValidationError({"image_file": "The uploaded file is not a valid, decodable image."})
+        raise ValidationError("The uploaded file is not a valid, decodable image.")
     finally:
         upload.seek(position)
 
