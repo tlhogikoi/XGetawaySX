@@ -1747,6 +1747,15 @@ class MarketingUnsubscribeView(APIView):
 from .models import PartnerVerificationSubmission, PartnerVerificationEvent, PartnerVerificationDocument
 
 
+class PartnerOwnedProfileListView(APIView):
+    """Private partner-profile listing for the authenticated owner."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        profiles = Partner.objects.filter(owner=request.user).order_by("name")
+        return Response(PublicPartnerSerializer(profiles, many=True).data)
+
+
 class PartnerVerificationOnboardingView(APIView):
     permission_classes = [IsAuthenticated]
 
