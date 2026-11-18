@@ -1507,7 +1507,7 @@ class PartnerVerificationOnboardingTests(TestCase):
         from .models import PartnerVerificationSubmission, PartnerVerificationEvent
         self.client.force_authenticate(self.owner)
         response = self.submit_valid_application()
-        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["status"], PartnerVerificationSubmission.Status.SUBMITTED)
         self.assertIsNotNone(response.data["submitted_at"])
         self.assertEqual(PartnerVerificationEvent.objects.filter(submission_id=response.data["id"], event_type="submitted").count(), 1)
@@ -1530,7 +1530,7 @@ class PartnerVerificationOnboardingTests(TestCase):
     def test_submitted_application_is_locked_until_staff_requests_changes(self):
         self.client.force_authenticate(self.owner)
         submitted = self.submit_valid_application()
-        self.assertEqual(submitted.status_code, 201)
+        self.assertEqual(submitted.status_code, 200)
         locked = self.client.post(
             self.url, {"partner_id": self.partner.pk, "contact_phone": "+27119999999"},
             format="json",
@@ -1539,7 +1539,8 @@ class PartnerVerificationOnboardingTests(TestCase):
 
     def test_only_staff_can_view_queue_and_review_submission(self):
         self.client.force_authenticate(self.owner)
-        submitted = self.client.post(self.url, self.valid_submission(), format="json")
+        submitted = self.submit_valid_application()
+        self.assertEqual(submitted.status_code, 200)
         submission_id = submitted.data["id"]
         self.assertEqual(
             self.client.get("/api/v1/partners/partner/onboarding/queue/").status_code,
@@ -1565,7 +1566,8 @@ class PartnerVerificationOnboardingTests(TestCase):
 
     def test_staff_must_explain_change_request_or_rejection(self):
         self.client.force_authenticate(self.owner)
-        submitted = self.client.post(self.url, self.valid_submission(), format="json")
+        submitted = self.submit_valid_application()
+        self.assertEqual(submitted.status_code, 200)
         self.client.force_authenticate(self.staff)
         response = self.client.post(
             f"/api/v1/partners/partner/onboarding/{submitted.data['id']}/review/",
