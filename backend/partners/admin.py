@@ -289,3 +289,23 @@ class PartnerVerificationEventAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+from .models import PartnerVerificationDocument
+
+
+@admin.register(PartnerVerificationDocument)
+class PartnerVerificationDocumentAdmin(admin.ModelAdmin):
+    list_display = ("submission", "document_type", "original_filename", "uploaded_by", "uploaded_at")
+    list_filter = ("document_type", "uploaded_at")
+    search_fields = ("submission__partner__name", "original_filename", "uploaded_by__email")
+    readonly_fields = ("submission", "document_type", "file", "original_filename", "uploaded_by", "uploaded_at")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
