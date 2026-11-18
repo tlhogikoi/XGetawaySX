@@ -1447,6 +1447,38 @@ class DualGatewayIntegrationTests(TestCase):
         self.assertEqual(json.loads(outgoing.data)["amount"], 1000)
 
 
+class PartnerOwnedProfileEndpointTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.owner = User.objects.create_user(
+            email="owned-profiles@example.com", password="test-password",
+            role=User.Role.PARTNER,
+        )
+        self.other = User.objects.create_user(
+            email="other-owned-profiles@example.com", password="test-password",
+            role=User.Role.PARTNER,
+        )
+        self.owned = Partner.objects.create(
+            owner=self.owner, name="Owner Profile",
+            category=Partner.Category.ACCOMMODATION,
+        )
+        self.not_owned = Partner.objects.create(
+            owner=self.other, name="Other Profile",
+            category=Partner.Category.ACCOMMODATION,
+        )
+        self.url = "/api/v1/partners/partner/my-profiles/"
+
+    def test_partner_owner_receives_only_their_own_profiles(self):
+        self.client.force_authenticate(self.owner)
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item["id"] for item in response.data], [self.owned.pk])
+
+    def test_profile_endpoint_requires_authentication(self):
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 401)
+
+
 class PartnerVerificationOnboardingTests(TestCase):
     def setUp(self):
         self.client = APIClient()
