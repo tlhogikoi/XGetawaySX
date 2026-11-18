@@ -18,7 +18,7 @@ from .views import (
     PartnerIncomingEnquiryListView, TripPlanDetailView,
     TripPlanItemCreateView, TripPlanItemDetailView, TripPlanListCreateView,
     CustomerEmailPreferenceView, MarketingUnsubscribeView, CustomerEnquiryConvertView,
-    PartnerVerificationOnboardingView, PartnerVerificationQueueView, PartnerVerificationReviewView,
+    PartnerVerificationOnboardingView, PartnerVerificationQueueView, PartnerVerificationReviewView, PartnerOwnedProfileListView,
     PartnerVerificationDocumentView, PartnerVerificationDocumentDownloadView,
     PartnerReservationQuoteCreateView, CustomerReservationQuoteDecisionView,
 )
@@ -40,6 +40,7 @@ urlpatterns = [
     path("availability/", PublicPartnerAvailabilityView.as_view(), name="public-partner-availability"),
     path("partner/availability/", PartnerAvailabilityManagementView.as_view(), name="partner-availability-management"),
     path("partner/profiles/", PartnerBookingProfileListView.as_view(), name="partner-booking-profiles"),
+    path("partner/my-profiles/", PartnerOwnedProfileListView.as_view(), name="partner-owned-profiles"),
     path("partner/onboarding/", PartnerVerificationOnboardingView.as_view(), name="partner-verification-onboarding"),
     path("partner/onboarding/queue/", PartnerVerificationQueueView.as_view(), name="partner-verification-queue"),
     path("partner/onboarding/<int:pk>/review/", PartnerVerificationReviewView.as_view(), name="partner-verification-review"),
