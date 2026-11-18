@@ -1480,7 +1480,7 @@ class PartnerVerificationOnboardingTests(TestCase):
             "contact_email": "owner@onboarding.example",
             "contact_phone": "+27110000000",
             "physical_address": "10 Example Road, Johannesburg, Gauteng",
-            "document_checklist": ["business_registration", "proof_of_address", "owner_identity"],
+            "document_checklist": ["business_registration"],
             "submit": True,
         }
 
@@ -1529,7 +1529,7 @@ class PartnerVerificationOnboardingTests(TestCase):
 
     def test_submitted_application_is_locked_until_staff_requests_changes(self):
         self.client.force_authenticate(self.owner)
-        submitted = self.client.post(self.url, self.valid_submission(), format="json")
+        submitted = self.submit_valid_application()
         self.assertEqual(submitted.status_code, 201)
         locked = self.client.post(
             self.url, {"partner_id": self.partner.pk, "contact_phone": "+27119999999"},
