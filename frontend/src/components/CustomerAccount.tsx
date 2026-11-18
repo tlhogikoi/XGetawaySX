@@ -8,7 +8,7 @@ import PartnerPaymentScheduleWorkspace from "./PartnerPaymentScheduleWorkspace";
 import "./customer-account.css";
 
 const API = (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env.VITE_API_BASE_URL ?? "";
-type Account = { id: number; email: string; first_name: string; last_name: string; role: string };
+type Account = { id: number; email: string; first_name: string; last_name: string; role: string; is_staff: boolean };
 type Tokens = { access: string; refresh: string };
 
 export default function CustomerAccount() {
@@ -108,6 +108,7 @@ export default function CustomerAccount() {
         <h1>Welcome{account.first_name ? `, ${account.first_name}` : ""}.</h1>
         <p>{account.email} · Your getaway plans, reservations and payments in one place.</p>
         <div className="account-trust"><ShieldCheck size={17}/> Your account information and bookings are private to your account.</div>
+        <div className="account-workspace-links">{account.role === "partner" && <a href="/partner/onboarding">Partner verification <ArrowRight size={15}/></a>}{account.is_staff && <a href="/staff/partner/onboarding">Staff verification queue <ArrowRight size={15}/></a>}</div>
       </section>
       <TripPlanner accessToken={tokens.access}/>
       <PartnerQuoteWorkspace accessToken={tokens.access}/>
