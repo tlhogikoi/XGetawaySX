@@ -19,6 +19,7 @@ type Application = {
   contact_person: string; contact_email: string; contact_phone: string; physical_address: string;
   document_checklist: string[]; status: string; submitted_at: string | null;
   review_notes: string; documents: Evidence[];
+  events: { event_type: string; details: Record<string, unknown>; created_at: string }[];
 };
 type QueueItem = {
   id: number; partner_id: number; partner_name: string; partner_owner_email: string;
@@ -237,10 +238,12 @@ export default function PartnerVerificationWorkspace({ accessToken, staffMode = 
         <div className="partner-verify-profile">
           <label>Select your partner profile<select value={partnerId} onChange={e => { setPartnerId(e.target.value); setApplication(null); }}><option value="">Choose a business…</option>{profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name} · {profile.city || profile.province}</option>)}</select></label>
           {profiles.length === 0 && <p className="partner-verify-muted">No partner profiles are linked to this account yet. Contact XGetawaySX partner support to create your profile.</p>}
+          {partnerId && <button type="button" className="outline" disabled={busy} onClick={() => { setBusy(true); refreshApplication().catch(reason => setError(reason instanceof Error ? reason.message : "Could not refresh application status.")).finally(() => setBusy(false)); }}>Refresh application status</button>}
         </div>
         {application && <>
           <div className="partner-verify-status"><span className={`status-${application.status}`}>{application.status.replaceAll("_", " ")}</span><small>{application.submitted_at ? `Submitted ${new Date(application.submitted_at).toLocaleDateString()}` : "Not submitted yet"}</small></div>
           {application.review_notes && <div className="partner-verify-feedback"><strong>Feedback from the verification team</strong><p>{application.review_notes}</p></div>}
+          {application.events?.length > 0 && <div className="partner-verify-feedback"><strong>Application activity</strong><ol>{application.events.slice().reverse().map((event, index) => <li key={`${event.event_type}-${event.created_at}-${index}`}><span>{event.event_type.replaceAll("_", " ")}</span><small>{new Date(event.created_at).toLocaleString()}</small>{typeof event.details.review_notes === "string" && event.details.review_notes && <p>{event.details.review_notes}</p>}</li>)}</ol></div>}
           <div className="partner-verify-form">
             <label>Legal business name<input disabled={!editable} value={application.legal_business_name} onChange={e => setField("legal_business_name", e.target.value)}/></label>
             <label className="partner-verify-check"><input type="checkbox" disabled={!editable} checked={application.is_sole_proprietor} onChange={e => setField("is_sole_proprietor", e.target.checked)}/> I operate as a sole proprietor</label>
