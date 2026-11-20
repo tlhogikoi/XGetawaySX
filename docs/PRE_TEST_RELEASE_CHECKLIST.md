@@ -10,7 +10,6 @@ Validate the implemented customer, partner, booking, payment-workflow and Galler
 - [ ] Reconcile the feature branch with the current `main` branch; confirm the pull request is mergeable and obtain approval before merging.
 - [ ] Deploy a staging build from the reviewed commit. Confirm the frontend and backend point to staging services, not production.
 - [ ] Configure a strong staging-only Django secret, allowed hosts, CORS origins, database, private Gallery storage and HTTPS.
-- [ ] Configure transactional email with a verified sender; test partner review, booking, cancellation and refund audit messages.
 - [ ] Configure PayFast and/or Yoco sandbox credentials and publicly reachable HTTPS webhook endpoints. Keep live credentials disabled.
 - [ ] Create synthetic test customers, partner owners, staff reviewers and approved test partner listings. Do not use real customer identity or payment data.
 - [ ] Prepare approved test prices, availability, cancellation terms, refund rules and test trip content. Clearly label all test inventory.
@@ -65,6 +64,7 @@ Validate the implemented customer, partner, booking, payment-workflow and Galler
 - [ ] Record defects with severity, reproducible steps, expected result, actual result and screenshot/log evidence.
 
 ## 4. Test boundaries for this cycle
+- SMTP configuration and outbound email delivery are explicitly deferred until after the first UAT cycle. Do not block UAT on a verified sender, SMTP credentials or mailbox setup. In-app status, notifications and audit records must be used where available.
 - AI trip suggestions, AI story drafting and multilingual AI/human Concierge must be marked out of scope unless their provider integration and user-facing workflow are separately completed and verified.
 - No real customer bookings, live payment capture, live refunds or public Gallery publication during internal testing.
 - A passing CI run does not prove that live payment provider accounts, email delivery, staging deployment or real partner inventory are operational.
