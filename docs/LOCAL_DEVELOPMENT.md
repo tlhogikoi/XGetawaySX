@@ -1,0 +1,119 @@
+# Local development
+
+## Prerequisites
+- Python 3.12+
+- Node.js 22+
+- PostgreSQL 16+ for shared development/staging. SQLite is used by default for a quick local backend smoke test unless DATABASE_URL is set.
+
+## Backend
+
+```bash
+cd backend
+python -m venv .venv
+# Windows: .venv\Scripts\activate
+# macOS/Linux: source .venv/bin/activate
+pip install -r requirements.txt
+python manage.py check
+python manage.py test
+python manage.py runserver
+```
+
+Health endpoint: http://127.0.0.1:8000/api/v1/health/
+
+Copy the root `.env.example` to `.env` and configure values before running with PostgreSQL. Do not commit real credentials. The development fallback secret is not suitable for deployment.
+
+## Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open http://localhost:5173
+
+Production checks:
+
+```bash
+npm run typecheck
+npm run build
+```
+
+## Current implementation status
+
+- Backend foundations include the accounts, partner, health and Gallery Django apps.
+- Partner listing and initial Gallery submission/review APIs are present on the `feat/application-foundation` branch.
+- Gallery work remains in progress: version-bound approvals, separate original-history consent, formal media permission grants and editorial evidence review have been added on the feature branch; automated validation and PostgreSQL migration checks still need to be run.
+- The frontend is a branded shell with an initial accessible Gallery story-card component; it is not yet connected to live Gallery API data.
+- Initial private filesystem uploads for Gallery images and rights evidence are present on the feature branch. Set `PRIVATE_GALLERY_STORAGE_ROOT` to a writable directory outside all static/web roots before local use. Production S3-compatible object storage, malware scanning, image re-encoding and retention/backup controls are not complete.
+- An initial authenticated `PartnerGalleryWorkspace` React component is present on the feature branch. The host partner portal must supply the bearer access token and partner context; no sign-in/session integration or route mounting is implemented yet. Editorial media review UI, AI drafting, timelines, analytics, payments and deployment are not complete.
+- The feature branch is not the production/default branch. Do not treat the Gallery as live or public until its tests, review and deployment gates pass.
+
+
+## Payment gateway sandbox setup
+
+The backend supports hosted checkout adapters for PayFast and Yoco. Copy the payment variables from `.env.example` into your local environment and use sandbox/test credentials only.
+
+- PayFast: configure merchant ID/key, passphrase, sandbox mode and a publicly reachable HTTPS `PAYFAST_NOTIFY_URL`.
+- Yoco: configure a test secret key and the webhook subscription signing secret. Register the webhook at `https://<public-host>/api/v1/partners/webhooks/yoco/`.
+- Set the customer return/cancel/failure URLs. A browser return is not payment confirmation; verified provider webhook/ITN processing updates payment status.
+- Local webhook testing requires a public HTTPS tunnel or deployed staging host. Never expose live secrets or store card details in XGetawaySX.
+
+Provider account setup, sandbox transactions, webhook delivery tests and live activation are separate release gates; the presence of configuration variables does not mean a gateway account is connected.
+
+
+### Development 18 — Refund API configuration and verification
+
+No additional provider secret is introduced. Refund initiation reuses the existing `PAYFAST_MERCHANT_ID`, `PAYFAST_PASSPHRASE`, `PAYFAST_SANDBOX`, and `YOCO_SECRET_KEY` configuration. The Yoco refund webhook uses the existing `YOCO_WEBHOOK_SECRET`.
+
+Staff API operations:
+
+- `POST /api/v1/partners/payments/{id}/refunds/initiate/` with `amount`, `reason`, and a unique `idempotency_key`.
+- `POST /api/v1/partners/payments/{id}/refunds/verify-payfast/` after PayFast has accepted a refund request; this queries the PayFast Refunds API and reconciles only the amount evidenced by the provider's remaining refundable balance.
+- Existing `GET/POST /api/v1/partners/payments/{id}/refunds/` remains available for staff to inspect and manually reconcile refunds completed outside the gateway automation.
+
+Yoco webhook subscriptions must include `refund.succeeded` and `refund.failed` events at `/api/v1/partners/webhooks/yoco/`. Configure the endpoint as public HTTPS and store the subscription signing secret in `YOCO_WEBHOOK_SECRET`. A successful Yoco API submission may remain pending; the signed refund webhook is the final state confirmation.
+
+PayFast automated refund requests query the refundable balance first and support only refunds back to the original payment source. Bank-payout cases require a separate authorised process and are not automated. Never retry an uncertain provider request until the provider's refund state has been checked.
+
+### Development 19 — Cancellation and notification API
+
+Customer operations:
+
+- `POST /api/v1/partners/reservations/{id}/cancel/` with a `reason` for confirmed bookings. Unconfirmed reservation requests can be withdrawn immediately.
+- `GET /api/v1/partners/reservations/cancellations/` lists the customer's cancellation requests.
+- `GET /api/v1/partners/notifications/` lists the authenticated user's in-app notifications; add `?unread=true` to filter unread items.
+- `POST /api/v1/partners/notifications/{id}/read/` marks only the recipient's notification as read.
+
+Partner/staff operations:
+
+- `GET /api/v1/partners/partner/cancellations/` lists cancellation requests for the authenticated partner owner.
+- `POST /api/v1/partners/cancellations/{id}/decision/` accepts `status` (`approved` or `declined`) and a `decision_note`. Only the owning partner or staff can decide.
+- If captured funds exist, approval does not cancel the reservation or release capacity. Staff must refund every captured payment through the existing Development 18 workflow; final refund reconciliation completes the cancellation and releases capacity automatically.
+
+Migration `0010_cancellation_workflow_notifications.py` adds cancellation workflow and in-app notification records. Run `python manage.py migrate` after pulling the branch. No extra provider credentials are needed.
+
+
+### Development 20 — Successful refund audit emails
+
+A confirmed refund creates one durable `RefundAuditEmail` record. After the database transaction commits, XGetawaySX sends separate confirmation emails to the customer and the partner account owner. Each email contains the booking reference, refund record ID, amount/currency, provider and provider refund reference, and confirmation timestamp. It does not include payment credentials or card data.
+
+Emails are sent only after a refund reaches the successful/refunded state through verified provider confirmation or authorised staff reconciliation. A refund request, pending provider response, or failed refund does not trigger a success email. Repeated webhook delivery or refund finalisation does not create duplicate audit records or resend an email already accepted by the configured email backend.
+
+Configure outbound SMTP using `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USE_TLS`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, and `DEFAULT_FROM_EMAIL`. Keep credentials in deployment environment variables, never in source control. In local development, set `EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend` to print messages to the runserver console.
+
+The Django admin exposes read-only refund email audit records, including recipient snapshots, per-recipient delivery timestamps, attempt count and the last delivery error. To retry pending, partial or failed deliveries after fixing SMTP configuration, run:
+
+```bash
+cd backend
+python manage.py retry_refund_audit_emails
+```
+
+Apply migration `0011_refund_audit_email.py` with `python manage.py migrate`. Email delivery is an external service dependency: a refund remains successful even if SMTP is unavailable; the audit record captures the failure for later retry.
+
+
+### Development 21 — Customer payment and refund history
+
+The authenticated customer payment history endpoint, `GET /api/v1/partners/payments/`, now includes each payment's refund records. The customer reservation workspace displays payment type, amount/currency, provider, payment state, captured/created timestamp, failure reason where relevant, and refund state, amount, provider reference and confirmation/request timestamp.
+
+The API remains scoped to the authenticated customer. Refund history is read-only; customers cannot alter provider reconciliation records. The endpoint prefetches refund rows to avoid an extra database query per payment.

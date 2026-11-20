@@ -31,6 +31,7 @@ This repository is being established as the XGetawaySX project home. Product spe
 
 ## Start here
 - docs/GALLERY_IMPLEMENTATION.md
+- docs/GALLERY_BACKLOG.md
 - docs/ARCHITECTURE.md
 
 ## Product principles

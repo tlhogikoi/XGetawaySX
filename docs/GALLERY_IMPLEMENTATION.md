@@ -1,6 +1,6 @@
 # XGetawaySX Gallery — Implementation Specification
 
-Status: Product specification and implementation backlog. No Gallery application code is implemented by this document.
+Status: Product specification. Delivery progress, implemented scaffolding, dependencies and acceptance criteria are tracked separately in [GALLERY_BACKLOG.md](GALLERY_BACKLOG.md). This document is not evidence of a live or deployed Gallery.
 
 ## 1. Purpose
 The Gallery is an official promotional showcase for approved XGetawaySX partner entities only. It is not a public upload gallery or traveller photo-sharing feature. It may showcase approved accommodation providers, tourism businesses, destinations, activities, restaurants, spas, transport providers and other approved entities.

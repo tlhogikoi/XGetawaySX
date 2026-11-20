@@ -1,0 +1,1264 @@
+import json
+import csv
+from datetime import datetime, time
+
+from django.db import transaction
+from django.http import FileResponse, Http404, HttpResponse
+from django.db.models import F, Q
+from django.utils import timezone
+from django.utils.dateparse import parse_date, parse_datetime
+from rest_framework import generics, status
+from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
+from rest_framework.views import APIView
+
+from partners.models import Partner
+from .models import GalleryAuditEvent, GalleryHistoryPublicationConsent, GalleryMedia, GalleryMediaPermissionGrant, GalleryPartnerNotification, GalleryStory, GalleryStoryMedia, GalleryStoryEditorialReview, GalleryStoryRevision
+from .validators import gallery_image_content_type
+from .story_drafting import draft_story_summary
+from .serializers import GalleryAuditEventSerializer, GalleryMediaDraftSerializer, GalleryPartnerNotificationSerializer, GalleryStoryDraftSerializer, GalleryStoryRevisionSerializer, PublicGalleryStorySerializer, PublicGalleryStoryDetailSerializer
+
+
+
+def active_gallery_permission_grant_ids(channel):
+    """Return active, editorially verified grants that explicitly authorise a channel.
+
+    JSONField channel membership is evaluated in Python for consistent behaviour
+    across PostgreSQL and SQLite test environments.
+    """
+    now = timezone.now()
+    grants = GalleryMediaPermissionGrant.objects.filter(
+        purpose=GalleryMediaPermissionGrant.Purpose.GALLERY_PROMOTION,
+        review_status=GalleryMediaPermissionGrant.ReviewStatus.APPROVED,
+        revoked_at__isnull=True,
+    ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
+    return [
+        grant_id
+        for grant_id, channels in grants.values_list("pk", "permitted_channels")
+        if isinstance(channels, list) and channel in channels
+    ]
+
+
+def has_active_gallery_media_permission(media, channel=None):
+    now = timezone.now()
+    grants = media.permission_grants.filter(
+        purpose=GalleryMediaPermissionGrant.Purpose.GALLERY_PROMOTION,
+        review_status=GalleryMediaPermissionGrant.ReviewStatus.APPROVED,
+        revoked_at__isnull=True,
+    ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
+    if channel is None:
+        return grants.exists()
+    return any(
+        isinstance(channels, list) and channel in channels
+        for channels in grants.values_list("permitted_channels", flat=True)
+    )
+
+
+
+def story_media_items(story):
+    return [story.media] + [
+        attachment.media
+        for attachment in story.additional_media.select_related("media").all()
+    ]
+
+
+def story_has_active_website_media_permissions(story):
+    for media in story_media_items(story):
+        if (
+            media.partner_id != story.media.partner_id
+            or media.status != GalleryMedia.Status.APPROVED
+            or media.partner.gallery_status != Partner.ApprovalStatus.APPROVED
+            or not has_active_gallery_media_permission(media, channel="website")
+        ):
+            return False
+    return True
+
+
+def public_gallery_story_queryset():
+    website_grant_ids = active_gallery_permission_grant_ids("website")
+    if not website_grant_ids:
+        return GalleryStory.objects.none()
+    website_approved_media_ids = GalleryMedia.objects.filter(
+        status=GalleryMedia.Status.APPROVED,
+        partner__gallery_status=Partner.ApprovalStatus.APPROVED,
+        permission_grants__id__in=website_grant_ids,
+    ).values("pk")
+    stories_with_invalid_additional_media = GalleryStoryMedia.objects.exclude(
+        media_id__in=website_approved_media_ids
+    ).values("story_id")
+    return GalleryStory.objects.filter(
+        status=GalleryStory.Status.PUBLISHED,
+        media__status=GalleryMedia.Status.APPROVED,
+        media__partner__gallery_status=Partner.ApprovalStatus.APPROVED,
+        media__permission_grants__id__in=website_grant_ids,
+        owner_approved_version=F("current_version"),
+        owner_approved_at__isnull=False,
+        editorial_approved_version=F("current_version"),
+        editorial_approved_at__isnull=False,
+        published_at__isnull=False,
+    ).exclude(
+        pk__in=stories_with_invalid_additional_media
+    ).select_related("media", "media__partner").prefetch_related(
+        "history_publication_consents", "additional_media__media"
+    ).distinct()
+
+
+def create_partner_story_notification(story, kind, title, message):
+    """Create an in-app notice for the partner owner; never expose internal review notes."""
+    return GalleryPartnerNotification.objects.create(
+        recipient=story.media.partner.owner,
+        partner=story.media.partner,
+        story=story,
+        kind=kind,
+        title=title,
+        message=message,
+    )
+
+
+class GalleryPartnerNotificationListView(generics.ListAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = GalleryPartnerNotificationSerializer
+
+    def get_queryset(self):
+        return GalleryPartnerNotification.objects.filter(
+            recipient=self.request.user,
+            partner__owner=self.request.user,
+        ).select_related("story", "partner")
+
+
+class GalleryPartnerNotificationReadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        notification = generics.get_object_or_404(
+            GalleryPartnerNotification.objects.filter(
+                recipient=request.user, partner__owner=request.user
+            ), pk=pk,
+        )
+        if notification.read_at is None:
+            notification.read_at = timezone.now()
+            notification.save(update_fields=("read_at",))
+        return Response({"id": notification.pk, "read_at": notification.read_at})
+
+
+
+
+class GalleryPartnerActivityView(APIView):
+    """Return a privacy-minimised submission timeline for the owning partner."""
+    permission_classes = [IsAuthenticated]
+
+    EVENT_LABELS = {
+        "media_submitted": "Image submitted",
+        "media_permission_granted": "Rights evidence submitted",
+        "media_permission_revoked": "Media permission withdrawn",
+        "media_permission_approved": "Media rights approved",
+        "media_permission_rejected": "Media rights not approved",
+        "media_editorially_approved": "Media approved for Gallery use",
+        "story_submitted": "Story submitted for owner review",
+        "owner_approved": "Story version approved by partner owner",
+        "story_edited": "Story revised; approvals reset",
+        "story_changes_requested": "Editorial changes requested",
+        "story_published": "Story published in the Gallery",
+    }
+
+    def get(self, request, partner_id):
+        partner = generics.get_object_or_404(Partner, pk=partner_id)
+        if not request.user.is_staff and partner.owner_id != request.user.id:
+            raise PermissionDenied("You can only view activity for your own partner profile.")
+
+        events = GalleryAuditEvent.objects.filter(partner=partner).select_related(
+            "media", "story"
+        ).order_by("-created_at")[:100]
+        return Response([{
+            "id": event.pk,
+            "event_type": event.action,
+            "label": self.EVENT_LABELS.get(event.action, "Gallery activity updated"),
+            "media_id": event.media_id,
+            "media_title": event.media.title if event.media_id else None,
+            "story_id": event.story_id,
+            "story_version": (
+                event.details.get("story_version")
+                if isinstance(event.details, dict)
+                and isinstance(event.details.get("story_version"), int)
+                else None
+            ),
+            "occurred_at": event.created_at,
+        } for event in events])
+
+
+class GalleryPartnerSubmissionListView(APIView):
+    """Return current partner-owned media/story submissions without editorial-only notes."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, partner_id):
+        partner = generics.get_object_or_404(Partner, pk=partner_id)
+        if not request.user.is_staff and partner.owner_id != request.user.id:
+            raise PermissionDenied("You can only view submissions for your own partner profile.")
+
+        media_items = GalleryMedia.objects.filter(partner=partner).order_by("-created_at")
+        stories = {
+            story.media_id: story
+            for story in GalleryStory.objects.filter(media__partner=partner).order_by("-updated_at")
+        }
+        results = []
+        for media in media_items:
+            grant = media.permission_grants.order_by("-created_at").first()
+            story = stories.get(media.pk)
+            feedback = None
+            if story:
+                event = story.audit_events.filter(action="story_changes_requested").order_by("-created_at").first()
+                details = event.details if event and isinstance(event.details, dict) else {}
+                feedback = details.get("reason") if isinstance(details.get("reason"), str) else None
+            results.append({
+                "media_id": media.pk,
+                "title": media.title,
+                "media_status": media.status,
+                "submitted_at": media.created_at,
+                "updated_at": media.updated_at,
+                "rights_status": grant.review_status if grant else "not_submitted",
+                "rights_submitted_at": grant.created_at if grant else None,
+                "story_id": story.pk if story else None,
+                "story_status": story.status if story else None,
+                "story_version": story.current_version if story else None,
+                "story_updated_at": story.updated_at if story else None,
+                "partner_feedback": feedback,
+                "published_at": story.published_at if story else None,
+            })
+        return Response(results)
+
+
+class PublicGalleryStoryDetailView(generics.RetrieveAPIView):
+    serializer_class = PublicGalleryStoryDetailSerializer
+    permission_classes = [AllowAny]
+
+    def get_queryset(self):
+        return public_gallery_story_queryset()
+
+
+class PublicGalleryStoriesView(generics.ListAPIView):
+    serializer_class = PublicGalleryStorySerializer
+    permission_classes = [AllowAny]
+
+    def get_queryset(self):
+        return public_gallery_story_queryset()
+
+
+class GalleryMediaCreateView(generics.CreateAPIView):
+    serializer_class = GalleryMediaDraftSerializer
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def perform_create(self, serializer):
+        partner = serializer.validated_data["partner"]
+        if not self.request.user.is_staff and partner.owner_id != self.request.user.id:
+            raise PermissionDenied("Only the partner owner may submit media.")
+        media = serializer.save(submitted_by=self.request.user)
+        GalleryAuditEvent.objects.create(
+            actor=self.request.user, partner=partner, media=media, action="media_submitted",
+        )
+
+
+class GalleryStoryCreateView(generics.CreateAPIView):
+    serializer_class = GalleryStoryDraftSerializer
+    permission_classes = [IsAuthenticated]
+
+    def perform_create(self, serializer):
+        media = serializer.validated_data["media"]
+        if not self.request.user.is_staff and media.partner.owner_id != self.request.user.id:
+            raise PermissionDenied("Only the partner owner may submit this story.")
+        story = serializer.save(status=GalleryStory.Status.OWNER_REVIEW)
+        GalleryStoryRevision.capture(story, self.request.user, "Initial owner story submission")
+        GalleryAuditEvent.objects.create(
+            actor=self.request.user, partner=media.partner, media=media,
+            story=story, action="story_submitted",
+        )
+
+
+class GalleryStoryMediaView(APIView):
+    """Attach or remove partner images before approval; every change creates a new story version."""
+
+    permission_classes = [IsAuthenticated]
+    editable_statuses = (
+        GalleryStory.Status.DRAFT,
+        GalleryStory.Status.OWNER_REVIEW,
+        GalleryStory.Status.EDITORIAL_REVIEW,
+        GalleryStory.Status.REJECTED,
+    )
+
+    def get_story(self, pk):
+        story = generics.get_object_or_404(
+            GalleryStory.objects.select_for_update().select_related("media", "media__partner"),
+            pk=pk,
+        )
+        if not self.request.user.is_staff and story.media.partner.owner_id != self.request.user.id:
+            raise PermissionDenied("You can only manage images for your own partner stories.")
+        if story.status not in self.editable_statuses:
+            raise ValidationError("Images can only be changed while a story is in an editable review state.")
+        return story
+
+    def record_media_change(self, story, media, action):
+        story.status = GalleryStory.Status.OWNER_REVIEW
+        story.save(update_fields=("status", "updated_at"))
+        revision = GalleryStoryRevision.capture(
+            story, self.request.user, "Story image collection changed; prior approvals reset"
+        )
+        GalleryAuditEvent.objects.create(
+            actor=self.request.user,
+            partner=story.media.partner,
+            media=media,
+            story=story,
+            action=action,
+            details={"story_version": revision.version, "media_id": media.pk},
+        )
+        return revision
+
+    def get(self, request, pk):
+        story = generics.get_object_or_404(
+            GalleryStory.objects.select_related("media", "media__partner").prefetch_related(
+                "additional_media__media__permission_grants"
+            ), pk=pk,
+        )
+        if not request.user.is_staff and story.media.partner.owner_id != request.user.id:
+            raise PermissionDenied("You can only manage images for your own partner stories.")
+        items = []
+        for position, media in enumerate([story.media] + [item.media for item in story.additional_media.all()]):
+            grants = list(media.permission_grants.all())
+            latest = max(grants, key=lambda grant: grant.created_at) if grants else None
+            items.append({
+                "id": media.pk,
+                "title": media.title,
+                "alt_text": media.alt_text,
+                "caption": media.caption,
+                "media_credit": media.media_credit,
+                "position": position,
+                "is_cover": position == 0,
+                "media_status": media.status,
+                "rights_review_status": latest.review_status if latest else "missing",
+                "permitted_channels": latest.permitted_channels if latest else [],
+                "website_permission_active": has_active_gallery_media_permission(media, channel="website"),
+            })
+        return Response({
+            "story_id": story.pk,
+            "story_version": story.current_version,
+            "status": story.status,
+            "images": items,
+        })
+
+    @transaction.atomic
+    def patch(self, request, pk):
+        story = self.get_story(pk)
+        ordered_ids = request.data.get("ordered_media_ids")
+        if not isinstance(ordered_ids, list) or any(not isinstance(value, int) or isinstance(value, bool) for value in ordered_ids):
+            raise ValidationError({"ordered_media_ids": "Provide an ordered list of additional image IDs."})
+        attachments = list(
+            GalleryStoryMedia.objects.select_for_update().select_related("media").filter(story=story)
+        )
+        by_id = {item.media_id: item for item in attachments}
+        if len(ordered_ids) != len(set(ordered_ids)) or set(ordered_ids) != set(by_id):
+            raise ValidationError({"ordered_media_ids": "The list must contain every attached additional image exactly once."})
+        if not ordered_ids:
+            return Response({"story_id": story.pk, "story_version": story.current_version, "ordered_media_ids": []})
+        offset = len(attachments) + 100
+        for index, media_id in enumerate(ordered_ids):
+            attachment = by_id[media_id]
+            attachment.position = offset + index
+            attachment.save(update_fields=("position",))
+        for position, media_id in enumerate(ordered_ids, start=1):
+            attachment = by_id[media_id]
+            attachment.position = position
+            attachment.save(update_fields=("position",))
+        revision = self.record_media_change(story, by_id[ordered_ids[0]].media, "story_media_reordered")
+        return Response({
+            "story_id": story.pk,
+            "story_version": revision.version,
+            "ordered_media_ids": ordered_ids,
+            "status": story.status,
+        })
+
+    @transaction.atomic
+    def post(self, request, pk):
+        story = self.get_story(pk)
+        try:
+            media_id = int(request.data.get("media_id"))
+        except (TypeError, ValueError):
+            raise ValidationError({"media_id": "A valid Gallery media ID is required."})
+        media = generics.get_object_or_404(
+            GalleryMedia.objects.select_related("partner"), pk=media_id
+        )
+        if media.partner_id != story.media.partner_id:
+            raise ValidationError({"media_id": "All images in a story must belong to the same partner."})
+        if media.pk == story.media_id:
+            raise ValidationError({"media_id": "The cover image is already part of this story."})
+        if GalleryStory.objects.filter(media_id=media.pk).exists():
+            raise ValidationError({"media_id": "This image is already the cover of another story."})
+        if GalleryStoryMedia.objects.filter(media_id=media.pk).exists():
+            raise ValidationError({"media_id": "This image is already attached to another story."})
+        last_position = story.additional_media.order_by("-position").values_list("position", flat=True).first() or 0
+        attachment = GalleryStoryMedia(story=story, media=media, position=last_position + 1)
+        attachment.full_clean()
+        attachment.save()
+        revision = self.record_media_change(story, media, "story_media_added")
+        return Response({
+            "story_id": story.pk,
+            "media_id": media.pk,
+            "position": attachment.position,
+            "image_count": 1 + story.additional_media.count(),
+            "story_version": revision.version,
+            "status": story.status,
+        }, status=status.HTTP_201_CREATED)
+
+    @transaction.atomic
+    def delete(self, request, pk):
+        story = self.get_story(pk)
+        try:
+            media_id = int(request.data.get("media_id") or request.query_params.get("media_id"))
+        except (TypeError, ValueError):
+            raise ValidationError({"media_id": "A valid additional media ID is required."})
+        attachment = generics.get_object_or_404(
+            GalleryStoryMedia.objects.select_for_update().select_related("media"),
+            story=story,
+            media_id=media_id,
+        )
+        media = attachment.media
+        attachment.delete()
+        revision = self.record_media_change(story, media, "story_media_removed")
+        return Response({
+            "story_id": story.pk,
+            "media_id": media.pk,
+            "image_count": 1 + story.additional_media.count(),
+            "story_version": revision.version,
+            "status": story.status,
+        })
+
+
+class GalleryStoryOwnerApprovalView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        story = generics.get_object_or_404(GalleryStory.objects.select_for_update(), pk=pk)
+        if story.media.partner.owner_id != request.user.id:
+            raise PermissionDenied("Only the partner owner may approve the story. Editorial staff cannot substitute for owner consent.")
+        if story.status != GalleryStory.Status.OWNER_REVIEW:
+            raise ValidationError("Story is not awaiting owner approval.")
+        if story.media.partner.gallery_status != Partner.ApprovalStatus.APPROVED:
+            raise ValidationError("Partner must be approved for Gallery advertising.")
+        if story.media.status not in (GalleryMedia.Status.OWNER_REVIEW, GalleryMedia.Status.EDITORIAL_REVIEW, GalleryMedia.Status.APPROVED):
+            raise ValidationError("Media must complete its rights review before story approval.")
+        if not 30 <= len(story.summary.split()) <= 60:
+            raise ValidationError("Story summary must contain 30–60 words.")
+        story.owner_approved_by = request.user
+        story.owner_approved_at = timezone.now()
+        story.owner_approved_version = story.current_version
+        story.status = GalleryStory.Status.EDITORIAL_REVIEW
+        story.save(update_fields=("owner_approved_by", "owner_approved_at", "owner_approved_version", "status", "updated_at"))
+        GalleryAuditEvent.objects.create(
+            actor=request.user, partner=story.media.partner, media=story.media,
+            story=story, action="owner_approved",
+            details={"story_version": story.current_version},
+        )
+        return Response({"status": story.status, "story_version": story.current_version}, status=status.HTTP_200_OK)
+
+
+class GalleryMediaEditorialApprovalView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        if not request.user.is_staff:
+            raise PermissionDenied("Editorial approval is restricted to authorised staff.")
+        media = generics.get_object_or_404(GalleryMedia.objects.select_for_update(), pk=pk)
+        if not has_active_gallery_media_permission(media, channel="website"):
+            raise ValidationError("An active, evidence-backed permission grant for the website is required.")
+        if media.partner.gallery_status != Partner.ApprovalStatus.APPROVED:
+            raise ValidationError("Partner must be approved for Gallery advertising.")
+        media.status = GalleryMedia.Status.APPROVED
+        media.full_clean()
+        media.save()
+        GalleryAuditEvent.objects.create(
+            actor=request.user, partner=media.partner, media=media,
+            action="media_editorially_approved",
+        )
+        return Response({"status": media.status})
+
+
+class GalleryStoryEditorialApprovalView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        if not request.user.is_staff:
+            raise PermissionDenied("Editorial approval is restricted to authorised staff.")
+        story = generics.get_object_or_404(GalleryStory.objects.select_for_update(), pk=pk)
+        if (
+            story.status != GalleryStory.Status.EDITORIAL_REVIEW
+            or not story.owner_approved_at
+            or story.owner_approved_version != story.current_version
+        ):
+            raise ValidationError("Owner approval of the current story version is required before editorial approval.")
+        if story.media.partner.gallery_status != Partner.ApprovalStatus.APPROVED:
+            raise ValidationError("Partner must be approved for Gallery advertising.")
+        if not story_has_active_website_media_permissions(story):
+            raise ValidationError("Every image must be approved and have active website publication permission.")
+        quality_review = story.editorial_quality_reviews.filter(
+            story_version=story.current_version, claims_verified=True,
+            source_facts_checked=True, unsupported_claims_resolved=True,
+            media_context_accurate=True,
+        ).first()
+        if not quality_review:
+            raise ValidationError("Complete the current-version editorial quality review before publication.")
+        story.editorial_approved_by = request.user
+        story.editorial_approved_at = timezone.now()
+        story.editorial_approved_version = story.current_version
+        story.status = GalleryStory.Status.PUBLISHED
+        story.published_at = timezone.now()
+        story.full_clean()
+        story.save()
+        GalleryAuditEvent.objects.create(
+            actor=request.user, partner=story.media.partner, media=story.media,
+            story=story, action="story_published",
+            details={"story_version": story.current_version},
+        )
+        create_partner_story_notification(
+            story,
+            GalleryPartnerNotification.Kind.STORY_PUBLISHED,
+            "Your Gallery story is published",
+            f'"{story.media.title}" has passed editorial review and is now published in the XGetawaySX Gallery.',
+        )
+        return Response({"status": story.status, "published_at": story.published_at, "story_version": story.current_version})
+
+
+class GalleryStoryOwnerDraftListView(generics.ListAPIView):
+    serializer_class = GalleryStoryDraftSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        if self.request.user.is_staff:
+            return GalleryStory.objects.all().select_related("media", "media__partner")
+        return GalleryStory.objects.filter(media__partner__owner=self.request.user).select_related("media", "media__partner")
+
+
+class GalleryStoryDraftUpdateView(generics.UpdateAPIView):
+    serializer_class = GalleryStoryDraftSerializer
+    permission_classes = [IsAuthenticated]
+    http_method_names = ["put", "patch", "head", "options"]
+
+    def get_queryset(self):
+        if self.request.user.is_staff:
+            return GalleryStory.objects.filter(status__in=[GalleryStory.Status.DRAFT, GalleryStory.Status.OWNER_REVIEW, GalleryStory.Status.EDITORIAL_REVIEW, GalleryStory.Status.REJECTED])
+        return GalleryStory.objects.filter(
+            media__partner__owner=self.request.user,
+            status__in=[GalleryStory.Status.DRAFT, GalleryStory.Status.OWNER_REVIEW, GalleryStory.Status.EDITORIAL_REVIEW, GalleryStory.Status.REJECTED],
+        )
+
+    @transaction.atomic
+    def perform_update(self, serializer):
+        story = self.get_object()
+        before = {
+            "summary": story.summary,
+            "owner_original_history": story.owner_original_history,
+            "ai_source_facts": story.ai_source_facts,
+        }
+        updated = serializer.save()
+        changed = (
+            before["summary"] != updated.summary
+            or before["owner_original_history"] != updated.owner_original_history
+            or before["ai_source_facts"] != updated.ai_source_facts
+        )
+        if changed:
+            updated.status = GalleryStory.Status.OWNER_REVIEW
+            updated.owner_approved_by = None
+            updated.owner_approved_at = None
+            updated.owner_approved_version = None
+            updated.editorial_approved_by = None
+            updated.editorial_approved_at = None
+            updated.editorial_approved_version = None
+            updated.published_at = None
+            updated.save(update_fields=(
+                "status", "owner_approved_by", "owner_approved_at", "owner_approved_version",
+                "editorial_approved_by", "editorial_approved_at", "editorial_approved_version",
+                "published_at", "updated_at",
+            ))
+            GalleryStoryRevision.capture(updated, self.request.user, "Story content edited; prior approvals reset")
+            GalleryAuditEvent.objects.create(
+                actor=self.request.user, partner=updated.media.partner, media=updated.media,
+                story=updated, action="story_edited",
+                details={"story_version": updated.current_version},
+            )
+
+
+class GalleryStoryRevisionListView(generics.ListAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = GalleryStoryRevisionSerializer
+
+    def get_queryset(self):
+        queryset = GalleryStoryRevision.objects.select_related("story", "changed_by", "story__media", "story__media__partner").filter(story_id=self.kwargs["pk"])
+        if self.request.user.is_staff:
+            return queryset
+        return queryset.filter(story__media__partner__owner=self.request.user)
+
+
+
+
+
+
+class GalleryStoryRequestChangesView(APIView):
+    """Return an owner-approved story to its partner for a documented revision."""
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        if not request.user.is_staff:
+            raise PermissionDenied("Only authorised editorial staff may request story changes.")
+        story = generics.get_object_or_404(
+            GalleryStory.objects.select_for_update().select_related("media", "media__partner"), pk=pk
+        )
+        if story.status != GalleryStory.Status.EDITORIAL_REVIEW:
+            raise ValidationError("Only stories awaiting editorial review can be returned for changes.")
+        reason = str(request.data.get("reason", "")).strip()
+        if len(reason) < 10:
+            raise ValidationError({"reason": "Provide a clear change request of at least 10 characters."})
+        if len(reason) > 1000:
+            raise ValidationError({"reason": "Change requests must be 1,000 characters or fewer."})
+
+        story.status = GalleryStory.Status.REJECTED
+        story.owner_approved_by = None
+        story.owner_approved_at = None
+        story.owner_approved_version = None
+        story.editorial_approved_by = None
+        story.editorial_approved_at = None
+        story.editorial_approved_version = None
+        story.published_at = None
+        story.save(update_fields=(
+            "status", "owner_approved_by", "owner_approved_at", "owner_approved_version",
+            "editorial_approved_by", "editorial_approved_at", "editorial_approved_version",
+            "published_at", "updated_at",
+        ))
+        GalleryAuditEvent.objects.create(
+            actor=request.user, partner=story.media.partner, media=story.media,
+            story=story, action="story_changes_requested",
+            details={"story_version": story.current_version, "reason": reason},
+        )
+        create_partner_story_notification(
+            story,
+            GalleryPartnerNotification.Kind.STORY_CHANGES_REQUESTED,
+            "Your Gallery story needs changes",
+            f'"{story.media.title}" has been returned for revision. Editorial feedback: {reason}',
+        )
+        return Response({
+            "status": story.status,
+            "story_version": story.current_version,
+            "reason": reason,
+        }, status=status.HTTP_200_OK)
+
+
+class GalleryStoryEditorialQualityReviewView(APIView):
+    """Staff-only quality review for the current story version."""
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        if not request.user.is_staff:
+            raise PermissionDenied("Editorial quality review is restricted to authorised staff.")
+        story = generics.get_object_or_404(GalleryStory.objects.select_for_update(), pk=pk)
+        if story.status != GalleryStory.Status.EDITORIAL_REVIEW:
+            raise ValidationError("Only stories awaiting editorial review can receive a quality review.")
+        try:
+            version = int(request.data.get("story_version"))
+        except (TypeError, ValueError):
+            raise ValidationError({"story_version": "A valid story version is required."})
+        if version != story.current_version:
+            raise ValidationError({"story_version": "The story changed. Refresh and review the current version."})
+        fields = ("claims_verified", "source_facts_checked", "unsupported_claims_resolved", "media_context_accurate")
+        checks = {}
+        for field in fields:
+            value = request.data.get(field)
+            if not isinstance(value, bool):
+                raise ValidationError({field: "Provide an explicit true or false decision."})
+            checks[field] = value
+        notes = str(request.data.get("reviewer_notes", "")).strip()
+        if len(notes) < 10:
+            raise ValidationError({"reviewer_notes": "Record at least 10 characters of review notes."})
+        if not all(checks.values()):
+            raise ValidationError("All quality checks must pass before a review can be recorded.")
+        review = GalleryStoryEditorialReview.objects.create(story=story, story_version=story.current_version, reviewer=request.user, reviewer_notes=notes, **checks)
+        GalleryAuditEvent.objects.create(actor=request.user, partner=story.media.partner, media=story.media, story=story, action="story_quality_reviewed", details={"story_version": story.current_version, "quality_review_id": review.pk})
+        return Response({"id": review.pk, "story_id": story.pk, "story_version": review.story_version}, status=status.HTTP_201_CREATED)
+
+class GalleryEditorialQueueView(APIView):
+    """Staff-only, privacy-minimised work queue for Gallery publication reviews."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not request.user.is_staff:
+            raise PermissionDenied("The Gallery editorial queue is restricted to authorised staff.")
+
+        now = timezone.now()
+        grants = GalleryMediaPermissionGrant.objects.filter(
+            review_status=GalleryMediaPermissionGrant.ReviewStatus.PENDING,
+            revoked_at__isnull=True,
+            evidence_file__gt="",
+        ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now)).select_related(
+            "media", "media__partner", "granted_by"
+        )
+        media_items = GalleryMedia.objects.filter(
+            status=GalleryMedia.Status.OWNER_REVIEW,
+            permission_grants__purpose=GalleryMediaPermissionGrant.Purpose.GALLERY_PROMOTION,
+            permission_grants__review_status=GalleryMediaPermissionGrant.ReviewStatus.APPROVED,
+            permission_grants__revoked_at__isnull=True,
+        ).filter(
+            Q(permission_grants__expires_at__isnull=True)
+            | Q(permission_grants__expires_at__gt=now)
+        ).select_related("partner").distinct()
+        stories = GalleryStory.objects.filter(
+            status=GalleryStory.Status.EDITORIAL_REVIEW
+        ).select_related("media", "media__partner").prefetch_related("revisions")
+
+        return Response({
+            "rights_reviews": [{
+                "id": grant.pk,
+                "media_id": grant.media_id,
+                "media_title": grant.media.title,
+                "partner_name": grant.media.partner.name,
+                "rights_holder": grant.rights_holder,
+                "permitted_channels": grant.permitted_channels,
+                "granted_at": grant.granted_at,
+                "expires_at": grant.expires_at,
+                "evidence_url": f"/api/v1/gallery/media/{grant.media_id}/permissions/{grant.pk}/evidence/",
+            } for grant in grants],
+            "media_reviews": [{
+                "id": media.pk,
+                "title": media.title,
+                "partner_name": media.partner.name,
+                "alt_text": media.alt_text,
+                "status": media.status,
+            } for media in media_items],
+            "story_reviews": [{
+                "id": story.pk,
+                "media_id": story.media_id,
+                "media_title": story.media.title,
+                "partner_name": story.media.partner.name,
+                "summary": story.summary,
+                "current_version": story.current_version,
+                "owner_approved_version": story.owner_approved_version,
+                "owner_approved_at": story.owner_approved_at,
+                "media_status": story.media.status,
+                "partner_gallery_status": story.media.partner.gallery_status,
+                "ai_assisted": story.ai_assisted,
+                "ai_source_facts": story.ai_source_facts,
+                "revision_count": story.revisions.count(),
+                "quality_review_version": story.editorial_quality_reviews.filter(story_version=story.current_version, claims_verified=True, source_facts_checked=True, unsupported_claims_resolved=True, media_context_accurate=True).values_list("story_version", flat=True).first(),
+            } for story in stories],
+        })
+
+
+def gallery_audit_filtered_queryset(request):
+    if not request.user.is_staff:
+        raise PermissionDenied("Gallery audit records are restricted to authorised editorial staff.")
+
+    queryset = GalleryAuditEvent.objects.select_related(
+        "actor", "partner", "media", "story", "story__media"
+    )
+    action = request.query_params.get("action", "").strip()
+    actor = request.query_params.get("actor", "").strip()
+    partner_id = request.query_params.get("partner_id", "").strip()
+    search = request.query_params.get("q", "").strip()
+    start_value = request.query_params.get("start", "").strip()
+    end_value = request.query_params.get("end", "").strip()
+
+    if action:
+        queryset = queryset.filter(action=action)
+    if actor:
+        queryset = queryset.filter(actor__email__icontains=actor)
+    if partner_id:
+        try:
+            queryset = queryset.filter(partner_id=int(partner_id))
+        except ValueError:
+            raise ValidationError({"partner_id": "Provide a valid partner ID."})
+    if search:
+        search_filter = (
+            Q(action__icontains=search)
+            | Q(actor__email__icontains=search)
+            | Q(partner__name__icontains=search)
+            | Q(media__title__icontains=search)
+            | Q(story__media__title__icontains=search)
+        )
+        if search.isdecimal():
+            numeric_search = int(search)
+            search_filter |= (
+                Q(story_id=numeric_search)
+                | Q(media_id=numeric_search)
+                | Q(partner_id=numeric_search)
+            )
+        queryset = queryset.filter(search_filter)
+
+    def boundary(value, upper=False):
+        if not value:
+            return None
+        parsed = parse_datetime(value)
+        if parsed is None:
+            day = parse_date(value)
+            if day is not None:
+                parsed = datetime.combine(day, time.max if upper else time.min)
+        if parsed is None:
+            raise ValidationError({"date": "Use YYYY-MM-DD or an ISO-8601 date-time for date filters."})
+        if timezone.is_naive(parsed):
+            parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
+        return parsed
+
+    start = boundary(start_value)
+    end = boundary(end_value, upper=True)
+    if start:
+        queryset = queryset.filter(created_at__gte=start)
+    if end:
+        queryset = queryset.filter(created_at__lte=end)
+    return queryset.order_by("-created_at", "-pk")
+
+
+class GalleryAuditEventListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        queryset = gallery_audit_filtered_queryset(request)
+        try:
+            limit = min(max(int(request.query_params.get("limit", 50)), 1), 200)
+            offset = max(int(request.query_params.get("offset", 0)), 0)
+        except ValueError:
+            raise ValidationError({"pagination": "Limit and offset must be whole numbers."})
+        total = queryset.count()
+        events = queryset[offset:offset + limit]
+        return Response({
+            "count": total,
+            "limit": limit,
+            "offset": offset,
+            "results": GalleryAuditEventSerializer(events, many=True).data,
+        })
+
+
+class GalleryAuditReportView(APIView):
+    """Staff-only CSV export with reviewer decisions and story-cycle turnaround."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        queryset = gallery_audit_filtered_queryset(request)
+        events = list(queryset[:10000])
+        story_ids = {event.story_id for event in events if event.story_id}
+        cycle_events = GalleryAuditEvent.objects.filter(
+            story_id__in=story_ids,
+            action__in=("story_submitted", "story_edited", "story_published", "story_changes_requested"),
+        ).order_by("created_at", "pk")
+
+        cycle_starts = {}
+        turnaround_hours = {}
+        for event in cycle_events:
+            if event.action in ("story_submitted", "story_edited"):
+                cycle_starts[event.story_id] = event.created_at
+            elif event.action in ("story_published", "story_changes_requested"):
+                started_at = cycle_starts.get(event.story_id)
+                if started_at:
+                    turnaround_hours[event.pk] = max(
+                        0.0, (event.created_at - started_at).total_seconds() / 3600
+                    )
+
+        response = HttpResponse(content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = 'attachment; filename="xgetawaysx-gallery-editorial-audit.csv"'
+        response["X-Report-Truncated"] = "true" if queryset.count() > 10000 else "false"
+        writer = csv.writer(response)
+        writer.writerow([
+            "event_id", "timestamp_utc", "action", "reviewer_email",
+            "partner_id", "partner_name", "media_id", "media_title",
+            "story_id", "story_version", "turnaround_hours",
+        ])
+        for event in events:
+            details = event.details if isinstance(event.details, dict) else {}
+            media_title = event.media.title if event.media_id else (
+                event.story.media.title if event.story_id else ""
+            )
+            turnaround = turnaround_hours.get(event.pk)
+            writer.writerow([
+                event.pk,
+                event.created_at.isoformat(),
+                event.action,
+                event.actor.email if event.actor_id else "",
+                event.partner_id or "",
+                event.partner.name if event.partner_id else "",
+                event.media_id or "",
+                media_title,
+                event.story_id or "",
+                details.get("story_version", ""),
+                f"{turnaround:.2f}" if turnaround is not None else "",
+            ])
+        return response
+
+
+class GalleryStoryHistoryConsentView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        story = generics.get_object_or_404(
+            GalleryStory.objects.select_for_update().select_related("media", "media__partner"),
+            pk=pk,
+        )
+        if story.media.partner.owner_id != request.user.id:
+            raise PermissionDenied("Only the partner owner may grant or revoke publication permission for original history.")
+        decision = request.data.get("decision")
+        if decision not in ("grant", "revoke"):
+            raise ValidationError({"decision": "Use 'grant' or 'revoke'."})
+
+        if decision == "grant":
+            if not story.owner_original_history.strip():
+                raise ValidationError("There is no original history to grant publication permission for.")
+            if story.status not in (GalleryStory.Status.DRAFT, GalleryStory.Status.OWNER_REVIEW):
+                raise ValidationError("Grant permission before owner approval; an approved story must be revised and reviewed again.")
+            consent, created = GalleryHistoryPublicationConsent.objects.get_or_create(
+                story=story,
+                story_version=story.current_version,
+                defaults={"granted_by": request.user, "granted_at": timezone.now()},
+            )
+            if not created:
+                consent.granted_by = request.user
+                consent.granted_at = timezone.now()
+                consent.revoked_by = None
+                consent.revoked_at = None
+                consent.save(update_fields=("granted_by", "granted_at", "revoked_by", "revoked_at", "updated_at"))
+            story.owner_history_private = False
+            story.original_history_public_permission = True
+            action = "history_publication_consent_granted"
+        else:
+            consent = GalleryHistoryPublicationConsent.objects.filter(
+                story=story,
+                story_version=story.current_version,
+                revoked_at__isnull=True,
+            ).first()
+            if consent:
+                consent.revoked_by = request.user
+                consent.revoked_at = timezone.now()
+                consent.save(update_fields=("revoked_by", "revoked_at", "updated_at"))
+            story.owner_history_private = True
+            story.original_history_public_permission = False
+            action = "history_publication_consent_revoked"
+
+        story.save(update_fields=("owner_history_private", "original_history_public_permission", "updated_at"))
+        GalleryAuditEvent.objects.create(
+            actor=request.user, partner=story.media.partner, media=story.media,
+            story=story, action=action,
+            details={"story_version": story.current_version},
+        )
+        return Response({
+            "decision": decision,
+            "story_version": story.current_version,
+            "original_history_public": decision == "grant",
+        }, status=status.HTTP_200_OK)
+
+
+class GalleryMediaPrivatePreviewView(APIView):
+    """Private partner preview; pending assets never bypass public publication gates."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        media = generics.get_object_or_404(
+            GalleryMedia.objects.select_related("partner"), pk=pk
+        )
+        if not request.user.is_staff and media.partner.owner_id != request.user.id:
+            raise PermissionDenied("Only the owning partner or authorised editorial staff may preview this image.")
+        if not media.image_file:
+            raise Http404
+        image_handle = media.image_file.open("rb")
+        response = FileResponse(image_handle, content_type=gallery_image_content_type(image_handle))
+        response["Content-Disposition"] = 'inline; filename="partner-gallery-preview"'
+        response["X-Content-Type-Options"] = "nosniff"
+        response["Cache-Control"] = "private, no-store"
+        GalleryAuditEvent.objects.create(
+            actor=request.user, partner=media.partner, media=media,
+            action="media_private_previewed",
+        )
+        return response
+
+
+class GalleryMediaPermissionGrantView(APIView):
+    """Only the partner owner can record a rights holder's Gallery permission."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        media = generics.get_object_or_404(
+            GalleryMedia.objects.select_related("partner").prefetch_related("permission_grants"),
+            pk=pk,
+        )
+        if not request.user.is_staff and media.partner.owner_id != request.user.id:
+            raise PermissionDenied("Only the partner owner or authorised editorial staff may view rights submissions.")
+        results = []
+        for grant in media.permission_grants.all():
+            results.append({
+                "id": grant.pk,
+                "rights_holder": grant.rights_holder,
+                "permitted_channels": grant.permitted_channels,
+                "evidence_reference": grant.evidence_reference,
+                "evidence_available": bool(grant.evidence_file),
+                "evidence_url": f"/api/v1/gallery/media/{media.pk}/permissions/{grant.pk}/evidence/" if grant.evidence_file else None,
+                "granted_at": grant.granted_at,
+                "expires_at": grant.expires_at,
+                "revoked_at": grant.revoked_at,
+                "review_status": grant.review_status,
+                "review_notes": grant.review_notes,
+                "reviewed_at": grant.reviewed_at,
+                "active": grant.is_active,
+            })
+        return Response({"media_id": media.pk, "media_status": media.status, "permissions": results})
+
+    @transaction.atomic
+    def post(self, request, pk):
+        media = generics.get_object_or_404(
+            GalleryMedia.objects.select_for_update().select_related("partner"), pk=pk
+        )
+        if media.partner.owner_id != request.user.id:
+            raise PermissionDenied("Only the partner owner may record media publication permission.")
+        rights_holder = request.data.get("rights_holder", "")
+        evidence_file = request.FILES.get("evidence_file")
+        if not evidence_file:
+            raise ValidationError({"evidence_file": "Upload the signed rights or promotional permission document."})
+        evidence_reference = request.data.get("evidence_reference", "")
+        permitted_channels = request.data.get("permitted_channels", [])
+        if isinstance(permitted_channels, str):
+            try:
+                permitted_channels = json.loads(permitted_channels)
+            except json.JSONDecodeError:
+                raise ValidationError({"permitted_channels": "Provide a JSON array of permitted channels."})
+        expires_raw = request.data.get("expires_at")
+        expires_at = parse_datetime(expires_raw) if expires_raw else None
+        if expires_raw and not expires_at:
+            raise ValidationError({"expires_at": "Provide a valid ISO-8601 date-time."})
+        if expires_at and timezone.is_naive(expires_at):
+            expires_at = timezone.make_aware(expires_at, timezone.get_current_timezone())
+        if not isinstance(permitted_channels, list) or not permitted_channels:
+            raise ValidationError({"permitted_channels": "Provide at least one permitted channel."})
+        grant = GalleryMediaPermissionGrant(
+            media=media,
+            purpose=GalleryMediaPermissionGrant.Purpose.GALLERY_PROMOTION,
+            rights_holder=rights_holder,
+            permitted_channels=permitted_channels,
+            evidence_reference=evidence_reference,
+            evidence_file=evidence_file,
+            granted_by=request.user,
+            granted_at=timezone.now(),
+            expires_at=expires_at,
+        )
+        grant.full_clean()
+        grant.save()
+        # Any new rights grant requires fresh media review and, where a story exists,
+        # fresh owner/editorial approval before the media can return to public display.
+        media.status = GalleryMedia.Status.OWNER_REVIEW
+        media.save(update_fields=("status", "updated_at"))
+        story = GalleryStory.objects.filter(media=media).first()
+        if story:
+            story.status = GalleryStory.Status.OWNER_REVIEW
+            story.owner_approved_by = None
+            story.owner_approved_at = None
+            story.owner_approved_version = None
+            story.editorial_approved_by = None
+            story.editorial_approved_at = None
+            story.editorial_approved_version = None
+            story.published_at = None
+            story.save(update_fields=(
+                "status", "owner_approved_by", "owner_approved_at", "owner_approved_version",
+                "editorial_approved_by", "editorial_approved_at", "editorial_approved_version",
+                "published_at", "updated_at",
+            ))
+        GalleryAuditEvent.objects.create(
+            actor=request.user, partner=media.partner, media=media,
+            action="media_permission_granted",
+            details={"permission_id": grant.pk, "purpose": grant.purpose},
+        )
+        return Response({
+            "id": grant.pk,
+            "purpose": grant.purpose,
+            "rights_holder": grant.rights_holder,
+            "permitted_channels": grant.permitted_channels,
+            "granted_at": grant.granted_at,
+            "expires_at": grant.expires_at,
+            "active": grant.is_active,
+        }, status=status.HTTP_201_CREATED)
+
+
+class GalleryMediaPermissionRevokeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk, grant_id):
+        media = generics.get_object_or_404(
+            GalleryMedia.objects.select_for_update().select_related("partner"), pk=pk
+        )
+        if media.partner.owner_id != request.user.id:
+            raise PermissionDenied("Only the partner owner may revoke media publication permission.")
+        grant = generics.get_object_or_404(
+            GalleryMediaPermissionGrant.objects.select_for_update(),
+            pk=grant_id, media=media,
+        )
+        if grant.revoked_at is None:
+            grant.revoked_by = request.user
+            grant.revoked_at = timezone.now()
+            grant.full_clean()
+            grant.save(update_fields=("revoked_by", "revoked_at", "updated_at"))
+            # Rights withdrawal suspends the asset and resets both approvals.
+            media.status = GalleryMedia.Status.OWNER_REVIEW
+            media.save(update_fields=("status", "updated_at"))
+            story = GalleryStory.objects.filter(media=media).first()
+            if story:
+                story.status = GalleryStory.Status.OWNER_REVIEW
+                story.owner_approved_by = None
+                story.owner_approved_at = None
+                story.owner_approved_version = None
+                story.editorial_approved_by = None
+                story.editorial_approved_at = None
+                story.editorial_approved_version = None
+                story.published_at = None
+                story.save(update_fields=(
+                    "status", "owner_approved_by", "owner_approved_at", "owner_approved_version",
+                    "editorial_approved_by", "editorial_approved_at", "editorial_approved_version",
+                    "published_at", "updated_at",
+                ))
+            GalleryAuditEvent.objects.create(
+                actor=request.user, partner=media.partner, media=media,
+                action="media_permission_revoked",
+                details={"permission_id": grant.pk, "purpose": grant.purpose},
+            )
+        return Response({"id": grant.pk, "active": grant.is_active, "revoked_at": grant.revoked_at})
+
+
+class GalleryMediaPermissionReviewView(APIView):
+    """Editorial staff verify the private evidence before a grant can authorise publication."""
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk, grant_id):
+        if not request.user.is_staff:
+            raise PermissionDenied("Media-rights evidence review is restricted to authorised editorial staff.")
+        media = generics.get_object_or_404(
+            GalleryMedia.objects.select_for_update().select_related("partner"), pk=pk
+        )
+        grant = generics.get_object_or_404(
+            GalleryMediaPermissionGrant.objects.select_for_update(),
+            pk=grant_id, media=media,
+        )
+        decision = request.data.get("decision")
+        if decision not in ("approve", "reject"):
+            raise ValidationError({"decision": "Use 'approve' or 'reject'."})
+        if not grant.evidence_file:
+            raise ValidationError("A private evidence document must be uploaded before review.")
+        if grant.revoked_at:
+            raise ValidationError("A revoked permission grant cannot be reviewed for publication.")
+        if grant.expires_at and grant.expires_at <= timezone.now():
+            raise ValidationError("An expired permission grant cannot be approved.")
+        grant.review_status = (
+            GalleryMediaPermissionGrant.ReviewStatus.APPROVED
+            if decision == "approve"
+            else GalleryMediaPermissionGrant.ReviewStatus.REJECTED
+        )
+        grant.reviewed_by = request.user
+        grant.reviewed_at = timezone.now()
+        grant.review_notes = str(request.data.get("review_notes", ""))[:4000]
+        grant.full_clean()
+        grant.save(update_fields=(
+            "review_status", "reviewed_by", "reviewed_at", "review_notes", "updated_at",
+        ))
+        GalleryAuditEvent.objects.create(
+            actor=request.user, partner=media.partner, media=media,
+            action="media_permission_" + grant.review_status,
+            details={"permission_id": grant.pk},
+        )
+        return Response({
+            "id": grant.pk,
+            "review_status": grant.review_status,
+            "reviewed_at": grant.reviewed_at,
+        })
+
+
+class GalleryMediaImageView(APIView):
+    """Serve an uploaded image publicly only after every Gallery publication gate passes."""
+    permission_classes = [AllowAny]
+
+    def get(self, request, pk):
+        media = generics.get_object_or_404(
+            GalleryMedia.objects.select_related("partner").prefetch_related("permission_grants"),
+            pk=pk,
+        )
+        if (
+            media.status != GalleryMedia.Status.APPROVED
+            or media.partner.gallery_status != Partner.ApprovalStatus.APPROVED
+            or not has_active_gallery_media_permission(media, channel="website")
+        ):
+            raise Http404
+        story = public_gallery_story_queryset().filter(
+            Q(media_id=media.pk) | Q(additional_media__media_id=media.pk)
+        ).first()
+        if not story:
+            raise Http404
+        if not media.image_file:
+            raise Http404
+        image_handle = media.image_file.open("rb")
+        response = FileResponse(image_handle, content_type=gallery_image_content_type(image_handle))
+        response["Content-Disposition"] = 'inline; filename="gallery-image"'
+        response["X-Content-Type-Options"] = "nosniff"
+        response["Cache-Control"] = "no-store"
+        return response
+
+
+class GalleryMediaPermissionEvidenceView(APIView):
+    """Private evidence is visible only to the owning partner or authorised staff."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk, grant_id):
+        grant = generics.get_object_or_404(
+            GalleryMediaPermissionGrant.objects.select_related("media", "media__partner"),
+            pk=grant_id, media_id=pk,
+        )
+        if not request.user.is_staff and grant.media.partner.owner_id != request.user.id:
+            raise PermissionDenied("Only the partner owner or authorised editorial staff may view rights evidence.")
+        if not grant.evidence_file:
+            raise Http404
+        GalleryAuditEvent.objects.create(
+            actor=request.user, partner=grant.media.partner, media=grant.media,
+            action="media_permission_evidence_viewed",
+            details={"permission_id": grant.pk},
+        )
+        response = FileResponse(grant.evidence_file.open("rb"), content_type="application/octet-stream")
+        response["Content-Disposition"] = 'attachment; filename="gallery-rights-evidence"'
+        response["X-Content-Type-Options"] = "nosniff"
+        response["Cache-Control"] = "private, no-store"
+        return response
+
+
+class GalleryStoryAIDraftView(APIView):
+    """Generate an owner-review draft; AI cannot approve or publish."""
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        story = generics.get_object_or_404(
+            GalleryStory.objects.select_for_update().select_related("media__partner"), pk=pk
+        )
+        if story.media.partner.owner_id != request.user.id:
+            raise PermissionDenied("Only the partner owner may request an AI draft.")
+        if story.status not in (GalleryStory.Status.DRAFT, GalleryStory.Status.OWNER_REVIEW):
+            raise ValidationError("AI drafting is only available before owner approval.")
+        summary = draft_story_summary(story)
+        story.summary = summary
+        story.ai_assisted = True
+        story.status = GalleryStory.Status.OWNER_REVIEW
+        story.save(update_fields=("summary", "ai_assisted", "status", "updated_at"))
+        revision = GalleryStoryRevision.capture(story, request.user, "AI-assisted draft; owner review required")
+        GalleryAuditEvent.objects.create(
+            actor=request.user, partner=story.media.partner, media=story.media,
+            story=story, action="ai_draft_created",
+            details={"story_version": revision.version},
+        )
+        return Response({
+            "summary": summary,
+            "story_version": revision.version,
+            "status": story.status,
+            "owner_approval_required": True,
+            "editorial_approval_required": True,
+        }, status=status.HTTP_200_OK)
