@@ -1642,13 +1642,14 @@ class PartnerVerificationOnboardingTests(TestCase):
         self.assertIn("clearer registration certificate", mail.outbox[0].body)
 
     def test_review_email_failure_does_not_undo_staff_decision(self):
+        from smtplib import SMTPException
         from unittest.mock import patch
 
         self.client.force_authenticate(self.owner)
         submitted = self.submit_valid_application()
         self.assertEqual(submitted.status_code, 200)
         self.client.force_authenticate(self.staff)
-        with patch("partners.views.send_mail", side_effect=RuntimeError("SMTP unavailable")):
+        with patch("partners.views.send_mail", side_effect=SMTPException("SMTP unavailable")):
             response = self.client.post(
                 f"/api/v1/partners/partner/onboarding/{submitted.data['id']}/review/",
                 {"decision": "approved"}, format="json",
