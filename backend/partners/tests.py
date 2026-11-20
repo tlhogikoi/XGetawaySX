@@ -1595,6 +1595,11 @@ class PartnerVerificationOnboardingTests(TestCase):
         )
         self.assertEqual(reviewed.status_code, 200)
         self.assertEqual(reviewed.data["status"], "approved")
+        self.client.force_authenticate(self.owner)
+        owner_status = self.client.get(f"{self.url}?partner_id={self.partner.pk}")
+        self.assertEqual(owner_status.status_code, 200)
+        self.assertEqual(owner_status.data["status"], "approved")
+        self.assertTrue(any(event["event_type"] == "approved" for event in owner_status.data["events"]))
 
     def test_staff_must_explain_change_request_or_rejection(self):
         self.client.force_authenticate(self.owner)
