@@ -9,6 +9,24 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: xgetawaysx
+          POSTGRES_USER: xgetawaysx
+          POSTGRES_PASSWORD: xgetawaysx_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U xgetawaysx -d xgetawaysx"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://xgetawaysx:xgetawaysx_test_password@127.0.0.1:5432/xgetawaysx
+      DJANGO_SECRET_KEY: ci-only-test-secret-key-not-for-deployment
+      DJANGO_DEBUG: "False"
     defaults:
       run:
         working-directory: backend
