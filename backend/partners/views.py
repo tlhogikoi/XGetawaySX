@@ -291,7 +291,7 @@ class CustomerEnquiryConvertView(APIView):
 
         with transaction.atomic():
             try:
-                enquiry = PartnerEnquiry.objects.select_for_update().select_related(
+                enquiry = PartnerEnquiry.objects.select_for_update(of=("self",)).select_related(
                     "partner", "customer", "trip_plan"
                 ).get(pk=pk, customer=request.user)
             except PartnerEnquiry.DoesNotExist:
