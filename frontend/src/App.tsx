@@ -22,7 +22,7 @@ const categories = [
 
 export default function App() {
   const pathname = window.location.pathname;
-  if (/^\\/(about|services|trips|contact)\\/?$/.test(pathname)) return <SitePages />;
+  if (/^\/(about|services|trips|contact)\/?$/.test(pathname)) return <SitePages />;
   if (pathname === "/gallery" || pathname === "/gallery/") return <GalleryExplorePage />;
   if (pathname === "/staff/gallery/editorial" || pathname === "/staff/gallery/editorial/") return <GalleryEditorialDashboard />;
   const galleryStoryMatch = pathname.match(/^\/gallery\/stories\/(\d+)\/?$/);
