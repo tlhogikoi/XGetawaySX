@@ -21,3 +21,7 @@ class User(AbstractUser):
 
     def __str__(self):
         return self.email
+
+
+# Register privacy models with Django's app registry.
+from .privacy_models import PrivacyRequest, PrivacyRequestEvent  # noqa: E402,F401
