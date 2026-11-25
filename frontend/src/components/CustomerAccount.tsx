@@ -108,7 +108,7 @@ export default function CustomerAccount() {
         <h1>Welcome{account.first_name ? `, ${account.first_name}` : ""}.</h1>
         <p>{account.email} · Your getaway plans, reservations and payments in one place.</p>
         <div className="account-trust"><ShieldCheck size={17}/> Your account information and bookings are private to your account.</div>
-        <div className="account-workspace-links"><a href="/wishlist/">My wishlist <ArrowRight size={15}/></a>{account.role === "partner" && <a href="/partner/onboarding">Partner verification <ArrowRight size={15}/></a>}{account.is_staff && <a href="/staff/partner/onboarding">Staff verification queue <ArrowRight size={15}/></a>}</div>
+        <div className="account-workspace-links"><a href="/wishlist/">My wishlist <ArrowRight size={15}/></a><a href="/privacy-centre/">Privacy Centre <ArrowRight size={15}/></a>{account.role === "partner" && <a href="/partner/onboarding">Partner verification <ArrowRight size={15}/></a>}{account.is_staff && <a href="/staff/partner/onboarding">Staff verification queue <ArrowRight size={15}/></a>}</div>
       </section>
       <TripPlanner accessToken={tokens.access}/>
       <PartnerQuoteWorkspace accessToken={tokens.access}/>
