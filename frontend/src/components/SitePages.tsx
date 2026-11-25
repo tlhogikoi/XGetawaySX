@@ -64,7 +64,7 @@ function Shell({ children }: { children: ReactNode }) {
       <a className="site-pages-account" href="/account/">My account <ArrowRight size={15}/></a>
     </header>
     {children}
-    <footer className="site-pages-footer"><a href="/">XGETAWAYS<span>X</span></a><span>TRAVEL THROUGH US.</span><div><a href="/about/">About</a><a href="/services/">Services</a><a href="/trips/">Trips</a><a href="/contact/">Contact</a></div><small>© {new Date().getFullYear()} XGetawaySX. Discover. Escape. Experience.</small></footer>
+    <footer className="site-pages-footer"><a href="/">XGETAWAYS<span>X</span></a><span>TRAVEL THROUGH US.</span><div><a href="/about/">About</a><a href="/services/">Services</a><a href="/trips/">Trips</a><a href="/contact/">Contact</a><a href="/faq/">FAQs</a><a href="/booking-process/">Booking</a><a href="/cancellation-policy/">Cancellations</a><a href="/privacy/">Privacy</a></div><small>© {new Date().getFullYear()} XGetawaySX. Discover. Escape. Experience.</small></footer>
   </main>;
 }
 
