@@ -10,6 +10,7 @@ import CustomerAccount from "./components/CustomerAccount";
 import PartnerVerificationWorkspace from "./components/PartnerVerificationWorkspace";
 import SitePages from "./components/SitePages";
 import HelpPages from "./components/HelpPages";
+import WishlistPage from "./components/WishlistPage";
 import "./components/destination-explorer.css";
 import { ArrowRight, Compass, Globe2, Heart, MapPin } from "lucide-react";
 
@@ -30,6 +31,7 @@ export default function App() {
   const galleryStoryMatch = pathname.match(/^\/gallery\/stories\/(\d+)\/?$/);
   if (galleryStoryMatch) return <GalleryStoryDetailPage storyId={galleryStoryMatch[1]} />;
   if (pathname === "/account" || pathname === "/account/") return <CustomerAccount />;
+  if (pathname === "/wishlist" || pathname === "/wishlist/") return <WishlistPage accessToken={sessionStorage.getItem("xgs_access")} />;
   if (pathname === "/partner/onboarding" || pathname === "/partner/onboarding/") return sessionStorage.getItem("xgs_access") ? <PartnerVerificationWorkspace accessToken={sessionStorage.getItem("xgs_access") || ""} /> : <main className="site-shell"><section className="intro-section"><div><p className="eyebrow">PARTNER CENTRE</p><h2>Sign in to continue</h2><p className="intro-copy">Please sign in to access your partner verification application.</p><a className="primary-button" href="/account">Go to account</a></div></section></main>;
   if (pathname === "/staff/partner/onboarding" || pathname === "/staff/partner/onboarding/") return sessionStorage.getItem("xgs_access") ? <PartnerVerificationWorkspace accessToken={sessionStorage.getItem("xgs_access") || ""} staffMode /> : <main className="site-shell"><section className="intro-section"><div><h2>Staff sign-in required</h2><a className="primary-button" href="/account">Go to account</a></div></section></main>;
   if (pathname === "/partner/gallery" || pathname === "/partner/gallery/") return <GalleryStoryEditor />;
