@@ -5,6 +5,13 @@ import "./trip-planner.css";
 type Partner = { id: number; name: string; slug: string; category: string; city: string; province: string; country: string; description: string };
 type TripItem = { id: number; partner: Partner; note: string };
 type TripPlan = { id: number; title: string; notes: string; start_date: string | null; end_date: string | null; items: TripItem[] };
+
+function isWishlistPlan(plan: TripPlan) {
+  try {
+    const metadata = JSON.parse(plan.notes) as { _xgs_wishlist?: number };
+    return metadata._xgs_wishlist === 1;
+  } catch { return false; }
+}
 type Enquiry = { id: number; status: string; partner: Partner; requested_start_date: string | null; requested_end_date: string | null; partner_response: string; reservation_request_id: number | null };
 
 const API_BASE = (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env.VITE_API_BASE_URL ?? "";
@@ -41,9 +48,10 @@ export default function TripPlanner({ accessToken }: { accessToken: string }) {
 
   async function refreshPlans() {
     const data = await request("trips/") as TripPlan[];
-    setPlans(data);
-    if (!selectedPlanId && data.length) { setSelectedPlanId(data[0].id); setStartDate(data[0].start_date || ""); setEndDate(data[0].end_date || ""); setPlanNotes(data[0].notes || ""); }
-    return data;
+    const plannerData = data.filter(plan => !isWishlistPlan(plan));
+    setPlans(plannerData);
+    if (!selectedPlanId && plannerData.length) { setSelectedPlanId(plannerData[0].id); setStartDate(plannerData[0].start_date || ""); setEndDate(plannerData[0].end_date || ""); setPlanNotes(plannerData[0].notes || ""); }
+    return plannerData;
   }
 
   useEffect(() => {
@@ -53,8 +61,9 @@ export default function TripPlanner({ accessToken }: { accessToken: string }) {
       fetch(`${API_BASE}/api/v1/partners/trips/`, { headers, signal: controller.signal }).then(async r => { if (!r.ok) throw new Error("Could not load your trip plans."); return r.json(); }),
       fetch(`${API_BASE}/api/v1/partners/enquiries/`, { headers, signal: controller.signal }).then(async r => { if (!r.ok) throw new Error("Could not load your enquiries."); return r.json(); }),
     ]).then(([p, t, e]) => {
-      setPartners(p as Partner[]); setPlans(t as TripPlan[]); setEnquiries(e as Enquiry[]);
-      if ((t as TripPlan[]).length) { const first = (t as TripPlan[])[0]; setSelectedPlanId(first.id); setStartDate(first.start_date || ""); setEndDate(first.end_date || ""); setPlanNotes(first.notes || ""); }
+      const plannerData = (t as TripPlan[]).filter(plan => !isWishlistPlan(plan));
+      setPartners(p as Partner[]); setPlans(plannerData); setEnquiries(e as Enquiry[]);
+      if (plannerData.length) { const first = plannerData[0]; setSelectedPlanId(first.id); setStartDate(first.start_date || ""); setEndDate(first.end_date || ""); setPlanNotes(first.notes || ""); }
     }).catch(reason => { if (reason instanceof Error && reason.name !== "AbortError") setError(reason.message); });
     return () => controller.abort();
   }, [accessToken]);
