@@ -21,6 +21,7 @@ export default function TripPlanner({ accessToken }: { accessToken: string }) {
   const [endDate, setEndDate] = useState("");
   const [enquiries, setEnquiries] = useState<Enquiry[]>([]);
   const [guestCount, setGuestCount] = useState(1);
+  const [compareIds, setCompareIds] = useState<number[]>([]);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -85,6 +86,18 @@ export default function TripPlanner({ accessToken }: { accessToken: string }) {
     finally { setBusy(false); }
   }
 
+  function toggleCompare(partnerId: number) {
+    setCompareIds(current => {
+      if (current.includes(partnerId)) return current.filter(id => id !== partnerId);
+      if (current.length >= 3) {
+        setError("Compare up to three saved places at a time.");
+        return current;
+      }
+      setError("");
+      return [...current, partnerId];
+    });
+  }
+
   async function submitEnquiry() {
     if (!selectedPlan || !selectedPartner || message.trim().length < 10) return;
     setBusy(true); setError(""); setNotice("");
@@ -126,8 +139,19 @@ export default function TripPlanner({ accessToken }: { accessToken: string }) {
         {selectedPlan && <><div className="trip-date-grid"><label><span>Start date</span><input type="date" value={startDate || selectedPlan.start_date || ""} onChange={e => setStartDate(e.target.value)}/></label><label><span>End date</span><input type="date" value={endDate || selectedPlan.end_date || ""} onChange={e => setEndDate(e.target.value)}/></label></div>
           <label className="trip-field"><span>Private trip notes</span><textarea rows={3} maxLength={5000} value={planNotes} onChange={e=>setPlanNotes(e.target.value)} placeholder="Add your plans, group preferences, special occasions or things to remember."/></label>
           <div className="trip-plan-save-row"><span>{planNotes.length}/5000 characters</span><button className="trip-save-dates" disabled={busy || (!!startDate && !!endDate && endDate < startDate)} onClick={async()=>{setBusy(true);setError("");try{const updated=await request(`trips/${selectedPlan.id}/`,{method:"PATCH",body:JSON.stringify({start_date:startDate||null,end_date:endDate||null,notes:planNotes})}) as TripPlan;setPlans(current=>current.map(p=>p.id===updated.id?updated:p));setNotice("Your trip dates and notes have been saved.");}catch(e){setError(e instanceof Error?e.message:"Could not save trip details.");}finally{setBusy(false);}}}><CalendarDays size={15}/> Save trip details</button></div>
-          <div className="trip-itinerary"><h4>Saved places <span>{selectedPlan.items.length}</span></h4>{selectedPlan.items.length ? selectedPlan.items.map(item=><div className="trip-itinerary-item" key={item.id}><div><strong>{item.partner.name}</strong><small>{[item.partner.city,item.partner.province].filter(Boolean).join(", ")}</small></div><button aria-label={`Remove ${item.partner.name}`} disabled={busy} onClick={()=>removeItem(item.id)}><Trash2 size={15}/></button></div>):<p className="trip-muted">Your itinerary is empty. Add an approved partner below.</p>}</div>
+          <div className="trip-itinerary"><h4>Saved places <span>{selectedPlan.items.length}</span></h4>{selectedPlan.items.length ? selectedPlan.items.map(item=><div className="trip-itinerary-item" key={item.id}><div><strong>{item.partner.name}</strong><small>{[item.partner.city,item.partner.province].filter(Boolean).join(", ")}</small></div><div className="trip-itinerary-actions"><button type="button" className={compareIds.includes(item.partner.id) ? "trip-compare-toggle is-selected" : "trip-compare-toggle"} aria-pressed={compareIds.includes(item.partner.id)} onClick={()=>toggleCompare(item.partner.id)}>{compareIds.includes(item.partner.id) ? "Selected" : "Compare"}</button><button aria-label={`Remove ${item.partner.name}`} disabled={busy} onClick={()=>{setCompareIds(current=>current.filter(id=>id!==item.partner.id));removeItem(item.id);}}><Trash2 size={15}/></button></div></div>):<p className="trip-muted">Your itinerary is empty. Add an approved partner below.</p>}</div>
         </>}
+        {selectedPlan && selectedPlan.items.length > 1 && <section className="trip-compare-panel" aria-labelledby="trip-compare-heading">
+          <div className="trip-compare-heading"><div><h4 id="trip-compare-heading">Compare saved places</h4><p>Select up to three places above to compare their published details side by side.</p></div><span>{compareIds.length}/3 selected</span></div>
+          {compareIds.length === 0 ? <p className="trip-muted">Choose Compare beside the places you want to review.</p> :
+            <div className="trip-compare-grid">{selectedPlan.items.filter(item=>compareIds.includes(item.partner.id)).map(item=><article key={item.partner.id}>
+              <h5>{item.partner.name}</h5>
+              <dl><div><dt>Category</dt><dd>{item.partner.category.replace(/_/g," ")}</dd></div>
+              <div><dt>Location</dt><dd>{[item.partner.city,item.partner.province,item.partner.country].filter(Boolean).join(", ") || "Not provided"}</dd></div>
+              <div><dt>About</dt><dd>{item.partner.description || "No description published yet."}</dd></div></dl>
+              <a href={`/partners/${encodeURIComponent(item.partner.slug)}/`}>View partner profile <ArrowRight size={14}/></a>
+            </article>)}</div>}
+        </section>}
       </div>
       <div className="trip-discovery-panel"><h3>Discover approved partners</h3><div className="trip-partner-list">{partners.map(partner=><article key={partner.id}><div><span>{partner.category.replace(/_/g," ")}</span><strong>{partner.name}</strong><small>{[partner.city,partner.province].filter(Boolean).join(", ")}</small></div><button disabled={busy || !selectedPlan || !!selectedPlan.items.some(i=>i.partner.slug===partner.slug)} onClick={()=>addPartner(partner.id)}><Plus size={15}/> Add</button></article>)}</div></div>
     </div>
