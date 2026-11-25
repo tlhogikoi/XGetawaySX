@@ -8,6 +8,7 @@ import PartnerDiscovery from "./components/PartnerDiscovery";
 import DestinationExplorer from "./components/DestinationExplorer";
 import CustomerAccount from "./components/CustomerAccount";
 import PartnerVerificationWorkspace from "./components/PartnerVerificationWorkspace";
+import SitePages from "./components/SitePages";
 import "./components/destination-explorer.css";
 import { ArrowRight, Compass, Globe2, Heart, MapPin } from "lucide-react";
 
@@ -21,6 +22,7 @@ const categories = [
 
 export default function App() {
   const pathname = window.location.pathname;
+  if (/^\\/(about|services|trips|contact)\\/?$/.test(pathname)) return <SitePages />;
   if (pathname === "/gallery" || pathname === "/gallery/") return <GalleryExplorePage />;
   if (pathname === "/staff/gallery/editorial" || pathname === "/staff/gallery/editorial/") return <GalleryEditorialDashboard />;
   const galleryStoryMatch = pathname.match(/^\/gallery\/stories\/(\d+)\/?$/);
@@ -40,7 +42,7 @@ export default function App() {
     <main className="site-shell">
       <header className="topbar">
         <a className="wordmark" href="/" aria-label="XGetawaySX home"><span className="wordmark-x">X</span>GETAWAYS<span className="wordmark-x">X</span></a>
-        <nav aria-label="Main navigation"><a href="#about">About</a><a href="#trips">Trips</a><a href="#partner-discovery">Partners</a><a href="#destinations">Destinations</a><a href="/gallery/">Gallery</a></nav>
+        <nav aria-label="Main navigation"><a href="/about/">About</a><a href="/trips/">Trips</a><a href="/services/">Services</a><a href="#partner-discovery">Partners</a><a href="#destinations">Destinations</a><a href="/gallery/">Gallery</a><a href="/contact/">Contact</a></nav>
         <a className="nav-cta" href="/account">My account <ArrowRight size={16} /></a>
       </header>
       <section className="hero" id="discover">
