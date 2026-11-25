@@ -11,6 +11,7 @@ import PartnerVerificationWorkspace from "./components/PartnerVerificationWorksp
 import SitePages from "./components/SitePages";
 import HelpPages from "./components/HelpPages";
 import WishlistPage from "./components/WishlistPage";
+import PrivacyCentre from "./components/PrivacyCentre";
 import "./components/destination-explorer.css";
 import { ArrowRight, Compass, Globe2, Heart, MapPin } from "lucide-react";
 
@@ -25,6 +26,7 @@ const categories = [
 export default function App() {
   const pathname = window.location.pathname;
   if (/^\/(about|services|trips|contact)\/?$/.test(pathname)) return <SitePages />;
+  if (pathname === "/privacy-centre" || pathname === "/privacy-centre/") return <PrivacyCentre />;
   if (/^\/(faq|booking-process|cancellation-policy|privacy)\/?$/.test(pathname)) return <HelpPages />;
   if (pathname === "/gallery" || pathname === "/gallery/") return <GalleryExplorePage />;
   if (pathname === "/staff/gallery/editorial" || pathname === "/staff/gallery/editorial/") return <GalleryEditorialDashboard />;
