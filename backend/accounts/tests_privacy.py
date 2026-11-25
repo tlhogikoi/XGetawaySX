@@ -76,3 +76,11 @@ class PrivacyRequestApiTests(APITestCase):
         self.client.force_authenticate(user=self.user)
         response = self.client.post("/api/v1/accounts/privacy-requests/", {"request_type": "access", "description": "Help"}, format="json")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_staff_cannot_complete_request_before_identity_verification(self):
+        obj = PrivacyRequest.objects.create(user=self.user, request_type="access", description="Please provide my account information.")
+        self.client.force_authenticate(user=self.staff)
+        response = self.client.patch(f"/api/v1/accounts/privacy-requests/{obj.reference}/", {"status": "fulfilled"}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        obj.refresh_from_db()
+        self.assertEqual(obj.status, PrivacyRequest.Status.SUBMITTED)
