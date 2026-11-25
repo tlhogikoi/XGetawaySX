@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import "./privacy-centre.css";
+import ConsentPreferences from "./ConsentPreferences";
 
 const API = (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env.VITE_API_BASE_URL ?? "";
 type RequestType = "access" | "correction" | "deletion" | "consent_withdrawal" | "marketing_optout";
@@ -98,6 +99,7 @@ export default function PrivacyCentre() {
       {error && <p className="privacy-feedback privacy-error" role="alert">{error}</p>}
       {notice && <p className="privacy-feedback" role="status">{notice}</p>}
       {signedIn && <>
+        <ConsentPreferences />
         <h2>Submit a privacy request</h2>
         <p className="privacy-intro">Choose the request that best describes what you need. Do not include passwords, payment-card details, identity-document numbers or other unnecessary sensitive information.</p>
         <form className="privacy-request-form" onSubmit={submitRequest}>
