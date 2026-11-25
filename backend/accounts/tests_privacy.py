@@ -84,3 +84,50 @@ class PrivacyRequestApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         obj.refresh_from_db()
         self.assertEqual(obj.status, PrivacyRequest.Status.SUBMITTED)
+
+
+from .consent_models import ConsentEvent, ConsentPreference
+
+
+class ConsentPreferenceApiTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(email="consent-user@example.com", password="Strong-Passphrase-2026!")
+        self.other = User.objects.create_user(email="consent-other@example.com", password="Strong-Passphrase-2026!")
+
+    def test_preferences_require_authentication(self):
+        response = self.client.get("/api/v1/accounts/consent-preferences/")
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_all_marketing_channels_default_to_off_without_creating_records(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get("/api/v1/accounts/consent-preferences/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 3)
+        self.assertTrue(all(item["enabled"] is False for item in response.data))
+        self.assertEqual(ConsentPreference.objects.filter(user=self.user).count(), 0)
+
+    def test_user_can_opt_in_and_out_with_audit_events(self):
+        self.client.force_authenticate(user=self.user)
+        url = "/api/v1/accounts/consent-preferences/"
+        response = self.client.post(url, {"purpose": "marketing_email", "enabled": True}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data["enabled"])
+        response = self.client.post(url, {"purpose": "marketing_email", "enabled": False}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data["enabled"])
+        events = ConsentEvent.objects.filter(preference__user=self.user).order_by("created_at")
+        self.assertEqual(events.count(), 2)
+        self.assertEqual(list(events.values_list("previous_value", "new_value")), [(False, True), (True, False)])
+
+    def test_preferences_are_private_to_each_account(self):
+        self.client.force_authenticate(user=self.user)
+        self.client.post("/api/v1/accounts/consent-preferences/", {"purpose": "marketing_sms", "enabled": True}, format="json")
+        self.client.force_authenticate(user=self.other)
+        response = self.client.get("/api/v1/accounts/consent-preferences/")
+        sms = next(item for item in response.data if item["purpose"] == "marketing_sms")
+        self.assertFalse(sms["enabled"])
+
+    def test_invalid_purpose_is_rejected(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post("/api/v1/accounts/consent-preferences/", {"purpose": "essential_booking", "enabled": False}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
