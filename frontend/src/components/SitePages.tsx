@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { ArrowRight, Compass, Globe2, HeartHandshake, Mail, MapPin, ShieldCheck, Sparkles } from "lucide-react";
 import "./site-pages.css";
 
@@ -53,7 +54,7 @@ const tripTypes = [
   ["12", "Road trips & discovery", "Flexible journeys that make the route part of the experience."],
 ];
 
-function Shell({ children }: { children: React.ReactNode }) {
+function Shell({ children }: { children: ReactNode }) {
   return <main className="site-pages">
     <header className="site-pages-nav">
       <a className="site-pages-brand" href="/" aria-label="XGetawaySX home"><span>X</span>GETAWAYS<span>X</span></a>
