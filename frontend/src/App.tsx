@@ -9,6 +9,7 @@ import DestinationExplorer from "./components/DestinationExplorer";
 import CustomerAccount from "./components/CustomerAccount";
 import PartnerVerificationWorkspace from "./components/PartnerVerificationWorkspace";
 import SitePages from "./components/SitePages";
+import HelpPages from "./components/HelpPages";
 import "./components/destination-explorer.css";
 import { ArrowRight, Compass, Globe2, Heart, MapPin } from "lucide-react";
 
