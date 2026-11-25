@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import "./privacy-centre.css";
 
 const API = (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env.VITE_API_BASE_URL ?? "";
@@ -51,7 +51,7 @@ export default function PrivacyCentre() {
 
   useEffect(() => { loadRequests(); }, [loadRequests]);
 
-  async function submitRequest(event: React.FormEvent<HTMLFormElement>) {
+  async function submitRequest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!token) return;
     setBusy(true); setError(""); setNotice("");
