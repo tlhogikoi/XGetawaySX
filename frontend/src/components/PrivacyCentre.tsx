@@ -1,25 +1,115 @@
+import { useCallback, useEffect, useState } from "react";
 import "./privacy-centre.css";
 
-const rights = [
-  { title: "Access your information", detail: "You may request confirmation of whether personal information is held and ask for a copy, subject to applicable identity checks and lawful limits.", status: "Request channel not yet enabled" },
-  { title: "Correct your information", detail: "You may request correction or updating of information that is inaccurate, incomplete or out of date.", status: "Request channel not yet enabled" },
-  { title: "Request deletion", detail: "You may request deletion where the law permits. Some records may need to be retained for legal, security, dispute or transaction obligations.", status: "Request channel not yet enabled" },
-  { title: "Manage consent", detail: "Where processing relies on consent, you should be able to withdraw it. Withdrawal does not make earlier lawful processing invalid.", status: "Consent controls not yet connected" },
-  { title: "Marketing preferences", detail: "Marketing communications should use a separate, clear opt-in and provide a straightforward way to opt out.", status: "Preference controls not yet connected" },
+const API = (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env.VITE_API_BASE_URL ?? "";
+type RequestType = "access" | "correction" | "deletion" | "consent_withdrawal" | "marketing_optout";
+type PrivacyRequest = {
+  reference: string;
+  request_type: RequestType;
+  description: string;
+  status: string;
+  created_at: string;
+  identity_verified: boolean;
+};
+const requestTypes: { value: RequestType; label: string }[] = [
+  { value: "access", label: "Access my personal information" },
+  { value: "correction", label: "Correct my personal information" },
+  { value: "deletion", label: "Request deletion of personal information" },
+  { value: "consent_withdrawal", label: "Withdraw consent where applicable" },
+  { value: "marketing_optout", label: "Opt out of marketing communications" },
 ];
+const statusLabels: Record<string, string> = {
+  submitted: "Submitted", under_review: "Under review",
+  awaiting_verification: "Awaiting identity verification",
+  fulfilled: "Completed", declined: "Declined", withdrawn: "Withdrawn",
+};
 
 export default function PrivacyCentre() {
-  const signedIn = Boolean(sessionStorage.getItem("xgs_access"));
+  const token = sessionStorage.getItem("xgs_access");
+  const [requests, setRequests] = useState<PrivacyRequest[]>([]);
+  const [requestType, setRequestType] = useState<RequestType>("access");
+  const [description, setDescription] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  const loadRequests = useCallback(async () => {
+    if (!token) return;
+    setLoading(true);
+    try {
+      const response = await fetch(`${API}/api/v1/accounts/privacy-requests/`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Could not load privacy requests.");
+      setRequests(data as PrivacyRequest[]);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not load privacy requests.");
+    } finally { setLoading(false); }
+  }, [token]);
+
+  useEffect(() => { loadRequests(); }, [loadRequests]);
+
+  async function submitRequest(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!token) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const response = await fetch(`${API}/api/v1/accounts/privacy-requests/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ request_type: requestType, description }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(Object.values(data).flat().join(" ") || "Could not submit your request.");
+      setDescription("");
+      setNotice(`Request submitted. Reference: ${data.reference}`);
+      await loadRequests();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not submit your request.");
+    } finally { setBusy(false); }
+  }
+
+  async function withdraw(reference: string) {
+    if (!token) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const response = await fetch(`${API}/api/v1/accounts/privacy-requests/${reference}/`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ status: "withdrawn" }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Could not withdraw this request.");
+      setNotice("Your request has been withdrawn.");
+      await loadRequests();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not withdraw this request.");
+    } finally { setBusy(false); }
+  }
+
+  const signedIn = Boolean(token);
   return <main className="privacy-centre">
     <header><a href="/" className="privacy-brand">XGETAWAYS<span>X</span></a><nav><a href="/account/">My account</a><a href="/privacy/">Privacy information</a></nav></header>
-    <section className="privacy-hero"><p className="eyebrow">YOUR INFORMATION · YOUR CHOICES</p><h1>Privacy Centre</h1><p>Understand the privacy controls being prepared for XGetawaySX and the steps available before launch.</p><span className="privacy-stage">PRE-LAUNCH · NOT A LIVE REQUEST SERVICE</span></section>
+    <section className="privacy-hero"><p className="eyebrow">YOUR INFORMATION · YOUR CHOICES</p><h1>Privacy Centre</h1><p>Submit and track privacy-related requests associated with your XGetawaySX account.</p><span className="privacy-stage">STAGING WORKFLOW · IDENTITY CHECKS REQUIRE STAFF REVIEW</span></section>
     <section className="privacy-main">
-      <div className="privacy-account-state"><div><h2>{signedIn ? "You are signed in on this device" : "Sign in to your account"}</h2><p>{signedIn ? "Your account session is present. The privacy request services below are not yet connected." : "Account-specific privacy tools will require you to sign in and verify your identity."}</p></div><a href="/account/">{signedIn ? "Account" : "Sign in"} →</a></div>
-      <h2>Privacy rights and controls</h2>
-      <p className="privacy-intro">These are the rights and preference controls the platform is preparing to support. The status beside each item is important: no request or preference change is submitted from this page.</p>
-      <div className="privacy-rights">{rights.map((right, index)=><article key={right.title}><span className="privacy-number">0{index+1}</span><div><h3>{right.title}</h3><p>{right.detail}</p><small>{right.status}</small></div></article>)}</div>
-      <aside className="privacy-notice"><strong>Need to make a privacy request now?</strong><p>This staging page does not yet have a verified privacy-request channel or confirmed Information Officer contact. Please do not enter sensitive personal information here. Before public launch, the responsible legal entity, privacy contact, identity-verification process, response workflow and audit trail must be configured and tested.</p><a href="/privacy/">Read the current privacy information →</a></aside>
-      <p className="privacy-footnote">This page is product information, not legal advice or a statement of POPIA compliance. Applicable rights and exceptions depend on the circumstances and the law.</p>
+      <div className="privacy-account-state"><div><h2>{signedIn ? "Your account privacy requests" : "Sign in to continue"}</h2><p>{signedIn ? "Requests are linked to your authenticated account. Staff may need to verify your identity before actioning a request." : "Sign in to submit and view requests linked to your account."}</p></div><a href="/account/">{signedIn ? "Account" : "Sign in"} →</a></div>
+      {error && <p className="privacy-feedback privacy-error" role="alert">{error}</p>}
+      {notice && <p className="privacy-feedback" role="status">{notice}</p>}
+      {signedIn && <>
+        <h2>Submit a privacy request</h2>
+        <p className="privacy-intro">Choose the request that best describes what you need. Do not include passwords, payment-card details, identity-document numbers or other unnecessary sensitive information.</p>
+        <form className="privacy-request-form" onSubmit={submitRequest}>
+          <label>Request type<select value={requestType} onChange={event=>setRequestType(event.target.value as RequestType)}>{requestTypes.map(item=><option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+          <label>What would you like us to know?<textarea value={description} onChange={event=>setDescription(event.target.value)} minLength={10} maxLength={4000} rows={4} required placeholder="Describe the information or action relevant to your request. Avoid including sensitive document details."/></label>
+          <button type="submit" disabled={busy}>{busy ? "Submitting…" : "Submit privacy request"}</button>
+        </form>
+        <h2>Your request history</h2>
+        {loading ? <p className="privacy-intro">Loading your requests…</p> : requests.length === 0 ? <p className="privacy-intro">You have not submitted any privacy requests yet.</p> : <div className="privacy-request-list">{requests.map(item=><article key={item.reference}><div className="privacy-request-heading"><strong>{requestTypes.find(type=>type.value===item.request_type)?.label ?? item.request_type}</strong><span>{statusLabels[item.status] ?? item.status}</span></div><p>{item.description}</p><small>Reference: {item.reference} · Submitted {new Date(item.created_at).toLocaleString()}</small><small>Identity verification: {item.identity_verified ? "Recorded as verified" : "Not yet recorded"}</small>{item.status === "submitted" && <button type="button" className="privacy-withdraw" disabled={busy} onClick={()=>withdraw(item.reference)}>Withdraw request</button>}</article>)}</div>}
+      </>}
+      <aside className="privacy-notice"><strong>Important safeguards</strong><p>Submitting a request does not automatically disclose, correct or erase information, change marketing subscriptions, or withdraw consent from third-party providers. Staff must review the request, verify identity where appropriate, assess legal obligations and record the outcome. A deletion request does not automatically delete your account or transaction records.</p><a href="/privacy/">Read the current privacy information →</a></aside>
+      <p className="privacy-footnote">This workflow is a technical staging implementation, not legal advice or proof of POPIA compliance. Confirm the responsible legal entity, Information Officer, response timelines, secure identity-verification process, retention schedule and complaint channel before public launch.</p>
     </section>
     <footer><a href="/">XGETAWAYS<span>X</span></a><span>TRAVEL THROUGH US.</span></footer>
   </main>;
