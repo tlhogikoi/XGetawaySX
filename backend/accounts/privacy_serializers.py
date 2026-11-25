@@ -38,3 +38,10 @@ class PrivacyRequestStaffUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = PrivacyRequest
         fields = ("status", "staff_note", "identity_verified")
+
+    def validate(self, attrs):
+        next_status = attrs.get("status", self.instance.status if self.instance else None)
+        identity_verified = attrs.get("identity_verified", self.instance.identity_verified if self.instance else False)
+        if next_status == PrivacyRequest.Status.FULFILLED and not identity_verified:
+            raise serializers.ValidationError({"identity_verified": "Identity must be verified before a request can be marked completed."})
+        return attrs
