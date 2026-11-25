@@ -23,5 +23,6 @@ class User(AbstractUser):
         return self.email
 
 
-# Register privacy models with Django's app registry.
+# Import model modules so Django registers their models.
 from .privacy_models import PrivacyRequest, PrivacyRequestEvent  # noqa: E402,F401
+from .consent_models import ConsentEvent, ConsentPreference  # noqa: E402,F401
