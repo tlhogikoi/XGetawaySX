@@ -37,3 +37,22 @@ class PrivacyRequestAdmin(admin.ModelAdmin):
     search_fields = ("reference", "user__email")
     readonly_fields = ("reference", "created_at", "updated_at", "closed_at")
     inlines = (PrivacyRequestEventInline,)
+
+
+from .consent_models import ConsentEvent, ConsentPreference
+
+
+class ConsentEventInline(admin.TabularInline):
+    model = ConsentEvent
+    extra = 0
+    can_delete = False
+    readonly_fields = ("actor", "previous_value", "new_value", "purpose", "policy_version", "source", "created_at")
+
+
+@admin.register(ConsentPreference)
+class ConsentPreferenceAdmin(admin.ModelAdmin):
+    list_display = ("user", "purpose", "enabled", "policy_version", "source", "updated_at")
+    list_filter = ("purpose", "enabled", "source")
+    search_fields = ("user__email",)
+    readonly_fields = ("created_at", "updated_at")
+    inlines = (ConsentEventInline,)
