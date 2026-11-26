@@ -192,3 +192,59 @@ class ReservationStatusHistoryTests(TestCase):
             format="json",
         )
         self.assertEqual(second.status_code, 400)
+
+    def test_expired_quote_cannot_be_accepted_or_confirmed(self):
+        from .models import ReservationQuote
+
+        reservation_id = self.create_reservation()
+        self.client.force_authenticate(user=self.owner)
+        quote = self.client.post(
+            f"/api/v1/partners/partner/reservations/{reservation_id}/quotes/",
+            {
+                "currency": "ZAR",
+                "items": [{
+                    "description": "One-night accommodation",
+                    "quantity": "1",
+                    "unit_price": "2400.00",
+                }],
+                "deposit_amount": "720.00",
+                "terms": "Expiry safeguard test.",
+                "expires_at": (timezone.now() + timedelta(days=1)).isoformat(),
+            },
+            format="json",
+        )
+        self.assertEqual(quote.status_code, 201, quote.data)
+
+        ReservationQuote.objects.filter(pk=quote.data["id"]).update(
+            expires_at=timezone.now() - timedelta(minutes=1)
+        )
+
+        self.client.force_authenticate(user=self.customer)
+        accepted = self.client.post(
+            f"/api/v1/partners/reservations/{reservation_id}/quote-decision/",
+            {"status": "accepted"},
+            format="json",
+        )
+        self.assertEqual(accepted.status_code, 400, accepted.data)
+        self.assertIn("expired", accepted.data["detail"].lower())
+
+        expired_quote = ReservationQuote.objects.get(pk=quote.data["id"])
+        self.assertEqual(expired_quote.status, ReservationQuote.Status.EXPIRED)
+
+        self.client.force_authenticate(user=self.owner)
+        confirmed = self.client.post(
+            f"/api/v1/partners/partner/reservations/{reservation_id}/decision/",
+            {
+                "status": "confirmed",
+                "partner_response": "Attempt to confirm expired quotation.",
+            },
+            format="json",
+        )
+        self.assertEqual(confirmed.status_code, 400, confirmed.data)
+        self.assertEqual(confirmed.data["detail"], "The customer must accept the latest quotation before the reservation can be confirmed.")
+
+        self.client.force_authenticate(user=self.customer)
+        reservation = self.client.get("/api/v1/partners/reservations/").data[0]
+        self.assertEqual(reservation["status"], "pending")
+        self.assertIsNone(reservation["quoted_total"])
+
