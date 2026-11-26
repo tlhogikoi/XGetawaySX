@@ -232,7 +232,7 @@ class ReservationRequestCreateSerializer(serializers.Serializer):
         return attrs
 
 
-from .models import ReservationQuote, ReservationQuoteItem
+from .models import ReservationQuote, ReservationQuoteItem, ReservationStatusEvent
 
 
 class ReservationQuoteItemSerializer(serializers.ModelSerializer):
@@ -314,6 +314,7 @@ class ReservationRequestSerializer(serializers.ModelSerializer):
     trip_plan_id = serializers.IntegerField(read_only=True)
     customer_email = serializers.EmailField(source="customer.email", read_only=True)
     latest_quote = serializers.SerializerMethodField()
+    status_history = serializers.SerializerMethodField()
 
     class Meta:
         model = ReservationRequest
