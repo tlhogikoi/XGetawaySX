@@ -608,6 +608,21 @@ class GalleryRevisionPrivacyTests(TestCase):
         self.assertEqual(first.version, 1)
         self.assertEqual(second.version, 2)
 
+    def test_revision_rejects_instance_and_bulk_mutation(self):
+        revision = self.story.revisions.get(version=1)
+        revision.summary = "Tampered historical content"
+        with self.assertRaises(ValidationError):
+            revision.save()
+        with self.assertRaises(ValidationError):
+            self.story.revisions.filter(version=1).update(summary="Bulk tampering")
+        with self.assertRaises(ValidationError):
+            revision.delete()
+        with self.assertRaises(ValidationError):
+            self.story.revisions.filter(version=1).delete()
+        revision.refresh_from_db()
+        self.assertNotEqual(revision.summary, "Tampered historical content")
+        self.assertEqual(self.story.revisions.count(), 1)
+
 
 class GalleryHistoryConsentTests(TestCase):
     def setUp(self):
