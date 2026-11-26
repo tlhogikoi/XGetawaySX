@@ -1575,6 +1575,45 @@ class DualGatewayIntegrationTests(TestCase):
         self.assertFalse(PartnerCommissionLedger.objects.filter(payment=self.payment).exists())
 
 
+
+    def test_checkout_start_is_blocked_during_approved_cancellation_for_both_providers(self):
+        from unittest.mock import patch
+        from .models import ReservationCancellationRequest, ReservationPayment
+
+        ReservationCancellationRequest.objects.create(
+            reservation=self.reservation,
+            customer=self.customer,
+            reason="Customer requested cancellation.",
+            status=ReservationCancellationRequest.Status.APPROVED,
+            decided_by=self.owner,
+            decided_at=timezone.now(),
+        )
+        self.payment.provider = "manual_reconciliation"
+        self.payment.checkout_url = ""
+        self.payment.checkout_session_id = ""
+        self.payment.save(update_fields=["provider", "checkout_url", "checkout_session_id"])
+
+        self.client.force_authenticate(self.customer)
+        with patch("partners.views.build_payfast_checkout") as payfast_checkout, patch(
+            "partners.views.create_yoco_checkout"
+        ) as yoco_checkout:
+            for provider in ("payfast", "yoco"):
+                with self.subTest(provider=provider):
+                    response = self.client.post(
+                        f"/api/v1/partners/payments/{self.payment.pk}/checkout/",
+                        {"provider": provider},
+                        format="json",
+                    )
+                    self.assertEqual(response.status_code, 400)
+                    self.assertIn("approved cancellation", str(response.data).lower())
+
+        payfast_checkout.assert_not_called()
+        yoco_checkout.assert_not_called()
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, ReservationPayment.Status.PENDING)
+        self.assertEqual(self.payment.provider, "manual_reconciliation")
+
+
 class PartnerOwnedProfileEndpointTests(TestCase):
     def setUp(self):
         self.client = APIClient()
