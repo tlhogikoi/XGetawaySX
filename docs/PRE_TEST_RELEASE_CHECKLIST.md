@@ -71,6 +71,7 @@ Record each scenario in the test evidence register. Use synthetic accounts and t
 - **UAT-GAL-02 — Rights withdrawal after publication:** publish an approved story in staging, then revoke the media permission as the partner owner; the story must disappear from list/detail responses and its image endpoint must return 404 on the next request.
 - **UAT-GAL-03 — Partner suspension after publication:** publish an approved story in staging, then suspend the partner's Gallery approval; the story must disappear from list/detail responses and its image endpoint must return 404 on the next request.
 - **UAT-GAL-04 — Latest editorial review wins:** record a passing quality review for a story version, then a later failed review for that same version; publication must be blocked until the latest review passes all checks.
+- **UAT-GAL-05 — Revision history is immutable:** verify story revisions reject instance saves/deletes and queryset bulk updates/deletes; original snapshots and version numbering must remain unchanged.
 
 ## 3. Security, reliability and usability checks
 - [ ] Test role-based access for customer, partner owner and staff roles, including direct API requests.
