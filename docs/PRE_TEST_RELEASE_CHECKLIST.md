@@ -66,6 +66,7 @@ Record each scenario in the test evidence register. Use synthetic accounts and t
 - [ ] **UAT-RES-06 — Cancellation workflow:** A confirmed booking with captured payment remains active until the sandbox refund is fully reconciled; cancellation completion must not release capacity prematurely.
 - [ ] **UAT-PAY-01 — Browser return safety:** A customer browser return without a verified provider webhook does not mark a payment as captured.
 - [ ] **UAT-PAY-02 — Late payment notification:** A valid PayFast or Yoco success notification received after its reservation is cancelled is rejected for manual investigation; it must not capture the payment, create a commission entry or silently restore the booking.
+- [ ] **UAT-PAY-03 — Sequential partial refunds:** Reconcile two partial sandbox refunds for one captured payment; verify cumulative refunds never exceed the capture, commission reversals total correctly, duplicate webhook delivery creates no second adjustment/notification, and payment becomes fully refunded only when the cumulative refund equals the captured amount.
 - [ ] **UAT-GAL-01 — Gallery approval gates:** Partner verification alone does not publish media or stories; owner consent and editorial approval must match the current content version.
 
 ## 3. Security, reliability and usability checks
