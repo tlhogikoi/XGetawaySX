@@ -1555,7 +1555,7 @@ class DualGatewayIntegrationTests(TestCase):
     def test_yoco_capture_is_rejected_during_approved_cancellation(self):
         from .models import (
             ReservationCancellationRequest, PaymentProviderEvent,
-            PartnerCommissionLedger,
+            PartnerCommissionLedger, ReservationPayment,
         )
         ReservationCancellationRequest.objects.create(
             reservation=self.reservation,
