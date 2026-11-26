@@ -56,7 +56,7 @@ Validate the implemented customer, partner, booking, payment-workflow and Galler
 
 ## 2A. UAT regression scenarios
 
-Record each scenario in the test evidence register. Use synthetic accounts and test reservations only.
+Record each scenario using `docs/UAT_TEST_EVIDENCE_TEMPLATE.md`. Capture the environment URL, deployment commit, tester, SAST timestamp, browser/device, synthetic data IDs, result and evidence link. Use synthetic accounts and test reservations only.
 
 - [ ] **UAT-RES-01 — Customer isolation:** Customer A cannot view, cancel or decide a quotation for Customer B's reservation, even when the reservation ID is known.
 - [ ] **UAT-RES-02 — Partner isolation:** Partner A cannot quote, confirm, decline or inspect Partner B's reservation.
@@ -70,10 +70,10 @@ Record each scenario in the test evidence register. Use synthetic accounts and t
 - [ ] **UAT-PAY-02 — Late payment notification:** A valid PayFast or Yoco success notification received after its reservation is cancelled is rejected for manual investigation; it must not capture the payment, create a commission entry or silently restore the booking.
 - [ ] **UAT-PAY-03 — Sequential partial refunds:** Reconcile two partial sandbox refunds for one captured payment; verify cumulative refunds never exceed the capture, commission reversals total correctly, duplicate webhook delivery creates no second adjustment/notification, and payment becomes fully refunded only when the cumulative refund equals the captured amount.
 - [ ] **UAT-GAL-01 — Gallery approval gates:** Partner verification alone does not publish media or stories; owner consent and editorial approval must match the current content version.
-- **UAT-GAL-02 — Rights withdrawal after publication:** publish an approved story in staging, then revoke the media permission as the partner owner; the story must disappear from list/detail responses and its image endpoint must return 404 on the next request.
-- **UAT-GAL-03 — Partner suspension after publication:** publish an approved story in staging, then suspend the partner's Gallery approval; the story must disappear from list/detail responses and its image endpoint must return 404 on the next request.
-- **UAT-GAL-04 — Latest editorial review wins:** record a passing quality review for a story version, then a later failed review for that same version; publication must be blocked until the latest review passes all checks.
-- **UAT-GAL-05 — Revision history is immutable:** verify story revisions reject instance saves/deletes and queryset bulk updates/deletes; original snapshots and version numbering must remain unchanged.
+- [ ] **UAT-GAL-02 — Rights withdrawal after publication:** publish an approved story in staging, then revoke the media permission as the partner owner; the story must disappear from list/detail responses and its image endpoint must return 404 on the next request.
+- [ ] **UAT-GAL-03 — Partner suspension after publication:** publish an approved story in staging, then suspend the partner's Gallery approval; the story must disappear from list/detail responses and its image endpoint must return 404 on the next request.
+- [ ] **UAT-GAL-04 — Latest editorial review wins:** record a passing quality review for a story version, then a later failed review for that same version; publication must be blocked until the latest review passes all checks.
+- [ ] **UAT-GAL-05 — Revision history is immutable:** verify story revisions reject instance saves/deletes and queryset bulk updates/deletes; original snapshots and version numbering must remain unchanged.
 
 ## 3. Security, reliability and usability checks
 - [ ] Test role-based access for customer, partner owner and staff roles, including direct API requests.
@@ -99,4 +99,4 @@ Record each scenario in the test evidence register. Use synthetic accounts and t
 - [ ] Product owner signs off the test report and the explicitly supported launch scope.
 
 ## Test evidence register
-Record each run with: test ID, tester, date/time, environment/build commit, browser/device, test data ID, result, defect reference and evidence link.
+Use `docs/UAT_TEST_EVIDENCE_TEMPLATE.md` for the execution register, individual test records, defect reports, daily summaries and exit sign-off. Do not mark a scenario passed without actual execution evidence.
