@@ -1558,6 +1558,14 @@ class ReservationCheckoutStartView(APIView):
                 raise ValidationError("Only pending payments can start checkout.")
             if payment.reservation.status != ReservationRequest.Status.CONFIRMED:
                 raise ValidationError("Checkout is available only for confirmed reservations.")
+            cancellation_in_progress = ReservationCancellationRequest.objects.filter(
+                reservation=payment.reservation,
+                status=ReservationCancellationRequest.Status.APPROVED,
+            ).exists()
+            if cancellation_in_progress:
+                raise ValidationError(
+                    "Checkout is blocked while an approved cancellation is being reconciled."
+                )
             if payment.provider not in {"manual_reconciliation", provider}:
                 raise ValidationError("This payment has already been assigned to another provider.")
             if payment.checkout_url and payment.checkout_session_id:
