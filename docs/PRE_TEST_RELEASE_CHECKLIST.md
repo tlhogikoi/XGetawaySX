@@ -68,6 +68,7 @@ Record each scenario in the test evidence register. Use synthetic accounts and t
 - [ ] **UAT-PAY-02 — Late payment notification:** A valid PayFast or Yoco success notification received after its reservation is cancelled is rejected for manual investigation; it must not capture the payment, create a commission entry or silently restore the booking.
 - [ ] **UAT-PAY-03 — Sequential partial refunds:** Reconcile two partial sandbox refunds for one captured payment; verify cumulative refunds never exceed the capture, commission reversals total correctly, duplicate webhook delivery creates no second adjustment/notification, and payment becomes fully refunded only when the cumulative refund equals the captured amount.
 - [ ] **UAT-GAL-01 — Gallery approval gates:** Partner verification alone does not publish media or stories; owner consent and editorial approval must match the current content version.
+- **UAT-GAL-02 — Rights withdrawal after publication:** publish an approved story in staging, then revoke the media permission as the partner owner; the story must disappear from list/detail responses and its image endpoint must return 404 on the next request.
 
 ## 3. Security, reliability and usability checks
 - [ ] Test role-based access for customer, partner owner and staff roles, including direct API requests.
