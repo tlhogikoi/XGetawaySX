@@ -1447,6 +1447,36 @@ class DualGatewayIntegrationTests(TestCase):
         self.assertEqual(json.loads(outgoing.data)["amount"], 1000)
 
 
+
+    def test_yoco_success_for_cancelled_reservation_is_rejected_without_capture(self):
+        from .models import PaymentProviderEvent, PartnerCommissionLedger, ReservationRequest
+
+        self.reservation.status = ReservationRequest.Status.CANCELLED
+        self.reservation.save(update_fields=["status"])
+
+        response = self.yoco_webhook(webhook_id="wh_evt_cancelled_reservation")
+
+        self.assertEqual(response.status_code, 409)
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, "pending")
+        self.assertFalse(PaymentProviderEvent.objects.filter(provider="yoco").exists())
+        self.assertFalse(PartnerCommissionLedger.objects.filter(payment=self.payment).exists())
+
+    def test_payfast_success_for_cancelled_reservation_is_rejected_without_capture(self):
+        from .models import PaymentProviderEvent, PartnerCommissionLedger, ReservationRequest
+
+        self.reservation.status = ReservationRequest.Status.CANCELLED
+        self.reservation.save(update_fields=["status"])
+
+        response = self.payfast_webhook(transaction_id="pf_cancelled_reservation_001")
+
+        self.assertEqual(response.status_code, 409)
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, "pending")
+        self.assertFalse(PaymentProviderEvent.objects.filter(provider="payfast").exists())
+        self.assertFalse(PartnerCommissionLedger.objects.filter(payment=self.payment).exists())
+
+
 class PartnerOwnedProfileEndpointTests(TestCase):
     def setUp(self):
         self.client = APIClient()
