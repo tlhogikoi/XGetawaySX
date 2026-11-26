@@ -502,13 +502,18 @@ class GalleryStoryEditorialApprovalView(APIView):
             raise ValidationError("Partner must be approved for Gallery advertising.")
         if not story_has_active_website_media_permissions(story):
             raise ValidationError("Every image must be approved and have active website publication permission.")
+        # The latest review for this exact version is authoritative. A later failed
+        # review must supersede an earlier passing review rather than being ignored.
         quality_review = story.editorial_quality_reviews.filter(
-            story_version=story.current_version, claims_verified=True,
-            source_facts_checked=True, unsupported_claims_resolved=True,
-            media_context_accurate=True,
-        ).first()
-        if not quality_review:
-            raise ValidationError("Complete the current-version editorial quality review before publication.")
+            story_version=story.current_version,
+        ).order_by("-created_at", "-pk").first()
+        if not quality_review or not all((
+            quality_review.claims_verified,
+            quality_review.source_facts_checked,
+            quality_review.unsupported_claims_resolved,
+            quality_review.media_context_accurate,
+        )):
+            raise ValidationError("The latest current-version editorial quality review must pass every check before publication.")
         story.editorial_approved_by = request.user
         story.editorial_approved_at = timezone.now()
         story.editorial_approved_version = story.current_version
