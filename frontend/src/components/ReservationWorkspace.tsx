@@ -10,7 +10,7 @@ type Cancellation = { id: number; reservation_id: number; partner_name: string; 
 type Notice = { id:number; title:string; message:string; event:string; read_at:string|null; created_at:string };
 type Refund = { id:number; amount:string; currency:string; status:string; provider:string; provider_reference:string|null; provider_status:string; reason:string; reconciled_at:string|null; created_at:string };
 type Payment = { id:number; reservation:number; reservation_reference:string|null; partner_name:string; kind:string; status:string; amount:string; currency:string; provider:string; provider_reference:string|null; failure_reason:string; refunds:Refund[]; created_at:string; captured_at:string|null };
-type Availability = { date: string; available_guests: number; price_per_guest: string | null; currency: string };
+type Availability = { date: string; available_guests: number; requested_guests: number; is_available: boolean; price_per_guest: string | null; currency: string };
 const API = (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env.VITE_API_BASE_URL ?? "";
 
 export default function ReservationWorkspace({ accessToken }: { accessToken: string }) {
@@ -42,8 +42,24 @@ export default function ReservationWorkspace({ accessToken }: { accessToken: str
     setPartners(await p.json());setItems(await r.json());setCancellations(await c.json());setNotifications(await n.json());setPayments(await pay.json());
   }
   useEffect(()=>{let live=true;load().catch(e=>{if(live)setError(e.message);});return()=>{live=false;};},[accessToken]);
-  async function check(){setError("");setNotice("");setAvailability([]);if(!partnerId||!start||!end){setError("Choose a partner and both dates first.");return;}const r=await fetch(`${API}/api/v1/partners/availability/?partner_id=${partnerId}&start_date=${start}&end_date=${end}`);const data=await r.json();if(!r.ok){setError(data.detail||"Could not check availability.");return;}setAvailability(data);if(!data.length)setNotice("No published availability was found for this date range.");}
-  async function submit(){setBusy(true);setError("");setNotice("");try{const r=await fetch(`${API}/api/v1/partners/reservations/`,{method:"POST",headers,body:JSON.stringify({partner_id:Number(partnerId),start_date:start,end_date:end,guests,message})});const data=await r.json();if(!r.ok)throw new Error(data.detail||JSON.stringify(data));setItems(v=>[data,...v]);setNotice("Reservation request sent. It is not confirmed until the partner accepts it.");setMessage("");}catch(e){setError(e instanceof Error?e.message:"Could not submit request.");}finally{setBusy(false);}}
+  async function check(){
+    setError("");setNotice("");setAvailability([]);
+    if(!partnerId||!start||!end){setError("Choose a partner and both dates first.");return;}
+    if(end<=start){setError("Check-out must be after check-in.");return;}
+    const nights=(Date.parse(`${end}T00:00:00Z`)-Date.parse(`${start}T00:00:00Z`))/86400000;
+    if(nights>90){setError("Reservations cannot exceed 90 nights.");return;}
+    if(!Number.isInteger(guests)||guests<1||guests>100){setError("Guest count must be between 1 and 100.");return;}
+    const r=await fetch(`${API}/api/v1/partners/availability/?partner_id=${partnerId}&start_date=${start}&end_date=${end}&guests=${guests}`);
+    const data=await r.json();
+    if(!r.ok){setError(data.detail||"Could not check availability.");return;}
+    setAvailability(data);
+    if(data.some((day:Availability)=>!day.is_available))setNotice("Some nights do not have enough capacity for your guest count. Choose different dates or reduce the number of guests.");
+    else setNotice("All requested nights currently have enough published capacity. Availability will be checked again when you submit.");
+  }
+  const availabilityReady=availability.length>0&&availability.every(day=>day.is_available&&day.requested_guests===guests);
+  async function submit(){
+    if(!availabilityReady){setError("Check availability for your selected dates and guest count before sending a reservation request.");return;}
+    setBusy(true);setError("");setNotice("");try{const r=await fetch(`${API}/api/v1/partners/reservations/`,{method:"POST",headers,body:JSON.stringify({partner_id:Number(partnerId),start_date:start,end_date:end,guests,message})});const data=await r.json();if(!r.ok)throw new Error(data.detail||JSON.stringify(data));setItems(v=>[data,...v]);setNotice("Reservation request sent. It is not confirmed until the partner accepts it.");setMessage("");}catch(e){setError(e instanceof Error?e.message:"Could not submit request.");}finally{setBusy(false);}}
   async function decideQuote(reservationId:number,decision:"accepted"|"declined"){
     setError("");setNotice("");
     const response=await fetch(`${API}/api/v1/partners/reservations/${reservationId}/quote-decision/`,{
@@ -77,11 +93,11 @@ export default function ReservationWorkspace({ accessToken }: { accessToken: str
     {error&&<p className="reservation-feedback error" role="alert">{error}</p>}{notice&&<p className="reservation-feedback" role="status">{notice}</p>}
     <div className="reservation-form"><h3><CalendarCheck size={18}/> Request a stay or experience</h3>
       <label>Partner<select value={partnerId} onChange={e=>{setPartnerId(e.target.value);setAvailability([]);}}><option value="">Choose a partner</option>{partners.map(p=><option key={p.id} value={p.id}>{p.name} — {[p.city,p.province].filter(Boolean).join(", ")}</option>)}</select></label>
-      <div className="reservation-fields"><label>Check-in / start<input type="date" value={start} onChange={e=>setStart(e.target.value)}/></label><label>Check-out / end (exclusive)<input type="date" value={end} onChange={e=>setEnd(e.target.value)}/></label><label>Guests<input type="number" min="1" max="100" value={guests} onChange={e=>setGuests(Number(e.target.value))}/></label></div>
+      <div className="reservation-fields"><label>Check-in / start<input type="date" value={start} min={new Date().toISOString().slice(0,10)} onChange={e=>{setStart(e.target.value);setAvailability([]);}}/></label><label>Check-out / end (exclusive)<input type="date" value={end} min={start||new Date().toISOString().slice(0,10)} onChange={e=>{setEnd(e.target.value);setAvailability([]);}}/></label><label>Guests<input type="number" min="1" max="100" value={guests} onChange={e=>{setGuests(Number(e.target.value));setAvailability([]);}}/></label></div>
       <button className="reservation-secondary" onClick={check}>Check availability</button>
-      {availability.length>0&&<div className="availability-list"><strong>Published availability</strong>{availability.map(d=><span key={d.date}>{d.date}: {d.available_guests} guests available {d.price_per_guest?(`· ${d.currency} ${d.price_per_guest} per guest`):""}</span>)}</div>}
+      {availability.length>0&&<div className="availability-list"><strong>Night-by-night availability</strong>{availability.map(d=><span key={d.date}><strong>{d.date}: {d.is_available?"Available":"Unavailable"}</strong> · {d.available_guests} guests available{d.price_per_guest?(` · ${d.currency} ${d.price_per_guest} per guest`):" · No published rate"}</span>)}</div>}
       <label>Message to partner<textarea rows={3} value={message} onChange={e=>setMessage(e.target.value)} placeholder="Add any requests or details for the partner."/></label>
-      <button disabled={busy||!partnerId||!start||!end||guests<1} onClick={submit}><Send size={15}/> Send reservation request</button>
+      <button disabled={busy||!availabilityReady} onClick={submit}><Send size={15}/> Send reservation request</button>
     </div>
     <div className="reservation-history"><h3>Notifications</h3>{notifications.length?notifications.map(n=><article key={n.id}><div><strong>{n.title}</strong><span className={`reservation-status ${n.read_at?"":"confirmed"}`}>{n.read_at?"read":"new"}</span></div><p>{n.message}</p>{!n.read_at&&<button className="reservation-secondary" onClick={()=>markRead(n.id)}>Mark as read</button>}</article>):<p>No notifications yet.</p>}</div>
     <div className="reservation-history"><h3><ClipboardList size={18}/> Your reservation history</h3>{items.length?items.map(item=>{
