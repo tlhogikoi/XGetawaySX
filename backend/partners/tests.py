@@ -1552,6 +1552,29 @@ class DualGatewayIntegrationTests(TestCase):
         self.assertFalse(PartnerCommissionLedger.objects.filter(payment=self.payment).exists())
 
 
+    def test_yoco_capture_is_rejected_during_approved_cancellation(self):
+        from .models import (
+            ReservationCancellationRequest, PaymentProviderEvent,
+            PartnerCommissionLedger,
+        )
+        ReservationCancellationRequest.objects.create(
+            reservation=self.reservation,
+            customer=self.customer,
+            reason="Customer requested cancellation.",
+            status=ReservationCancellationRequest.Status.APPROVED,
+            decided_by=self.owner,
+            decided_at=timezone.now(),
+        )
+
+        response = self.yoco_webhook(webhook_id="wh_evt_cancel_approved_001")
+
+        self.assertEqual(response.status_code, 409)
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, ReservationPayment.Status.PENDING)
+        self.assertFalse(PaymentProviderEvent.objects.filter(provider="yoco").exists())
+        self.assertFalse(PartnerCommissionLedger.objects.filter(payment=self.payment).exists())
+
+
 class PartnerOwnedProfileEndpointTests(TestCase):
     def setUp(self):
         self.client = APIClient()
