@@ -151,7 +151,7 @@ class ReservationCancellationReconciliationTests(TestCase):
         client = APIClient()
         client.force_authenticate(staff)
         response = client.post(
-            f"/api/v1/partners/payments/reconcile/{pending.pk}/",
+            f"/api/v1/partners/payments/{pending.pk}/reconcile/",
             {
                 "status": "captured",
                 "provider": "sandbox_test",
