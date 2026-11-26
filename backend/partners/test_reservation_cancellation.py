@@ -127,7 +127,7 @@ class ReservationCancellationReconciliationTests(TestCase):
             format="json",
         )
         self.assertEqual(response.status_code, 400)
-        self.assertIn("approved cancellation", str(response.data).lower())
+        self.assertIn("cancellation request", str(response.data).lower())
         self.assertFalse(self.reservation.payments.filter(
             idempotency_key="blocked-during-cancel"
         ).exists())
