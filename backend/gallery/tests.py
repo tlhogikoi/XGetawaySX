@@ -492,6 +492,37 @@ class GalleryPublicationTests(TestCase):
         self.assertEqual(self.client.get(f"/api/v1/gallery/media/{self.media.id}/image/").status_code, 404)
 
 
+    def test_suspending_partner_after_publication_hides_story_and_image(self):
+        self.media.image_file = SimpleUploadedFile(
+            "published.png",
+            base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC"),
+        )
+        self.media.save()
+        story = GalleryStory.objects.create(
+            media=self.media,
+            summary=" ".join(["A verified short story about this place and its setting."] * 5),
+            status=GalleryStory.Status.PUBLISHED,
+            owner_approved_by=self.owner,
+            owner_approved_at=timezone.now(),
+            owner_approved_version=1,
+            editorial_approved_by=self.editor,
+            editorial_approved_at=timezone.now(),
+            editorial_approved_version=1,
+            published_at=timezone.now(),
+        )
+
+        self.assertEqual(self.client.get("/api/v1/gallery/stories/").data[0]["id"], story.id)
+        self.assertEqual(self.client.get(f"/api/v1/gallery/stories/{story.id}/").status_code, 200)
+        self.assertEqual(self.client.get(f"/api/v1/gallery/media/{self.media.id}/image/").status_code, 200)
+
+        self.partner.gallery_status = Partner.ApprovalStatus.SUSPENDED
+        self.partner.save(update_fields=("gallery_status", "updated_at"))
+
+        self.assertEqual(self.client.get("/api/v1/gallery/stories/").data, [])
+        self.assertEqual(self.client.get(f"/api/v1/gallery/stories/{story.id}/").status_code, 404)
+        self.assertEqual(self.client.get(f"/api/v1/gallery/media/{self.media.id}/image/").status_code, 404)
+
+
 class GalleryRevisionPrivacyTests(TestCase):
     def setUp(self):
         from django.utils import timezone
