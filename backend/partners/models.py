@@ -254,6 +254,31 @@ class ReservationRequest(models.Model):
         return f"Reservation request {self.pk} — {self.partner.name}"
 
 
+class ReservationStatusEvent(models.Model):
+    """Append-only audit record for a reservation status transition."""
+    reservation = models.ForeignKey(
+        ReservationRequest, on_delete=models.PROTECT, related_name="status_events"
+    )
+    from_status = models.CharField(max_length=20, blank=True)
+    to_status = models.CharField(max_length=20)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="reservation_status_events",
+    )
+    actor_role = models.CharField(max_length=30, default="system")
+    reason = models.CharField(max_length=1000, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("created_at", "id")
+        indexes = [
+            models.Index(fields=("reservation", "created_at"), name="res_status_event_idx"),
+        ]
+
+    def __str__(self):
+        return f"Reservation {self.reservation_id}: {self.from_status or 'created'} → {self.to_status}"
+
+
 class ReservationQuote(models.Model):
     class Status(models.TextChoices):
         SENT = "sent", "Sent to customer"
