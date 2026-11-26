@@ -378,15 +378,34 @@ class PublicPartnerAvailabilityView(APIView):
         start_date, end_date = parse_date(start), parse_date(end)
         if not start_date or not end_date or end_date <= start_date or (end_date - start_date).days > 90:
             raise ValidationError("Provide a valid date range of up to 90 nights.")
+        try:
+            guests = int(request.query_params.get("guests", "1"))
+        except (TypeError, ValueError):
+            raise ValidationError({"guests": "Guests must be a whole number between 1 and 100."})
+        if not 1 <= guests <= 100:
+            raise ValidationError({"guests": "Guests must be between 1 and 100."})
+
         days = PartnerAvailability.objects.filter(
-            partner=partner, date__gte=start_date, date__lt=end_date, is_open=True
+            partner=partner, date__gte=start_date, date__lt=end_date
         ).order_by("date")
-        return Response([{
-            "date": day.date,
-            "available_guests": max(0, day.capacity - day.booked_count),
-            "price_per_guest": day.price_per_guest,
-            "currency": day.currency,
-        } for day in days])
+        days_by_date = {day.date: day for day in days}
+        results = []
+        for offset in range((end_date - start_date).days):
+            day_date = start_date + timedelta(days=offset)
+            day = days_by_date.get(day_date)
+            available_guests = (
+                max(0, day.capacity - day.booked_count)
+                if day and day.is_open else 0
+            )
+            results.append({
+                "date": day_date,
+                "available_guests": available_guests,
+                "requested_guests": guests,
+                "is_available": available_guests >= guests,
+                "price_per_guest": day.price_per_guest if day else None,
+                "currency": day.currency if day else "ZAR",
+            })
+        return Response(results)
 
 
 class PartnerAvailabilityManagementView(APIView):
