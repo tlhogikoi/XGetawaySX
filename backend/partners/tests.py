@@ -1386,6 +1386,80 @@ class DualGatewayIntegrationTests(TestCase):
         self.assertEqual(refund.provider_reference, "rfd_wh_refund_001")
         self.assertEqual(PartnerCommissionAdjustment.objects.get(refund=refund).commission_reversal, Decimal("2.00"))
 
+
+    def test_yoco_sequential_partial_refunds_reconcile_once_and_close_payment_at_full_total(self):
+        from unittest.mock import patch
+        from .models import (
+            ReservationPayment, ReservationRefund, PartnerCommissionAdjustment,
+            ReservationNotification, PaymentProviderEvent,
+        )
+
+        self.yoco_webhook()
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, ReservationPayment.Status.CAPTURED)
+
+        self.client.force_authenticate(user=self.admin)
+        with patch("partners.views.create_yoco_refund", return_value={
+            "status": "pending", "provider_reference": "rfd_partial_001",
+        }):
+            first = self.client.post(
+                f"/api/v1/partners/payments/{self.payment.pk}/refunds/initiate/",
+                {"amount": "20.00", "reason": "First partial refund", "idempotency_key": "yoco-partial-first-001"},
+                format="json",
+            )
+        self.assertEqual(first.status_code, 202)
+        self.client.force_authenticate(user=None)
+        first_event = self.yoco_refund_webhook(
+            webhook_id="wh_partial_first_001", amount=2000,
+        )
+        self.assertEqual(first_event.status_code, 200)
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, ReservationPayment.Status.CAPTURED)
+
+        self.client.force_authenticate(user=self.admin)
+        with patch("partners.views.create_yoco_refund", return_value={
+            "status": "pending", "provider_reference": "rfd_partial_002",
+        }):
+            second = self.client.post(
+                f"/api/v1/partners/payments/{self.payment.pk}/refunds/initiate/",
+                {"amount": "30.00", "reason": "Final partial refund", "idempotency_key": "yoco-partial-second-002"},
+                format="json",
+            )
+        self.assertEqual(second.status_code, 202)
+        self.client.force_authenticate(user=None)
+        second_event = self.yoco_refund_webhook(
+            webhook_id="wh_partial_second_002", amount=3000,
+        )
+        self.assertEqual(second_event.status_code, 200)
+
+        duplicate = self.yoco_refund_webhook(
+            webhook_id="wh_partial_second_002", amount=3000,
+        )
+        self.assertEqual(duplicate.status_code, 200)
+        self.assertTrue(duplicate.data["duplicate"])
+
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, ReservationPayment.Status.REFUNDED)
+        self.assertEqual(
+            ReservationRefund.objects.filter(payment=self.payment, status=ReservationRefund.Status.REFUNDED).aggregate(total=Sum("amount"))["total"],
+            Decimal("50.00"),
+        )
+        self.assertEqual(
+            PartnerCommissionAdjustment.objects.filter(refund__payment=self.payment).aggregate(total=Sum("commission_reversal"))["total"],
+            Decimal("5.00"),
+        )
+        self.assertEqual(
+            PaymentProviderEvent.objects.filter(provider="yoco").count(), 3,
+        )
+        self.assertEqual(
+            ReservationNotification.objects.filter(
+                reservation=self.reservation,
+                event=ReservationNotification.Event.REFUND_UPDATE,
+            ).count(),
+            2,
+        )
+
+
     def test_yoco_failed_refund_webhook_does_not_reverse_commission(self):
         from unittest.mock import patch
         from .models import ReservationRefund, PartnerCommissionAdjustment
