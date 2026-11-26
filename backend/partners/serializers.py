@@ -302,6 +302,13 @@ class ReservationQuoteCreateSerializer(serializers.Serializer):
         return attrs
 
 
+class ReservationStatusEventSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ReservationStatusEvent
+        fields = ("id", "from_status", "to_status", "actor_role", "reason", "created_at")
+        read_only_fields = fields
+
+
 class ReservationRequestSerializer(serializers.ModelSerializer):
     partner = PublicPartnerSerializer(read_only=True)
     trip_plan_id = serializers.IntegerField(read_only=True)
@@ -310,12 +317,16 @@ class ReservationRequestSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ReservationRequest
-        fields = ("id", "partner", "customer_email", "trip_plan_id", "start_date", "end_date", "guests", "message", "status", "booking_reference", "quoted_total", "quoted_deposit", "quoted_currency", "quoted_at", "partner_response", "responded_at", "latest_quote", "created_at", "updated_at")
+        fields = ("id", "partner", "customer_email", "trip_plan_id", "start_date", "end_date", "guests", "message", "status", "booking_reference", "quoted_total", "quoted_deposit", "quoted_currency", "quoted_at", "partner_response", "responded_at", "latest_quote", "status_history", "created_at", "updated_at")
         read_only_fields = fields
 
     def get_latest_quote(self, obj):
         quote = obj.quotes.prefetch_related("items").order_by("-version").first()
         return ReservationQuoteSerializer(quote).data if quote else None
+
+    def get_status_history(self, obj):
+        events = obj.status_events.all()
+        return ReservationStatusEventSerializer(events, many=True).data
 
 
 class ReservationDecisionSerializer(serializers.Serializer):
