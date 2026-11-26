@@ -1389,6 +1389,7 @@ class DualGatewayIntegrationTests(TestCase):
 
     def test_yoco_sequential_partial_refunds_reconcile_once_and_close_payment_at_full_total(self):
         from unittest.mock import patch
+        from django.db.models import Sum
         from .models import (
             ReservationPayment, ReservationRefund, PartnerCommissionAdjustment,
             ReservationNotification, PaymentProviderEvent,
