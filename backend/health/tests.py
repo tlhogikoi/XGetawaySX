@@ -8,3 +8,11 @@ class HealthCheckTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "ok")
         self.assertEqual(response.json()["service"], "xgetawaysx-api")
+
+    def test_readiness_endpoint_executes_database_query(self):
+        response = self.client.get("/api/v1/health/ready/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {
+            "status": "ready",
+            "database": "connected",
+        })
