@@ -4,6 +4,11 @@ import ConsentPreferences from "./ConsentPreferences";
 
 const API = (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env.VITE_API_BASE_URL ?? "";
 type RequestType = "access" | "correction" | "deletion" | "consent_withdrawal" | "marketing_optout";
+type PrivacyRequestEvent = {
+  from_status: string;
+  to_status: string;
+  created_at: string;
+};
 type PrivacyRequest = {
   reference: string;
   request_type: RequestType;
@@ -11,6 +16,7 @@ type PrivacyRequest = {
   status: string;
   created_at: string;
   identity_verified: boolean;
+  events: PrivacyRequestEvent[];
 };
 const requestTypes: { value: RequestType; label: string }[] = [
   { value: "access", label: "Access my personal information" },
@@ -38,6 +44,7 @@ export default function PrivacyCentre() {
   const loadRequests = useCallback(async () => {
     if (!token) return;
     setLoading(true);
+    setError("");
     try {
       const response = await fetch(`${API}/api/v1/accounts/privacy-requests/`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -107,8 +114,10 @@ export default function PrivacyCentre() {
           <label>What would you like us to know?<textarea value={description} onChange={event=>setDescription(event.target.value)} minLength={10} maxLength={4000} rows={4} required placeholder="Describe the information or action relevant to your request. Avoid including sensitive document details."/></label>
           <button type="submit" disabled={busy}>{busy ? "Submitting…" : "Submit privacy request"}</button>
         </form>
-        <h2>Your request history</h2>
-        {loading ? <p className="privacy-intro">Loading your requests…</p> : requests.length === 0 ? <p className="privacy-intro">You have not submitted any privacy requests yet.</p> : <div className="privacy-request-list">{requests.map(item=><article key={item.reference}><div className="privacy-request-heading"><strong>{requestTypes.find(type=>type.value===item.request_type)?.label ?? item.request_type}</strong><span>{statusLabels[item.status] ?? item.status}</span></div><p>{item.description}</p><small>Reference: {item.reference} · Submitted {new Date(item.created_at).toLocaleString()}</small><small>Identity verification: {item.identity_verified ? "Recorded as verified" : "Not yet recorded"}</small>{item.status === "submitted" && <button type="button" className="privacy-withdraw" disabled={busy} onClick={()=>withdraw(item.reference)}>Withdraw request</button>}</article>)}</div>}
+        <div className="privacy-history-heading"><h2>Your request history</h2><button type="button" onClick={loadRequests} disabled={loading || busy}>{loading ? "Refreshing…" : "Refresh status"}</button></div>
+        {loading ? <p className="privacy-intro">Loading your requests…</p> : requests.length === 0 ? <p className="privacy-intro">You have not submitted any privacy requests yet.</p> : <div className="privacy-request-list">{requests.map(item=><article key={item.reference}><div className="privacy-request-heading"><strong>{requestTypes.find(type=>type.value===item.request_type)?.label ?? item.request_type}</strong><span>{statusLabels[item.status] ?? item.status}</span></div><p>{item.description}</p><small>Reference: {item.reference} · Submitted {new Date(item.created_at).toLocaleString()}</small><small>Identity verification: {item.identity_verified ? "Recorded as verified" : "Not yet recorded"}</small>
+          {item.events?.length > 0 && <div className="privacy-request-timeline"><strong>Activity history</strong><ol>{item.events.map((entry,index)=><li key={`${entry.created_at}-${index}`}><span>{statusLabels[entry.to_status] ?? entry.to_status}</span><time dateTime={entry.created_at}>{new Date(entry.created_at).toLocaleString()}</time></li>)}</ol></div>}
+          {item.status === "submitted" && <button type="button" className="privacy-withdraw" disabled={busy} onClick={()=>withdraw(item.reference)}>Withdraw request</button>}</article>)}</div>}
       </>}
       <aside className="privacy-notice"><strong>Important safeguards</strong><p>Submitting a request does not automatically disclose, correct or erase information, change marketing subscriptions, or withdraw consent from third-party providers. Staff must review the request, verify identity where appropriate, assess legal obligations and record the outcome. A deletion request does not automatically delete your account or transaction records.</p><a href="/privacy/">Read the current privacy information →</a></aside>
       <p className="privacy-footnote">This workflow is a technical staging implementation, not legal advice or proof of POPIA compliance. Confirm the responsible legal entity, Information Officer, response timelines, secure identity-verification process, retention schedule and complaint channel before public launch.</p>
