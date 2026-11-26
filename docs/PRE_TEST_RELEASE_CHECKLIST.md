@@ -65,6 +65,7 @@ Record each scenario in the test evidence register. Use synthetic accounts and t
 - [ ] **UAT-RES-05 — Status audit:** Creation, withdrawal and partner decision entries show the correct status transition, actor role, timestamp and reason.
 - [ ] **UAT-RES-06 — Cancellation workflow:** A confirmed booking with captured payment remains active until the sandbox refund is fully reconciled; cancellation completion must not release capacity prematurely.
 - [ ] **UAT-PAY-01 — Browser return safety:** A customer browser return without a verified provider webhook does not mark a payment as captured.
+- [ ] **UAT-PAY-02 — Late payment notification:** A valid PayFast or Yoco success notification received after its reservation is cancelled is rejected for manual investigation; it must not capture the payment, create a commission entry or silently restore the booking.
 - [ ] **UAT-GAL-01 — Gallery approval gates:** Partner verification alone does not publish media or stories; owner consent and editorial approval must match the current content version.
 
 ## 3. Security, reliability and usability checks
