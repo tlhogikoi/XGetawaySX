@@ -214,6 +214,20 @@ class GalleryHistoryPublicationConsent(models.Model):
 
 
 
+class GalleryStoryRevisionQuerySet(models.QuerySet):
+    """Revision history is append-only, including bulk ORM operations."""
+
+    def update(self, **kwargs):
+        raise ValidationError("Gallery story revisions are immutable and cannot be updated.")
+
+    def delete(self):
+        raise ValidationError("Gallery story revisions are immutable and cannot be deleted.")
+
+
+class GalleryStoryRevisionManager(models.Manager.from_queryset(GalleryStoryRevisionQuerySet)):
+    pass
+
+
 class GalleryStoryRevision(models.Model):
     story = models.ForeignKey(GalleryStory, on_delete=models.PROTECT, related_name="revisions")
     version = models.PositiveIntegerField()
@@ -228,11 +242,21 @@ class GalleryStoryRevision(models.Model):
     change_reason = models.CharField(max_length=250, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    objects = GalleryStoryRevisionManager()
+
     class Meta:
         ordering = ("-version",)
         constraints = [
             models.UniqueConstraint(fields=("story", "version"), name="gal_story_version_unique"),
         ]
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk).exists():
+            raise ValidationError("Gallery story revisions are immutable and cannot be updated.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Gallery story revisions are immutable and cannot be deleted.")
 
     @classmethod
     @transaction.atomic
