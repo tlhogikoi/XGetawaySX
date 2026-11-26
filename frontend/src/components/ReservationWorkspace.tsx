@@ -5,7 +5,8 @@ import CustomerEmailPreferences from "./CustomerEmailPreferences";
 
 type Partner = { id: number; name: string; city: string; province: string };
 type Quote = { id:number; version:number; status:string; currency:string; total_amount:string; deposit_amount:string; terms:string; expires_at:string; items:{id:number;description:string;quantity:string;unit_price:string;line_total:string}[] };
-type Reservation = { id: number; partner: Partner; start_date: string; end_date: string; guests: number; status: string; booking_reference: string | null; partner_response: string; latest_quote:Quote|null };
+type StatusEvent = { id:number; from_status:string; to_status:string; actor_role:string; reason:string; created_at:string };
+type Reservation = { status_history?:StatusEvent[]; id: number; partner: Partner; start_date: string; end_date: string; guests: number; status: string; booking_reference: string | null; partner_response: string; latest_quote:Quote|null };
 type Cancellation = { id: number; reservation_id: number; partner_name: string; reason: string; status: string; decision_note: string; requested_at: string };
 type Notice = { id:number; title:string; message:string; event:string; read_at:string|null; created_at:string };
 type Refund = { id:number; amount:string; currency:string; status:string; provider:string; provider_reference:string|null; provider_status:string; reason:string; reconciled_at:string|null; created_at:string };
@@ -102,7 +103,7 @@ export default function ReservationWorkspace({ accessToken }: { accessToken: str
     <div className="reservation-history"><h3>Notifications</h3>{notifications.length?notifications.map(n=><article key={n.id}><div><strong>{n.title}</strong><span className={`reservation-status ${n.read_at?"":"confirmed"}`}>{n.read_at?"read":"new"}</span></div><p>{n.message}</p>{!n.read_at&&<button className="reservation-secondary" onClick={()=>markRead(n.id)}>Mark as read</button>}</article>):<p>No notifications yet.</p>}</div>
     <div className="reservation-history"><h3><ClipboardList size={18}/> Your reservation history</h3>{items.length?items.map(item=>{
       const cancellation=cancellations.find(x=>x.reservation_id===item.id&&["pending","approved"].includes(x.status));
-      return <article key={item.id}><div><strong>{item.partner.name}</strong><span className={`reservation-status ${item.status}`}>{item.status}</span></div><p>{item.start_date} to {item.end_date} · {item.guests} guests</p>{item.booking_reference&&<p>Booking reference: <strong>{item.booking_reference}</strong></p>}{item.partner_response&&<p>{item.partner_response}</p>}
+      return <article key={item.id}><div><strong>{item.partner.name}</strong><span className={`reservation-status ${item.status}`}>{item.status}</span></div><p>{item.start_date} to {item.end_date} · {item.guests} guests</p>{item.booking_reference&&<p>Booking reference: <strong>{item.booking_reference}</strong></p>}{item.partner_response&&<p>{item.partner_response}</p>}{item.status_history&&item.status_history.length>0&&<div className="availability-list"><strong>Booking activity</strong>{item.status_history.map(event=><span key={event.id}><strong>{event.from_status||"Created"} → {event.to_status}</strong> · {event.actor_role} · {new Date(event.created_at).toLocaleString()}{event.reason ? " — "+event.reason : ""}</span>)}</div>}
       {item.latest_quote&&<div className="availability-list">
         <strong>Partner quotation v{item.latest_quote.version} · {item.latest_quote.status}</strong>
         {item.latest_quote.items.map(line=><span key={line.id}>{line.description} · {line.quantity} × {item.latest_quote!.currency} {line.unit_price} = {item.latest_quote!.currency} {line.line_total}</span>)}
