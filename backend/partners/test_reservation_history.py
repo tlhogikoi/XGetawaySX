@@ -128,3 +128,67 @@ class ReservationStatusHistoryTests(TestCase):
         )
         self.assertEqual(history[-1]["actor_role"], getattr(self.owner, "role", "user"))
         self.assertEqual(history[-1]["reason"], "Your reservation is confirmed.")
+
+
+    def test_other_customer_cannot_cancel_or_read_reservation(self):
+        reservation_id = self.create_reservation()
+        self.client.force_authenticate(user=self.other_customer)
+        denied = self.client.post(
+            f"/api/v1/partners/reservations/{reservation_id}/cancel/",
+            {"reason": "Not my reservation"},
+            format="json",
+        )
+        self.assertEqual(denied.status_code, 404)
+        self.assertEqual(self.client.get("/api/v1/partners/reservations/").data, [])
+
+        self.client.force_authenticate(user=self.customer)
+        own_reservation = self.client.get("/api/v1/partners/reservations/")
+        self.assertEqual(own_reservation.status_code, 200)
+        self.assertEqual(own_reservation.data[0]["status"], "pending")
+
+    def test_other_customer_cannot_decide_reservation_quote(self):
+        reservation_id = self.create_reservation()
+        self.client.force_authenticate(user=self.other_customer)
+        denied = self.client.post(
+            f"/api/v1/partners/reservations/{reservation_id}/quote-decision/",
+            {"status": "accepted"},
+            format="json",
+        )
+        self.assertEqual(denied.status_code, 404)
+
+    def test_unrelated_user_cannot_issue_quote_or_decide_partner_reservation(self):
+        reservation_id = self.create_reservation()
+        self.client.force_authenticate(user=self.other_customer)
+        quote = self.client.post(
+            f"/api/v1/partners/partner/reservations/{reservation_id}/quotes/",
+            {
+                "currency": "ZAR",
+                "items": [{"description": "Unauthorised quote", "quantity": "1", "unit_price": "100.00"}],
+                "deposit_amount": "30.00",
+                "expires_at": (timezone.now() + timedelta(days=1)).isoformat(),
+            },
+            format="json",
+        )
+        self.assertEqual(quote.status_code, 404)
+        decision = self.client.post(
+            f"/api/v1/partners/partner/reservations/{reservation_id}/decision/",
+            {"status": "declined", "partner_response": "Unauthorised"},
+            format="json",
+        )
+        self.assertEqual(decision.status_code, 404)
+
+    def test_cancelled_request_rejects_repeated_cancellation(self):
+        reservation_id = self.create_reservation()
+        self.client.force_authenticate(user=self.customer)
+        first = self.client.post(
+            f"/api/v1/partners/reservations/{reservation_id}/cancel/",
+            {"reason": ""},
+            format="json",
+        )
+        self.assertEqual(first.status_code, 200)
+        second = self.client.post(
+            f"/api/v1/partners/reservations/{reservation_id}/cancel/",
+            {"reason": ""},
+            format="json",
+        )
+        self.assertEqual(second.status_code, 400)
