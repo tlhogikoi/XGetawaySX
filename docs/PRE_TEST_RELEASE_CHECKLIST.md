@@ -27,7 +27,7 @@ Validate the implemented customer, partner, booking, payment-workflow and Galler
 - [ ] Partner owner can view only their own partner profiles and onboarding submissions.
 - [ ] Submit the required business details and evidence documents; reject incomplete submissions.
 - [ ] Staff can access the review queue and approve, request changes or reject a submitted application.
-- [ ] Verify the owner receives the correct decision email and can see the decision and review notes after signing in.
+- [ ] Verify the owner can see the decision, review notes and activity history after signing in. Outbound email delivery is deferred until after first UAT.
 - [ ] Verify private evidence downloads are restricted to the owning partner and authorised staff; test cross-account access denial.
 - [ ] Confirm an approved partner is not automatically Gallery-published or booking-enabled unless the separate approval state permits it.
 
@@ -44,7 +44,7 @@ Validate the implemented customer, partner, booking, payment-workflow and Galler
 - [ ] Verify signed PayFast ITN / Yoco webhook processing, duplicate-event idempotency and rejection of invalid signatures.
 - [ ] Confirm a browser return alone never marks a reservation as paid.
 - [ ] Test successful, failed, pending and duplicate payment events.
-- [ ] Test refund outcomes and confirm every successful refund produces the required audit email; check retry behaviour for email delivery failures.
+- [ ] Test refund outcomes and verify refund records, provider references, reconciliation state and in-app audit history. Outbound email delivery is deferred until after first UAT.
 - [ ] Reconcile reservation amount, paid amount, refund amount and outstanding balance.
 
 ### Gallery and content permissions
@@ -53,6 +53,19 @@ Validate the implemented customer, partner, booking, payment-workflow and Galler
 - [ ] Verify a material edit invalidates prior approvals until the revised version is approved.
 - [ ] Confirm original owner history, rights evidence, private notes and internal review data remain private unless separately authorised.
 - [ ] Confirm placeholder or unapproved partner content is not presented as real approved inventory.
+
+## 2A. UAT regression scenarios
+
+Record each scenario in the test evidence register. Use synthetic accounts and test reservations only.
+
+- [ ] **UAT-RES-01 — Customer isolation:** Customer A cannot view, cancel or decide a quotation for Customer B's reservation, even when the reservation ID is known.
+- [ ] **UAT-RES-02 — Partner isolation:** Partner A cannot quote, confirm, decline or inspect Partner B's reservation.
+- [ ] **UAT-RES-03 — Invalid transitions:** A cancelled or declined reservation cannot be cancelled, quoted or confirmed again.
+- [ ] **UAT-RES-04 — Capacity race:** Two requests competing for the same remaining capacity cannot both be confirmed beyond capacity.
+- [ ] **UAT-RES-05 — Status audit:** Creation, withdrawal and partner decision entries show the correct status transition, actor role, timestamp and reason.
+- [ ] **UAT-RES-06 — Cancellation workflow:** A confirmed booking with captured payment remains active until the sandbox refund is fully reconciled; cancellation completion must not release capacity prematurely.
+- [ ] **UAT-PAY-01 — Browser return safety:** A customer browser return without a verified provider webhook does not mark a payment as captured.
+- [ ] **UAT-GAL-01 — Gallery approval gates:** Partner verification alone does not publish media or stories; owner consent and editorial approval must match the current content version.
 
 ## 3. Security, reliability and usability checks
 - [ ] Test role-based access for customer, partner owner and staff roles, including direct API requests.
