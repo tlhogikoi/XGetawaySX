@@ -1096,6 +1096,11 @@ class ReservationPaymentListCreateView(APIView):
             reservation = ReservationRequest.objects.select_for_update().get(pk=reservation.pk, customer=request.user)
             if reservation.status != ReservationRequest.Status.CONFIRMED:
                 raise ValidationError("Only confirmed reservations can be paid.")
+            if ReservationCancellationRequest.objects.filter(
+                reservation=reservation,
+                status=ReservationCancellationRequest.Status.APPROVED,
+            ).exists():
+                raise ValidationError("Payments are blocked while an approved cancellation is being reconciled.")
             existing = ReservationPayment.objects.filter(customer=request.user, idempotency_key=key).first()
             if existing:
                 if existing.reservation_id != reservation.pk:
@@ -1209,6 +1214,11 @@ class AdminPaymentReconciliationView(APIView):
                 raise ValidationError("Only pending payment records can be reconciled.")
             if data["status"] == ReservationPayment.Status.CAPTURED and payment.reservation.status != ReservationRequest.Status.CONFIRMED:
                 raise ValidationError("A payment cannot be captured for a cancelled or unconfirmed reservation.")
+            if data["status"] == ReservationPayment.Status.CAPTURED and ReservationCancellationRequest.objects.filter(
+                reservation=payment.reservation,
+                status=ReservationCancellationRequest.Status.APPROVED,
+            ).exists():
+                raise ValidationError("A payment cannot be captured while an approved cancellation is being reconciled.")
             payment.provider = data["provider"]
             payment.provider_reference = data.get("provider_reference") or None
             payment.failure_reason = data.get("failure_reason", "")
@@ -1712,6 +1722,15 @@ class PaymentProviderWebhookView(APIView):
                     if reservation.status != ReservationRequest.Status.CONFIRMED:
                         event_record.delete()
                         return Response({"detail": "Cannot capture a payment for an unconfirmed reservation."}, status=status.HTTP_409_CONFLICT)
+                    if ReservationCancellationRequest.objects.filter(
+                        reservation=reservation,
+                        status=ReservationCancellationRequest.Status.APPROVED,
+                    ).exists():
+                        event_record.delete()
+                        return Response(
+                            {"detail": "Cannot capture a payment while an approved cancellation is being reconciled."},
+                            status=status.HTTP_409_CONFLICT,
+                        )
                     locked_payment.status = ReservationPayment.Status.CAPTURED
                     locked_payment.provider_reference = provider_reference
                     locked_payment.captured_at = timezone.now()
