@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from django.test import TestCase
 from django.utils import timezone
+from rest_framework.test import APIClient
 
 from accounts.models import User
 from .models import (
@@ -108,3 +109,57 @@ class ReservationCancellationReconciliationTests(TestCase):
         for day in self.days:
             day.refresh_from_db()
             self.assertEqual(day.booked_count, 0)
+
+
+    def test_customer_cannot_create_payment_during_approved_cancellation(self):
+        self.reservation.quoted_total = Decimal("1000.00")
+        self.reservation.quoted_deposit = Decimal("300.00")
+        self.reservation.quoted_currency = "ZAR"
+        self.reservation.quoted_at = timezone.now()
+        self.reservation.save(update_fields=[
+            "quoted_total", "quoted_deposit", "quoted_currency", "quoted_at", "updated_at",
+        ])
+        client = APIClient()
+        client.force_authenticate(self.customer)
+        response = client.post(
+            "/api/v1/partners/payments/",
+            {"reservation_id": self.reservation.pk, "idempotency_key": "blocked-during-cancel"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("approved cancellation", str(response.data).lower())
+        self.assertFalse(self.reservation.payments.filter(
+            idempotency_key="blocked-during-cancel"
+        ).exists())
+
+    def test_admin_cannot_manually_capture_payment_during_approved_cancellation(self):
+        staff = User.objects.create_user(
+            email="cancel-uat-staff@example.com",
+            password="Strong-passphrase-2026!",
+            is_staff=True,
+        )
+        pending = ReservationPayment.objects.create(
+            reservation=self.reservation,
+            customer=self.customer,
+            partner=self.partner,
+            kind=ReservationPayment.Kind.BALANCE,
+            status=ReservationPayment.Status.PENDING,
+            amount=Decimal("100.00"),
+            currency="ZAR",
+            idempotency_key="manual-capture-blocked",
+        )
+        client = APIClient()
+        client.force_authenticate(staff)
+        response = client.post(
+            f"/api/v1/partners/payments/reconcile/{pending.pk}/",
+            {
+                "status": "captured",
+                "provider": "sandbox_test",
+                "provider_reference": "blocked-capture-reference",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        pending.refresh_from_db()
+        self.assertEqual(pending.status, ReservationPayment.Status.PENDING)
+        self.assertFalse(hasattr(pending, "commission_entry"))
