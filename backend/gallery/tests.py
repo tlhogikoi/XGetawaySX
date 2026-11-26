@@ -10,7 +10,7 @@ from django.utils import timezone
 
 from accounts.models import User
 from partners.models import Partner
-from .models import GalleryAuditEvent, GalleryHistoryPublicationConsent, GalleryMedia, GalleryMediaPermissionGrant, GalleryStory, GalleryStoryMedia, GalleryStoryRevision
+from .models import GalleryAuditEvent, GalleryHistoryPublicationConsent, GalleryMedia, GalleryMediaPermissionGrant, GalleryStory, GalleryStoryEditorialReview, GalleryStoryMedia, GalleryStoryRevision
 
 
 class GalleryPublicationTests(TestCase):
@@ -193,6 +193,41 @@ class GalleryPublicationTests(TestCase):
         self.assertEqual(response.status_code, 400)
         story.refresh_from_db()
         self.assertEqual(story.status, GalleryStory.Status.EDITORIAL_REVIEW)
+
+    def test_latest_failed_quality_review_supersedes_earlier_pass(self):
+        story = GalleryStory.objects.create(
+            media=self.media,
+            summary=" ".join(["A verified short story about this place and its setting."] * 5),
+            status=GalleryStory.Status.EDITORIAL_REVIEW,
+            owner_approved_by=self.owner,
+            owner_approved_at=timezone.now(),
+            owner_approved_version=1,
+        )
+        review_fields = {
+            "story": story,
+            "story_version": story.current_version,
+            "reviewer": self.editor,
+            "claims_verified": True,
+            "source_facts_checked": True,
+            "unsupported_claims_resolved": True,
+            "media_context_accurate": True,
+            "reviewer_notes": "All source facts and media context have been checked.",
+        }
+        GalleryStoryEditorialReview.objects.create(**review_fields)
+        failed_review = GalleryStoryEditorialReview.objects.create(
+            **{**review_fields, "claims_verified": False,
+               "reviewer_notes": "A factual claim still needs verification."}
+        )
+        self.client.force_authenticate(self.editor)
+        response = self.client.post(f"/api/v1/gallery/stories/{story.id}/editorial-approve/")
+        self.assertEqual(response.status_code, 400)
+        story.refresh_from_db()
+        self.assertEqual(story.status, GalleryStory.Status.EDITORIAL_REVIEW)
+        self.assertIsNone(story.editorial_approved_version)
+        self.assertEqual(
+            story.editorial_quality_reviews.order_by("-created_at", "-pk").first().pk,
+            failed_review.pk,
+        )
 
     def test_editorial_approval_rechecks_dated_media_permission(self):
         story = GalleryStory.objects.create(
