@@ -331,6 +331,10 @@ class CustomerEnquiryConvertView(APIView):
                 guests=data["guests"],
                 message=data.get("message", ""),
             )
+            _record_reservation_status_event(
+                reservation, "", reservation.status, request.user,
+                "Reservation created from an accepted partner enquiry.",
+            )
             enquiry.reservation_request = reservation
             enquiry.save(update_fields=["reservation_request", "updated_at"])
 
@@ -351,7 +355,7 @@ import json
 from urllib.parse import parse_qsl
 from datetime import timedelta
 from django.db import transaction
-from .models import PartnerAvailability, ReservationRequest, ReservationCancellationRequest, ReservationNotification
+from .models import PartnerAvailability, ReservationRequest, ReservationCancellationRequest, ReservationNotification, ReservationStatusEvent
 from .serializers import (
     PartnerAvailabilitySerializer, ReservationDecisionSerializer,
     ReservationRequestCreateSerializer, ReservationRequestSerializer,
@@ -454,6 +458,9 @@ class CustomerReservationListCreateView(APIView):
             customer=request.user, partner=data["partner"], trip_plan=data.get("trip_plan"),
             start_date=data["start_date"], end_date=data["end_date"],
             guests=data["guests"], message=data.get("message", ""),
+        )
+        _record_reservation_status_event(
+            item, "", item.status, request.user, "Customer submitted a reservation request."
         )
         _queue_reservation_lifecycle_emails(
             item, "reservation_requested", "Reservation request received",
@@ -615,10 +622,15 @@ class PartnerReservationDecisionView(APIView):
                     day.booked_count += item.guests
                     day.save(update_fields=["booked_count", "updated_at"])
                 item.booking_reference = uuid.uuid4()
+            previous_status = item.status
             item.status = decision
             item.partner_response = serializer.validated_data["partner_response"]
             item.responded_at = timezone.now()
             item.save(update_fields=["status", "booking_reference", "partner_response", "responded_at", "updated_at"])
+            _record_reservation_status_event(
+                item, previous_status, decision, request.user,
+                serializer.validated_data["partner_response"],
+            )
             if decision == ReservationRequest.Status.CONFIRMED:
                 _create_reservation_installments(item, accepted_quote)
             event = "reservation_confirmed" if decision == ReservationRequest.Status.CONFIRMED else "reservation_declined"
@@ -677,6 +689,23 @@ def _create_reservation_notification(recipient, reservation, event, title, messa
     )
 
 
+def _record_reservation_status_event(reservation, from_status, to_status, actor=None, reason=""):
+    """Persist an immutable audit entry for a reservation status transition."""
+    actor_role = "system"
+    if actor is not None:
+        actor_role = "staff" if getattr(actor, "is_staff", False) else str(
+            getattr(actor, "role", "user") or "user"
+        )
+    return ReservationStatusEvent.objects.create(
+        reservation=reservation,
+        from_status=from_status or "",
+        to_status=to_status,
+        actor=actor,
+        actor_role=actor_role[:30],
+        reason=(reason or "")[:1000],
+    )
+
+
 def _complete_approved_cancellation(cancellation):
     """Complete cancellation only after every captured payment has been fully refunded."""
     with transaction.atomic():
@@ -706,8 +735,13 @@ def _complete_approved_cancellation(cancellation):
             for day in days:
                 day.booked_count = max(0, day.booked_count - reservation.guests)
                 day.save(update_fields=["booked_count", "updated_at"])
+        previous_status = reservation.status
         reservation.status = ReservationRequest.Status.CANCELLED
         reservation.save(update_fields=["status", "updated_at"])
+        _record_reservation_status_event(
+            reservation, previous_status, reservation.status, item.decided_by,
+            item.decision_note or "Cancellation completed after refund reconciliation.",
+        )
         item.status = ReservationCancellationRequest.Status.COMPLETED
         item.completed_at = timezone.now()
         item.save(update_fields=["status", "completed_at"])
@@ -746,8 +780,13 @@ class CustomerReservationCancelView(APIView):
                 from rest_framework.exceptions import NotFound
                 raise NotFound("Reservation request not found.")
             if item.status == ReservationRequest.Status.PENDING:
+                previous_status = item.status
                 item.status = ReservationRequest.Status.CANCELLED
                 item.save(update_fields=["status", "updated_at"])
+                _record_reservation_status_event(
+                    item, previous_status, item.status, request.user,
+                    "Customer withdrew the unconfirmed reservation request.",
+                )
                 _create_reservation_notification(
                     item.partner.owner, item, ReservationNotification.Event.CANCELLATION_COMPLETED,
                     "Reservation request withdrawn",
