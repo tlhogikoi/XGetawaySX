@@ -58,7 +58,7 @@ The workflow:
 
 ## Frontend API configuration
 
-The frontend previously had no Vercel environment variables. `CustomerAccount.tsx` reads `VITE_API_BASE_URL`; without it, account API calls default to the frontend origin. A Preview-only, branch-scoped `VITE_API_BASE_URL` has now been added for `feat/application-foundation`, pointing to the staging API. A new frontend deployment is required for this build-time variable to take effect.
+The frontend previously had no Vercel environment variables. `CustomerAccount.tsx` reads `VITE_API_BASE_URL`; without it, account API calls default to the frontend origin. A Preview-only, branch-scoped `VITE_API_BASE_URL` has been added for `feat/application-foundation`, pointing to the staging API. It is present in the compiled frontend JavaScript. The frontend deployment `dpl_EqsKExYAqgLfixuAJQnqENNtFQRo` (commit `a2ba996`) is READY, and `/`, `/account/` and `/privacy-centre/` return HTTP 200. This verifies the API base URL is embedded in the build, but authenticated browser-to-API interaction still requires a real browser UAT.
 
 ## UAT decision
 
@@ -67,7 +67,7 @@ The frontend previously had no Vercel environment variables. `CustomerAccount.ts
 Do not invite testers or create real bookings until:
 - The staging migrations complete successfully.
 - Partner, destination, collection and public Gallery API requests return expected responses.
-- The new frontend deployment is READY and account API requests target the backend.
+- The new frontend deployment is READY and the compiled frontend contains the correct API base URL; authenticated account API requests still need browser verification.
 - The frontend/backend smoke checks are repeated successfully.
 
 Keep test data synthetic. Do not enable live payment capture, publish public Gallery content, or configure SMTP as part of this remediation.
