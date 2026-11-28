@@ -1,0 +1,479 @@
+from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.db import models, transaction
+from django.db.models import Q
+from django.utils import timezone
+from pathlib import Path
+from uuid import uuid4
+
+from .storage import PrivateGalleryStorage
+from .validators import validate_gallery_evidence, validate_gallery_image
+
+
+private_gallery_storage = PrivateGalleryStorage()
+
+def gallery_media_upload_path(instance, filename):
+    suffix = Path(filename).suffix.lower()
+    return f"gallery/media/{timezone.now():%Y/%m}/{uuid4().hex}{suffix}"
+
+def gallery_evidence_upload_path(instance, filename):
+    suffix = Path(filename).suffix.lower()
+    return f"gallery/evidence/{timezone.now():%Y/%m}/{uuid4().hex}{suffix}"
+
+from partners.models import Partner
+
+
+class GalleryMedia(models.Model):
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        OWNER_REVIEW = "owner_review", "Awaiting owner approval"
+        EDITORIAL_REVIEW = "editorial_review", "Awaiting editorial approval"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+        WITHDRAWN = "withdrawn", "Withdrawn"
+
+    partner = models.ForeignKey(Partner, on_delete=models.PROTECT, related_name="gallery_media")
+    title = models.CharField(max_length=180)
+    image = models.URLField(max_length=1000, blank=True)
+    image_file = models.FileField(
+        storage=private_gallery_storage, upload_to=gallery_media_upload_path,
+        blank=True, null=True, validators=[validate_gallery_image],
+    )
+    alt_text = models.CharField(max_length=250)
+    caption = models.CharField(max_length=250, blank=True)
+    media_credit = models.CharField(max_length=180, blank=True)
+    rights_holder = models.CharField(max_length=180)
+    rights_reference = models.CharField(max_length=250, blank=True)
+    rights_confirmed = models.BooleanField(default=False)
+    promotional_permission = models.BooleanField(default=False)
+    permission_granted_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=24, choices=Status.choices, default=Status.DRAFT)
+    submitted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="gallery_media_submissions")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=("partner", "status"), name="gal_media_partner_status_idx")]
+
+    def clean(self):
+        # Formal GalleryMediaPermissionGrant records are the publication source of truth.
+        if self.status == self.Status.APPROVED and self.pk:
+            now = timezone.now()
+            has_active_permission = self.permission_grants.filter(
+                purpose=GalleryMediaPermissionGrant.Purpose.GALLERY_PROMOTION,
+                review_status=GalleryMediaPermissionGrant.ReviewStatus.APPROVED,
+                revoked_at__isnull=True,
+            ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now)).exists()
+            if not has_active_permission:
+                raise ValidationError("Media cannot be approved without an active, editorially verified Gallery permission.")
+
+    def __str__(self):
+        return f"{self.partner.name}: {self.title}"
+
+
+class GalleryStory(models.Model):
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        OWNER_REVIEW = "owner_review", "Awaiting owner approval"
+        EDITORIAL_REVIEW = "editorial_review", "Awaiting editorial approval"
+        PUBLISHED = "published", "Published"
+        REJECTED = "rejected", "Rejected"
+        WITHDRAWN = "withdrawn", "Withdrawn"
+
+    media = models.OneToOneField(GalleryMedia, on_delete=models.PROTECT, related_name="story")
+    # Source facts are retained privately. They are never included in public serializers.
+    owner_original_history = models.TextField(blank=True)
+    owner_history_private = models.BooleanField(default=True)
+    original_history_public_permission = models.BooleanField(default=False)
+    summary = models.CharField(max_length=600, blank=True)
+    summary_word_count = models.PositiveSmallIntegerField(default=0)
+    ai_assisted = models.BooleanField(default=False)
+    ai_source_facts = models.JSONField(default=list, blank=True)
+    status = models.CharField(max_length=24, choices=Status.choices, default=Status.DRAFT)
+    current_version = models.PositiveIntegerField(default=1)
+    owner_approved_version = models.PositiveIntegerField(null=True, blank=True)
+    editorial_approved_version = models.PositiveIntegerField(null=True, blank=True)
+    owner_approved_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="gallery_owner_approvals")
+    owner_approved_at = models.DateTimeField(null=True, blank=True)
+    editorial_approved_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="gallery_editorial_approvals")
+    editorial_approved_at = models.DateTimeField(null=True, blank=True)
+    published_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-published_at", "-created_at")
+
+    @staticmethod
+    def word_count(value):
+        return len(value.split())
+
+    def clean(self):
+        count = self.word_count(self.summary)
+        if self.summary and not 30 <= count <= 60:
+            raise ValidationError({"summary": "Published story summaries must contain 30–60 words."})
+        if not self.owner_history_private:
+            consent_exists = self.history_publication_consents.filter(
+                story_version=self.current_version,
+                revoked_at__isnull=True,
+                granted_by_id=self.media.partner.owner_id,
+            ).exists()
+            if not (self.original_history_public_permission and consent_exists):
+                raise ValidationError("Publishing original history requires separate, current-version owner consent.")
+        if self.status == self.Status.PUBLISHED:
+            if not (self.owner_approved_at and self.owner_approved_version == self.current_version):
+                raise ValidationError("The current story version must have owner approval.")
+            if not (self.editorial_approved_at and self.editorial_approved_version == self.current_version):
+                raise ValidationError("The current story version must have editorial approval.")
+            if self.media.partner.gallery_status != Partner.ApprovalStatus.APPROVED:
+                raise ValidationError("The partner must be approved for Gallery publication.")
+            media_items = [self.media]
+            if self.pk:
+                media_items.extend(
+                    attachment.media
+                    for attachment in self.additional_media.select_related("media").all()
+                )
+            now = timezone.now()
+            for item in media_items:
+                if item.partner_id != self.media.partner_id:
+                    raise ValidationError("Every Gallery image must belong to the story's partner.")
+                if item.status != GalleryMedia.Status.APPROVED:
+                    raise ValidationError("Every Gallery image must be editorially approved.")
+                grants = item.permission_grants.filter(
+                    purpose=GalleryMediaPermissionGrant.Purpose.GALLERY_PROMOTION,
+                    review_status=GalleryMediaPermissionGrant.ReviewStatus.APPROVED,
+                    revoked_at__isnull=True,
+                ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
+                if not any(
+                    isinstance(channels, list) and "website" in channels
+                    for channels in grants.values_list("permitted_channels", flat=True)
+                ):
+                    raise ValidationError("Every Gallery image requires an active website publication permission.")
+
+    def __str__(self):
+        return f"Story for {self.media.title}"
+
+
+class GalleryStoryMedia(models.Model):
+    """An additional image in a story; rights and editorial status remain media-specific."""
+
+    story = models.ForeignKey(
+        GalleryStory, on_delete=models.CASCADE, related_name="additional_media"
+    )
+    media = models.OneToOneField(
+        GalleryMedia, on_delete=models.PROTECT, related_name="story_attachment"
+    )
+    position = models.PositiveSmallIntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("position", "created_at")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("story", "position"), name="gal_story_media_position_unique"
+            ),
+        ]
+
+    def clean(self):
+        if not self.story_id or not self.media_id:
+            return
+        if self.story.media_id == self.media_id:
+            raise ValidationError({"media": "The cover image is already part of this story."})
+        if self.story.media.partner_id != self.media.partner_id:
+            raise ValidationError({"media": "Every story image must belong to the same partner."})
+        if GalleryStory.objects.filter(media_id=self.media_id).exists():
+            raise ValidationError({"media": "This image is already the cover of another story."})
+
+    def __str__(self):
+        return f"{self.story_id}: {self.media.title} (image {self.position})"
+
+
+class GalleryHistoryPublicationConsent(models.Model):
+    story = models.ForeignKey(GalleryStory, on_delete=models.PROTECT, related_name="history_publication_consents")
+    story_version = models.PositiveIntegerField()
+    granted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="gallery_history_consents_granted")
+    granted_at = models.DateTimeField()
+    revoked_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="gallery_history_consents_revoked")
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-granted_at",)
+        constraints = [
+            models.UniqueConstraint(fields=("story", "story_version"), name="gal_history_consent_version_unique"),
+        ]
+
+    def clean(self):
+        if self.granted_by_id != self.story.media.partner.owner_id:
+            raise ValidationError("Only the partner owner may grant publication permission for original history.")
+        if self.story_version != self.story.current_version:
+            raise ValidationError("Original-history permission must apply to the current story version.")
+
+
+
+
+class GalleryStoryRevisionQuerySet(models.QuerySet):
+    """Revision history is append-only, including bulk ORM operations."""
+
+    def update(self, **kwargs):
+        raise ValidationError("Gallery story revisions are immutable and cannot be updated.")
+
+    def delete(self):
+        raise ValidationError("Gallery story revisions are immutable and cannot be deleted.")
+
+
+class GalleryStoryRevisionManager(models.Manager.from_queryset(GalleryStoryRevisionQuerySet)):
+    pass
+
+
+class GalleryStoryRevision(models.Model):
+    story = models.ForeignKey(GalleryStory, on_delete=models.PROTECT, related_name="revisions")
+    version = models.PositiveIntegerField()
+    summary = models.CharField(max_length=600, blank=True)
+    owner_original_history_snapshot = models.TextField(blank=True)
+    owner_history_private = models.BooleanField(default=True)
+    original_history_public_permission = models.BooleanField(default=False)
+    ai_assisted = models.BooleanField(default=False)
+    ai_source_facts_snapshot = models.JSONField(default=list, blank=True)
+    media_snapshot = models.JSONField(default=list, blank=True)
+    changed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.PROTECT, related_name="gallery_story_revisions")
+    change_reason = models.CharField(max_length=250, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = GalleryStoryRevisionManager()
+
+    class Meta:
+        ordering = ("-version",)
+        constraints = [
+            models.UniqueConstraint(fields=("story", "version"), name="gal_story_version_unique"),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk).exists():
+            raise ValidationError("Gallery story revisions are immutable and cannot be updated.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Gallery story revisions are immutable and cannot be deleted.")
+
+    @classmethod
+    @transaction.atomic
+    def capture(cls, story, actor=None, reason=""):
+        locked_story = GalleryStory.objects.select_for_update().get(pk=story.pk)
+        latest = cls.objects.filter(story=locked_story).order_by("-version").first()
+        version = (latest.version + 1) if latest else 1
+        # A material content change always returns the original history to private
+        # and invalidates approvals/consent associated with the previous version.
+        locked_story.current_version = version
+        locked_story.owner_history_private = True
+        locked_story.original_history_public_permission = False
+        locked_story.owner_approved_by = None
+        locked_story.owner_approved_at = None
+        locked_story.owner_approved_version = None
+        locked_story.editorial_approved_by = None
+        locked_story.editorial_approved_at = None
+        locked_story.editorial_approved_version = None
+        locked_story.published_at = None
+        locked_story.save(update_fields=(
+            "current_version", "owner_history_private", "original_history_public_permission",
+            "owner_approved_by", "owner_approved_at", "owner_approved_version",
+            "editorial_approved_by", "editorial_approved_at", "editorial_approved_version",
+            "published_at", "updated_at",
+        ))
+        story.current_version = version
+        story.owner_history_private = True
+        story.original_history_public_permission = False
+        return cls.objects.create(
+            story=locked_story,
+            version=version,
+            summary=locked_story.summary,
+            owner_original_history_snapshot=locked_story.owner_original_history,
+            owner_history_private=locked_story.owner_history_private,
+            original_history_public_permission=locked_story.original_history_public_permission,
+            ai_assisted=locked_story.ai_assisted,
+            ai_source_facts_snapshot=locked_story.ai_source_facts,
+            media_snapshot=[
+                locked_story.media_id,
+                *locked_story.additional_media.order_by("position").values_list("media_id", flat=True),
+            ],
+            changed_by=actor,
+            change_reason=reason,
+        )
+
+
+class GalleryAuditEventQuerySet(models.QuerySet):
+    """Prevent ordinary ORM updates/deletes from rewriting the audit trail."""
+
+    def update(self, **kwargs):
+        raise ValidationError("Gallery audit events are append-only and cannot be updated.")
+
+    def delete(self):
+        raise ValidationError("Gallery audit events are append-only and cannot be deleted.")
+
+
+class GalleryAuditEventManager(models.Manager.from_queryset(GalleryAuditEventQuerySet)):
+    pass
+
+
+class GalleryAuditEvent(models.Model):
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.PROTECT, related_name="gallery_audit_events")
+    partner = models.ForeignKey(Partner, null=True, on_delete=models.PROTECT, related_name="gallery_audit_events")
+    media = models.ForeignKey(GalleryMedia, null=True, on_delete=models.PROTECT, related_name="audit_events")
+    story = models.ForeignKey(GalleryStory, null=True, on_delete=models.PROTECT, related_name="audit_events")
+    action = models.CharField(max_length=60)
+    details = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = GalleryAuditEventManager()
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=("action", "created_at"), name="gal_audit_action_date_idx")]
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk).exists():
+            raise ValidationError("Gallery audit events are append-only and cannot be updated.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Gallery audit events are append-only and cannot be deleted.")
+
+
+class GalleryMediaPermissionGrant(models.Model):
+    """Private, auditable evidence that a rights holder permits Gallery promotion."""
+
+    class Purpose(models.TextChoices):
+        GALLERY_PROMOTION = "gallery_promotion", "XGetawaySX Gallery promotion"
+
+    class ReviewStatus(models.TextChoices):
+        PENDING = "pending", "Pending editorial rights review"
+        APPROVED = "approved", "Rights approved"
+        REJECTED = "rejected", "Rights rejected"
+
+    media = models.ForeignKey(
+        GalleryMedia, on_delete=models.PROTECT, related_name="permission_grants"
+    )
+    purpose = models.CharField(
+        max_length=32, choices=Purpose.choices, default=Purpose.GALLERY_PROMOTION
+    )
+    rights_holder = models.CharField(max_length=180)
+    permitted_channels = models.JSONField(default=list, blank=True)
+    evidence_reference = models.CharField(max_length=500, blank=True)
+    evidence_file = models.FileField(
+        storage=private_gallery_storage, upload_to=gallery_evidence_upload_path,
+        blank=True, null=True, validators=[validate_gallery_evidence],
+    )
+    granted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+        related_name="gallery_media_permissions_granted",
+    )
+    granted_at = models.DateTimeField()
+    expires_at = models.DateTimeField(null=True, blank=True)
+    revoked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT,
+        related_name="gallery_media_permissions_revoked",
+    )
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    review_status = models.CharField(max_length=16, choices=ReviewStatus.choices, default=ReviewStatus.PENDING)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT,
+        related_name="gallery_media_permissions_reviewed",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    review_notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-granted_at",)
+        indexes = [
+            models.Index(fields=("media", "purpose", "revoked_at"), name="gal_media_perm_active_idx"),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=models.F("granted_at")),
+                name="gal_media_perm_expiry_after_grant",
+            ),
+        ]
+
+    def clean(self):
+        if self.granted_by_id and self.media_id and self.granted_by_id != self.media.partner.owner_id:
+            raise ValidationError({"granted_by": "Only the owning partner may grant media publication permission."})
+        if not self.rights_holder.strip():
+            raise ValidationError({"rights_holder": "A rights holder is required."})
+        if self.review_status == self.ReviewStatus.APPROVED and not self.evidence_file:
+            raise ValidationError({"evidence_file": "An uploaded evidence document is required before rights approval."})
+        if not isinstance(self.permitted_channels, list) or not self.permitted_channels:
+            raise ValidationError({"permitted_channels": "At least one permitted channel is required."})
+        if any(not isinstance(channel, str) or not channel.strip() for channel in self.permitted_channels):
+            raise ValidationError({"permitted_channels": "Channels must be non-empty strings."})
+        if self.expires_at and self.granted_at and self.expires_at <= self.granted_at:
+            raise ValidationError({"expires_at": "Expiry must be later than the grant date."})
+        if self.revoked_at and not self.revoked_by_id:
+            raise ValidationError({"revoked_by": "Record who revoked this permission."})
+        if self.review_status in (self.ReviewStatus.APPROVED, self.ReviewStatus.REJECTED):
+            if not self.reviewed_by_id or not self.reviewed_at:
+                raise ValidationError("A completed rights review requires an editorial reviewer and timestamp.")
+            if not self.reviewed_by.is_staff:
+                raise ValidationError({"reviewed_by": "Only authorised editorial staff may review media rights."})
+        elif self.reviewed_by_id or self.reviewed_at:
+            raise ValidationError("Pending rights reviews cannot have a reviewer or review timestamp.")
+
+    @property
+    def is_active(self):
+        return (
+            self.revoked_at is None
+            and (self.expires_at is None or self.expires_at > timezone.now())
+            and self.purpose == self.Purpose.GALLERY_PROMOTION
+            and self.review_status == self.ReviewStatus.APPROVED
+        )
+
+    def __str__(self):
+        return f"{self.media_id}: {self.purpose} ({self.rights_holder})"
+
+
+class GalleryStoryEditorialReview(models.Model):
+    """Staff-only quality review tied to one exact story version."""
+    story = models.ForeignKey(GalleryStory, on_delete=models.PROTECT, related_name="editorial_quality_reviews")
+    story_version = models.PositiveIntegerField()
+    reviewer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="gallery_quality_reviews")
+    claims_verified = models.BooleanField(default=False)
+    source_facts_checked = models.BooleanField(default=False)
+    unsupported_claims_resolved = models.BooleanField(default=False)
+    media_context_accurate = models.BooleanField(default=False)
+    reviewer_notes = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=("story", "story_version", "created_at"), name="gal_story_qc_version_idx")]
+
+class GalleryPartnerNotification(models.Model):
+    """In-app publication workflow notice for the owning partner account."""
+
+    class Kind(models.TextChoices):
+        STORY_PUBLISHED = "story_published", "Story published"
+        STORY_CHANGES_REQUESTED = "story_changes_requested", "Changes requested"
+
+    recipient = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name="gallery_partner_notifications",
+    )
+    partner = models.ForeignKey(Partner, on_delete=models.CASCADE, related_name="gallery_notifications")
+    story = models.ForeignKey(GalleryStory, on_delete=models.CASCADE, related_name="partner_notifications")
+    kind = models.CharField(max_length=40, choices=Kind.choices)
+    title = models.CharField(max_length=180)
+    message = models.TextField(max_length=1200)
+    read_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(fields=("recipient", "read_at", "created_at"), name="gal_notice_recipient_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.recipient_id}: {self.title}"

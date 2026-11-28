@@ -1,0 +1,511 @@
+from decimal import Decimal
+
+from rest_framework import serializers
+from django.utils import timezone
+
+from .models import Partner
+
+
+class PublicPartnerSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Partner
+        fields = (
+            "id",
+            "name",
+            "slug",
+            "category",
+            "description",
+            "city",
+            "province",
+            "country",
+            "website_url",
+        )
+        read_only_fields = fields
+
+
+from .models import DestinationPage, ExperienceCollection
+
+
+class PublicDestinationSerializer(serializers.ModelSerializer):
+    partners = serializers.SerializerMethodField()
+    collections = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DestinationPage
+        fields = (
+            "name", "slug", "introduction", "description", "city", "province",
+            "country", "partners", "collections",
+        )
+        read_only_fields = fields
+
+    def get_partners(self, obj):
+        approved = obj.partners.filter(gallery_status=Partner.ApprovalStatus.APPROVED).order_by("name")
+        return PublicPartnerSerializer(approved, many=True, context=self.context).data
+
+    def get_collections(self, obj):
+        items = obj.collections.filter(is_published=True).order_by("display_order", "title")
+        return PublicExperienceCollectionSummarySerializer(items, many=True, context=self.context).data
+
+
+class PublicExperienceCollectionSummarySerializer(serializers.ModelSerializer):
+    destination_slug = serializers.SlugField(source="destination.slug", read_only=True, allow_null=True)
+
+    class Meta:
+        model = ExperienceCollection
+        fields = ("title", "slug", "summary", "destination_slug")
+        read_only_fields = fields
+
+
+class PublicExperienceCollectionSerializer(serializers.ModelSerializer):
+    destination_slug = serializers.SlugField(source="destination.slug", read_only=True, allow_null=True)
+    partners = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ExperienceCollection
+        fields = ("title", "slug", "summary", "description", "destination_slug", "partners")
+        read_only_fields = fields
+
+    def get_partners(self, obj):
+        approved = obj.partners.filter(gallery_status=Partner.ApprovalStatus.APPROVED).order_by("name")
+        return PublicPartnerSerializer(approved, many=True, context=self.context).data
+
+
+from .models import PartnerEnquiry, TripPlan, TripPlanItem
+
+
+class TripPlanItemSerializer(serializers.ModelSerializer):
+    partner = PublicPartnerSerializer(read_only=True)
+
+    class Meta:
+        model = TripPlanItem
+        fields = ("id", "partner", "note", "display_order", "added_at")
+        read_only_fields = fields
+
+
+class TripPlanSerializer(serializers.ModelSerializer):
+    items = TripPlanItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = TripPlan
+        fields = ("id", "title", "notes", "start_date", "end_date", "items", "created_at", "updated_at")
+        read_only_fields = ("id", "items", "created_at", "updated_at")
+
+    def validate(self, attrs):
+        start = attrs.get("start_date", getattr(self.instance, "start_date", None))
+        end = attrs.get("end_date", getattr(self.instance, "end_date", None))
+        if start and end and end < start:
+            raise serializers.ValidationError({"end_date": "End date cannot be earlier than start date."})
+        return attrs
+
+
+class TripPlanItemCreateSerializer(serializers.Serializer):
+    partner_id = serializers.IntegerField()
+    note = serializers.CharField(required=False, allow_blank=True, max_length=500)
+
+    def validate_partner_id(self, value):
+        try:
+            partner = Partner.objects.get(
+                pk=value,
+                gallery_status=Partner.ApprovalStatus.APPROVED,
+                enquiry_status=Partner.ApprovalStatus.APPROVED,
+            )
+        except Partner.DoesNotExist:
+            raise serializers.ValidationError("This partner is not currently available for trip planning.")
+        return partner.pk
+
+
+class PartnerEnquiryCreateSerializer(serializers.Serializer):
+    partner_id = serializers.IntegerField()
+    trip_plan_id = serializers.IntegerField(required=False, allow_null=True)
+    message = serializers.CharField(min_length=10, max_length=5000)
+    requested_start_date = serializers.DateField(required=False, allow_null=True)
+    requested_end_date = serializers.DateField(required=False, allow_null=True)
+
+    def validate(self, attrs):
+        start, end = attrs.get("requested_start_date"), attrs.get("requested_end_date")
+        if start and end and end < start:
+            raise serializers.ValidationError({"requested_end_date": "End date cannot be earlier than start date."})
+        try:
+            partner = Partner.objects.get(
+                pk=attrs["partner_id"],
+                gallery_status=Partner.ApprovalStatus.APPROVED,
+                enquiry_status=Partner.ApprovalStatus.APPROVED,
+            )
+        except Partner.DoesNotExist:
+            raise serializers.ValidationError({"partner_id": "This partner is not accepting enquiries."})
+        attrs["partner"] = partner
+        plan_id = attrs.get("trip_plan_id")
+        if plan_id:
+            try:
+                plan = TripPlan.objects.get(pk=plan_id, owner=self.context["request"].user)
+            except TripPlan.DoesNotExist:
+                raise serializers.ValidationError({"trip_plan_id": "Trip plan not found."})
+            if not plan.items.filter(partner=partner).exists():
+                raise serializers.ValidationError({"trip_plan_id": "Add this partner to the trip plan before enquiring."})
+            attrs["trip_plan"] = plan
+        return attrs
+
+
+class PartnerEnquirySerializer(serializers.ModelSerializer):
+    partner = PublicPartnerSerializer(read_only=True)
+    trip_plan_id = serializers.IntegerField(read_only=True)
+    reservation_request_id = serializers.IntegerField(read_only=True, allow_null=True)
+    customer_email = serializers.EmailField(source="customer.email", read_only=True)
+
+    class Meta:
+        model = PartnerEnquiry
+        fields = (
+            "id", "partner", "trip_plan_id", "reservation_request_id", "message",
+            "requested_start_date", "requested_end_date", "status", "partner_response",
+            "customer_email", "responded_at", "created_at", "updated_at",
+        )
+        read_only_fields = fields
+
+
+class PartnerEnquiryResponseSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=(PartnerEnquiry.Status.ACCEPTED, PartnerEnquiry.Status.DECLINED))
+    partner_response = serializers.CharField(min_length=5, max_length=5000)
+
+from datetime import timedelta
+from .models import PartnerAvailability, ReservationRequest
+
+
+class PartnerAvailabilitySerializer(serializers.ModelSerializer):
+    partner_id = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = PartnerAvailability
+        fields = ("id", "partner_id", "date", "capacity", "booked_count", "is_open", "price_per_guest", "currency", "updated_at")
+        read_only_fields = ("id", "partner_id", "booked_count", "updated_at")
+
+    def validate_capacity(self, value):
+        if value < 1:
+            raise serializers.ValidationError("Capacity must be at least one.")
+        if self.instance and value < self.instance.booked_count:
+            raise serializers.ValidationError("Capacity cannot be lower than already reserved guests.")
+        return value
+
+    def validate_price_per_guest(self, value):
+        if value is not None and value < 0:
+            raise serializers.ValidationError("Price cannot be negative.")
+        return value
+
+    def validate_date(self, value):
+        if value < timezone.localdate():
+            raise serializers.ValidationError("Availability cannot be published for a past date.")
+        return value
+
+
+class ReservationRequestCreateSerializer(serializers.Serializer):
+    partner_id = serializers.IntegerField()
+    trip_plan_id = serializers.IntegerField(required=False, allow_null=True)
+    start_date = serializers.DateField()
+    end_date = serializers.DateField()
+    guests = serializers.IntegerField(min_value=1, max_value=100)
+    message = serializers.CharField(required=False, allow_blank=True, max_length=2000)
+
+    def validate(self, attrs):
+        start, end = attrs["start_date"], attrs["end_date"]
+        if start < timezone.localdate():
+            raise serializers.ValidationError({"start_date": "Reservation requests cannot start in the past."})
+        if end <= start:
+            raise serializers.ValidationError({"end_date": "Checkout must be after check-in."})
+        if (end - start).days > 90:
+            raise serializers.ValidationError({"end_date": "Reservations cannot exceed 90 nights."})
+        try:
+            partner = Partner.objects.get(pk=attrs["partner_id"], gallery_status=Partner.ApprovalStatus.APPROVED, booking_status=Partner.ApprovalStatus.APPROVED)
+        except Partner.DoesNotExist:
+            raise serializers.ValidationError({"partner_id": "This partner is not currently accepting reservation requests."})
+        attrs["partner"] = partner
+        plan_id = attrs.get("trip_plan_id")
+        if plan_id:
+            try:
+                attrs["trip_plan"] = TripPlan.objects.get(pk=plan_id, owner=self.context["request"].user)
+            except TripPlan.DoesNotExist:
+                raise serializers.ValidationError({"trip_plan_id": "Trip plan not found."})
+        dates = [start + timedelta(days=offset) for offset in range((end - start).days)]
+        days = list(PartnerAvailability.objects.filter(partner=partner, date__in=dates, is_open=True))
+        if len(days) != len(dates):
+            raise serializers.ValidationError({"start_date": "The partner has not published availability for every requested night."})
+        if any(day.capacity - day.booked_count < attrs["guests"] for day in days):
+            raise serializers.ValidationError({"guests": "The requested guest count exceeds currently available capacity on at least one night."})
+        return attrs
+
+
+from .models import ReservationQuote, ReservationQuoteItem, ReservationStatusEvent
+
+
+class ReservationQuoteItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ReservationQuoteItem
+        fields = ("id", "description", "quantity", "unit_price", "line_total")
+        read_only_fields = fields
+
+
+class ReservationQuoteSerializer(serializers.ModelSerializer):
+    items = ReservationQuoteItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ReservationQuote
+        fields = ("id", "version", "status", "currency", "total_amount", "deposit_amount", "terms", "expires_at", "responded_at", "created_at", "items")
+        read_only_fields = fields
+
+
+class ReservationQuoteCreateSerializer(serializers.Serializer):
+    items = serializers.ListField(
+        child=serializers.DictField(), min_length=1, max_length=50
+    )
+    currency = serializers.CharField(min_length=3, max_length=3, default="ZAR")
+    deposit_amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0"))
+    terms = serializers.CharField(required=False, allow_blank=True, max_length=3000)
+    expires_at = serializers.DateTimeField()
+
+    def validate_currency(self, value):
+        value = value.upper()
+        if not value.isalpha():
+            raise serializers.ValidationError("Currency must be a three-letter code.")
+        return value
+
+    def validate(self, attrs):
+        if attrs["expires_at"] <= timezone.now():
+            raise serializers.ValidationError({"expires_at": "Quote expiry must be in the future."})
+        total = Decimal("0.00")
+        clean_items = []
+        for index, item in enumerate(attrs["items"]):
+            description = str(item.get("description", "")).strip()
+            if not description or len(description) > 180:
+                raise serializers.ValidationError({"items": f"Item {index + 1} needs a description (maximum 180 characters)."})
+            try:
+                quantity = Decimal(str(item.get("quantity", "1")))
+                unit_price = Decimal(str(item.get("unit_price")))
+            except Exception:
+                raise serializers.ValidationError({"items": f"Item {index + 1} has an invalid quantity or unit price."})
+            if not quantity.is_finite() or quantity <= 0 or quantity > Decimal("999999.99"):
+                raise serializers.ValidationError({"items": f"Item {index + 1} quantity must be positive."})
+            if not unit_price.is_finite() or unit_price < 0 or unit_price > Decimal("9999999999.99"):
+                raise serializers.ValidationError({"items": f"Item {index + 1} unit price is invalid."})
+            line_total = (quantity * unit_price).quantize(Decimal("0.01"))
+            total += line_total
+            clean_items.append({
+                "description": description, "quantity": quantity,
+                "unit_price": unit_price, "line_total": line_total,
+            })
+        total = total.quantize(Decimal("0.01"))
+        if total <= 0:
+            raise serializers.ValidationError({"items": "Quote total must be greater than zero."})
+        if total > Decimal("9999999999.99"):
+            raise serializers.ValidationError({"items": "Quote total exceeds the supported amount."})
+        if attrs["deposit_amount"] > total:
+            raise serializers.ValidationError({"deposit_amount": "Deposit cannot exceed the quotation total."})
+        attrs["items"] = clean_items
+        attrs["total_amount"] = total
+        return attrs
+
+
+class ReservationStatusEventSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ReservationStatusEvent
+        fields = ("id", "from_status", "to_status", "actor_role", "reason", "created_at")
+        read_only_fields = fields
+
+
+class ReservationRequestSerializer(serializers.ModelSerializer):
+    partner = PublicPartnerSerializer(read_only=True)
+    trip_plan_id = serializers.IntegerField(read_only=True)
+    customer_email = serializers.EmailField(source="customer.email", read_only=True)
+    latest_quote = serializers.SerializerMethodField()
+    status_history = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ReservationRequest
+        fields = ("id", "partner", "customer_email", "trip_plan_id", "start_date", "end_date", "guests", "message", "status", "booking_reference", "quoted_total", "quoted_deposit", "quoted_currency", "quoted_at", "partner_response", "responded_at", "latest_quote", "status_history", "created_at", "updated_at")
+        read_only_fields = fields
+
+    def get_latest_quote(self, obj):
+        quote = obj.quotes.prefetch_related("items").order_by("-version").first()
+        return ReservationQuoteSerializer(quote).data if quote else None
+
+    def get_status_history(self, obj):
+        events = obj.status_events.all()
+        return ReservationStatusEventSerializer(events, many=True).data
+
+
+class ReservationDecisionSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=(ReservationRequest.Status.CONFIRMED, ReservationRequest.Status.DECLINED))
+    partner_response = serializers.CharField(min_length=5, max_length=3000)
+
+from decimal import Decimal
+from .models import PartnerFinancialSettings, ReservationPayment, PartnerCommissionLedger, ReservationRefund
+
+
+class PartnerFinancialSettingsSerializer(serializers.ModelSerializer):
+    partner_id = serializers.IntegerField(read_only=True)
+    commission_rate = serializers.DecimalField(max_digits=5, decimal_places=2, read_only=True)
+
+    class Meta:
+        model = PartnerFinancialSettings
+        fields = ("partner_id", "deposit_type", "deposit_value", "commission_rate", "currency", "deposit_due_hours", "balance_due_days_before", "balance_installment_count", "balance_installment_interval_days", "updated_at")
+        read_only_fields = ("partner_id", "commission_rate", "updated_at")
+
+    def validate_currency(self, value):
+        value = value.upper()
+        if len(value) != 3 or not value.isalpha():
+            raise serializers.ValidationError("Currency must be a three-letter code.")
+        return value
+
+    def validate(self, attrs):
+        deposit_type = attrs.get("deposit_type", getattr(self.instance, "deposit_type", PartnerFinancialSettings.DepositType.NONE))
+        deposit_value = attrs.get("deposit_value", getattr(self.instance, "deposit_value", Decimal("0")))
+        if deposit_value < 0:
+            raise serializers.ValidationError({"deposit_value": "Deposit value cannot be negative."})
+        deposit_due_hours = attrs.get("deposit_due_hours", getattr(self.instance, "deposit_due_hours", 48))
+        balance_due_days = attrs.get("balance_due_days_before", getattr(self.instance, "balance_due_days_before", 7))
+        if not 1 <= deposit_due_hours <= 720:
+            raise serializers.ValidationError({"deposit_due_hours": "Deposit deadline must be between 1 and 720 hours."})
+        if not 0 <= balance_due_days <= 365:
+            raise serializers.ValidationError({"balance_due_days_before": "Balance deadline must be between 0 and 365 days before travel."})
+        count = attrs.get("balance_installment_count", getattr(self.instance, "balance_installment_count", 1))
+        interval = attrs.get("balance_installment_interval_days", getattr(self.instance, "balance_installment_interval_days", 7))
+        if not 1 <= count <= 6:
+            raise serializers.ValidationError({"balance_installment_count": "Choose between 1 and 6 balance instalments."})
+        if not 1 <= interval <= 90:
+            raise serializers.ValidationError({"balance_installment_interval_days": "Instalment intervals must be between 1 and 90 days."})
+        if deposit_type == PartnerFinancialSettings.DepositType.PERCENTAGE and deposit_value > 100:
+            raise serializers.ValidationError({"deposit_value": "Percentage deposits cannot exceed 100%."})
+        if deposit_type == PartnerFinancialSettings.DepositType.NONE and deposit_value != 0:
+            raise serializers.ValidationError({"deposit_value": "Set deposit value to zero when deposits are disabled."})
+        return attrs
+
+
+class ReservationPaymentCreateSerializer(serializers.Serializer):
+    reservation_id = serializers.IntegerField()
+    idempotency_key = serializers.CharField(min_length=8, max_length=100)
+
+    def validate(self, attrs):
+        try:
+            reservation = ReservationRequest.objects.select_related("partner").get(
+                pk=attrs["reservation_id"], customer=self.context["request"].user
+            )
+        except ReservationRequest.DoesNotExist:
+            raise serializers.ValidationError({"reservation_id": "Reservation not found."})
+        if reservation.status != ReservationRequest.Status.CONFIRMED:
+            raise serializers.ValidationError({"reservation_id": "Only confirmed reservations can be paid."})
+        if reservation.cancellation_requests.filter(
+            status__in=(ReservationCancellationRequest.Status.PENDING, ReservationCancellationRequest.Status.APPROVED)
+        ).exists():
+            raise serializers.ValidationError({"reservation_id": "Payment is paused while a cancellation request is under review or refund processing."})
+        attrs["reservation"] = reservation
+        return attrs
+
+
+class ReservationRefundHistorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ReservationRefund
+        fields = ("id", "amount", "currency", "status", "provider", "provider_reference", "provider_status", "reason", "reconciled_at", "created_at")
+        read_only_fields = fields
+
+
+class ReservationPaymentSerializer(serializers.ModelSerializer):
+    partner_name = serializers.CharField(source="partner.name", read_only=True)
+    reservation_reference = serializers.UUIDField(source="reservation.booking_reference", read_only=True)
+    refunds = ReservationRefundHistorySerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ReservationPayment
+        fields = ("id", "reservation", "reservation_reference", "partner_name", "kind", "status", "amount", "currency", "provider", "checkout_session_id", "checkout_url", "provider_reference", "failure_reason", "refunds", "created_at", "captured_at")
+        read_only_fields = fields
+
+
+class PaymentReconciliationSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=(ReservationPayment.Status.CAPTURED, ReservationPayment.Status.FAILED))
+    provider = serializers.CharField(max_length=40)
+    provider_reference = serializers.CharField(max_length=160, required=False, allow_blank=True)
+    failure_reason = serializers.CharField(max_length=500, required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        if attrs["status"] == ReservationPayment.Status.CAPTURED and not attrs.get("provider_reference", "").strip():
+            raise serializers.ValidationError({"provider_reference": "A verified provider transaction reference is required for captured payments."})
+        return attrs
+
+
+class PartnerCommissionLedgerSerializer(serializers.ModelSerializer):
+    payment_id = serializers.IntegerField(read_only=True)
+    reservation_reference = serializers.UUIDField(source="payment.reservation.booking_reference", read_only=True)
+
+    class Meta:
+        model = PartnerCommissionLedger
+        fields = ("id", "payment_id", "reservation_reference", "gross_amount", "commission_rate", "commission_amount", "partner_net_amount", "status", "created_at")
+        read_only_fields = fields
+
+
+from .models import PartnerCommissionAdjustment
+
+
+class ReservationRefundSerializer(serializers.ModelSerializer):
+    payment_id = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = ReservationRefund
+        fields = ("id", "payment_id", "amount", "currency", "status", "provider", "provider_reference", "provider_status", "reason", "idempotency_key", "reconciled_at", "created_at")
+        read_only_fields = fields
+
+
+class RefundReconciliationSerializer(serializers.Serializer):
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=0.01)
+    provider = serializers.CharField(max_length=40)
+    provider_reference = serializers.CharField(max_length=160)
+    reason = serializers.CharField(max_length=500, required=False, allow_blank=True)
+
+    def validate_provider_reference(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("A verified external refund reference is required.")
+        return value
+
+
+from .models import ReservationCancellationRequest, ReservationNotification
+
+
+class ReservationCancellationRequestSerializer(serializers.ModelSerializer):
+    reservation_id = serializers.IntegerField(read_only=True)
+    partner_name = serializers.CharField(source="reservation.partner.name", read_only=True)
+    booking_reference = serializers.UUIDField(source="reservation.booking_reference", read_only=True)
+
+    class Meta:
+        model = ReservationCancellationRequest
+        fields = (
+            "id", "reservation_id", "partner_name", "booking_reference",
+            "reason", "status", "decision_note", "requested_at",
+            "decided_at", "completed_at",
+        )
+        read_only_fields = fields
+
+
+class ReservationCancellationCreateSerializer(serializers.Serializer):
+    reason = serializers.CharField(min_length=10, max_length=1000)
+
+
+class ReservationCancellationDecisionSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=(
+        ReservationCancellationRequest.Status.APPROVED,
+        ReservationCancellationRequest.Status.DECLINED,
+    ))
+    decision_note = serializers.CharField(min_length=5, max_length=1000)
+
+
+class ReservationNotificationSerializer(serializers.ModelSerializer):
+    reservation_id = serializers.IntegerField(read_only=True)
+    booking_reference = serializers.UUIDField(source="reservation.booking_reference", read_only=True)
+    partner_name = serializers.CharField(source="reservation.partner.name", read_only=True)
+
+    class Meta:
+        model = ReservationNotification
+        fields = (
+            "id", "reservation_id", "booking_reference", "partner_name",
+            "event", "title", "message", "read_at", "created_at",
+        )
+        read_only_fields = fields
+
+
+class ReservationQuoteDecisionSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=(ReservationQuote.Status.ACCEPTED, ReservationQuote.Status.DECLINED))

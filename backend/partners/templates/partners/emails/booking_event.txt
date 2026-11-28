@@ -1,0 +1,10 @@
+XGetawaySX
+travel through us
+
+{{ subject }}
+
+{{ body }}
+
+We look forward to helping you make the most of your getaway.
+
+This is an essential service email about a reservation or cancellation.
