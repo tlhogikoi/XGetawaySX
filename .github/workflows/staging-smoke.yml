@@ -12,7 +12,7 @@ on:
         description: Optional staging frontend origin (without a trailing slash)
         required: false
         type: string
-        default: https://xgetawaysx-staging-b0d9qkdsc-tlhogikoi.vercel.app
+        default: ""
 
 permissions:
   contents: read
@@ -29,8 +29,6 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-        with:
-          ref: feat/application-foundation
 
       - name: Set up Python
         uses: actions/setup-python@v5
