@@ -1,0 +1,42 @@
+name: XGetawaySX staging smoke checks
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_base_url:
+        description: Staging API origin (without a trailing slash)
+        required: true
+        type: string
+        default: https://xgetawaysx-api-staging-kxtvcmcfv-tlhogikoi.vercel.app
+      frontend_base_url:
+        description: Optional staging frontend origin (without a trailing slash)
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: xgetawaysx-staging-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: Verify staging API and frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run read-only staging checks
+        env:
+          API_BASE_URL: ${{ inputs.api_base_url }}
+          FRONTEND_BASE_URL: ${{ inputs.frontend_base_url }}
+        run: python scripts/staging_smoke.py
